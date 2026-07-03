@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+edge_env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Runtime artifacts (never commit user data or models)
+*.log
+models/
+data/
+conversations/
+
+# Frontend (added in M5)
+node_modules/
+frontend/dist/
+
+# OS
+Thumbs.db
+.DS_Store

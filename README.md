@@ -1,0 +1,63 @@
+# Edge Voice Assistant
+
+A production-grade offline AI voice assistant designed for natural, low-latency conversations on local hardware.
+
+Edge Voice Assistant runs entirely on your computer after the required AI models are installed. It combines local speech recognition, language models, and speech synthesis into a modular voice platform that prioritizes privacy, responsiveness, and extensibility.
+
+## Highlights
+
+- Fully offline after initial model installation
+- Natural voice conversations with streaming speech recognition and response generation
+- Real-time voice interruption (barge-in)
+- Modular architecture with interchangeable AI models
+- Desktop and local web interfaces powered by the same backend
+- Cross-platform support for Windows and Linux
+- Built for developers, researchers, and edge AI applications
+
+## Project Vision
+
+Edge Voice Assistant is designed as a long-term open-source platform for local AI interaction.
+
+The architecture is intentionally modular so that language models, speech recognition engines, text-to-speech engines, memory systems, plugins, and future multimodal capabilities can evolve independently.
+
+## Current Status
+
+The project is under active development.
+
+Completed milestones:
+
+- **M0 – Project Foundation**
+- **M1 – Audio Foundation** (full-duplex audio, echo cancellation, voice activity detection)
+
+Next milestone:
+
+**M2 – Streaming Pipeline** (speech recognition, language model, speech synthesis)
+
+See the project roadmap for implementation progress.
+
+## Hardware Targets
+
+Primary development platform
+
+- NVIDIA RTX 3060 Laptop GPU (6 GB VRAM)
+- 16 GB RAM
+
+The application is designed to scale across different hardware profiles and automatically recommend suitable AI models.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| Architecture | Overall system architecture |
+| Roadmap | Development milestones |
+| ADRs | Architecture Decision Records |
+| Developer Guide | Development workflow |
+| API Reference | Backend APIs |
+| Plugin SDK | Extension development |
+| Benchmark Guide | Performance evaluation |
+
+## Project Background
+
+Edge Voice Assistant is the production successor to the research prototype developed during my Master's thesis at the University of Vaasa.
+
+The original thesis implementation is preserved separately as a historical research artifact while this repository focuses on long-term product development.
