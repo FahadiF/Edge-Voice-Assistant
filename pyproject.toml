@@ -85,7 +85,15 @@ strict = true
 warn_unreachable = true
 # Third-party libs without stubs
 [[tool.mypy.overrides]]
-module = ["psutil.*", "sounddevice.*", "livekit.*", "pysilero_vad.*"]
+module = [
+    "psutil.*",
+    "sounddevice.*",
+    "livekit.*",
+    "pysilero_vad.*",
+    "faster_whisper.*",
+    "llama_cpp.*",
+    "kokoro_onnx.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

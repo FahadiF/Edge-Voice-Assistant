@@ -51,7 +51,10 @@ class AudioSystem:
             raw_tap=self.raw_tap,
         )
         vad = create_vad(settings.vad.engine)
-        segmenter = SpeechSegmenter(settings.vad)
+        partial_interval = (
+            settings.asr.partial_interval_ms if settings.asr.partial_transcripts else None
+        )
+        segmenter = SpeechSegmenter(settings.vad, partial_interval_ms=partial_interval)
         self.pipeline = CapturePipeline(
             self.capture_ring,
             vad,
@@ -77,3 +80,7 @@ class AudioSystem:
     def stop_speaking(self) -> None:
         """Fade out and flush current playback (the barge-in action)."""
         self.playback.stop()
+
+    @property
+    def is_speaking(self) -> bool:
+        return self.playback.is_active

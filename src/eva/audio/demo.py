@@ -30,6 +30,7 @@ from eva.audio.segmenter import (
     SpeechStart,
     UtteranceDiscarded,
     UtteranceEnd,
+    UtteranceProgress,
 )
 from eva.audio.system import AudioSystem
 from eva.config.settings import Settings
@@ -49,6 +50,8 @@ def _describe(event: SegmenterEvent) -> str:
             return f"utterance ended: {d} ms total, {s} ms speech{suffix}"
         case UtteranceDiscarded(speech_ms=s):
             return f"utterance discarded as noise ({s} ms speech)"
+        case UtteranceProgress(duration_ms=d):
+            return f"utterance in progress ({d} ms)"
 
 
 def run_listen(settings: Settings, seconds: float) -> int:

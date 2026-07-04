@@ -81,11 +81,17 @@ class ASRSettings(_Section):
     language: str | None = Field(None, description="ISO 639-1 hint; None = auto-detect")
     device: Literal["auto", "cuda", "cpu"] = "auto"
     compute_type: Literal["auto", "int8", "float16", "float32"] = "auto"
+    partial_transcripts: bool = Field(
+        True, description="Transcribe in-progress utterances for live feedback"
+    )
+    partial_interval_ms: Annotated[int, Field(ge=300, le=5000)] = Field(
+        1200, description="How often to refresh the partial transcript"
+    )
 
 
 class LLMSettings(_Section):
     engine: str = Field("llamacpp", description="LLM engine id (registry key)")
-    model: str = Field("qwen3-4b-instruct-q4_k_m", description="Installed LLM model id")
+    model: str = Field("qwen3.5-4b-instruct-q4_k_m", description="Installed LLM model id")
     context_length: Annotated[int, Field(ge=512, le=131072)] = 8192
     gpu_layers: Annotated[int, Field(ge=-1, le=200)] = Field(
         -1, description="-1 = offload as many layers as fit (auto)"

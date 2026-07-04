@@ -53,6 +53,29 @@ Integration tests that need real audio devices or downloaded models are marked
 See `ARCHITECTURE.md` §6. Short version: one package per subsystem; each owns its
 port (`base.py`), its `registry.py`, and its adapters.
 
+## Running the assistant (from M2)
+
+```bash
+eva models list                                  # catalog + install state
+eva models download qwen3.5-4b-instruct-q4_k_m   # ~2.7 GB
+eva models download kokoro-82m-v1.0              # ~340 MB
+eva run                                          # interactive voice loop
+eva bench                                        # end-to-end pipeline benchmark, no mic needed
+```
+
+faster-whisper weights download automatically on first use (~460 MB for `small`).
+
+## Adding an engine adapter
+
+1. Implement the port (`eva/<subsystem>/base.py`) in a new module in that package.
+2. Register a factory in the subsystem's `registry.py` `register_builtins()`
+   (or via a plugin entry point once the SDK lands).
+3. If the engine needs weights, add a catalog entry (`eva/models/catalog.py`) —
+   the consistency tests enforce that settings/profiles only reference catalog ids.
+4. Engines are synchronous and single-threaded; the orchestrator provides all
+   concurrency and cancellation (see ADR-012). LLM engines must honor
+   `should_abort` between tokens.
+
 ## Release checklist (draft — finalized in M8)
 
 1. Quality gate green on Windows and Linux CI.

@@ -146,6 +146,24 @@ def test_reset_clears_active_utterance() -> None:
     assert feed(seg, [0.0] * 5) == []
 
 
+def test_utterance_progress_emitted_at_interval() -> None:
+    seg = SpeechSegmenter(
+        VADSettings(silence_timeout_ms=320, min_speech_ms=96),
+        partial_interval_ms=128,  # 4 chunks
+    )
+    events = feed(seg, [0.9] * 12 + [0.0] * 12)
+    from eva.audio.segmenter import UtteranceProgress
+
+    progress = [e for e in events if isinstance(e, UtteranceProgress)]
+    assert len(progress) >= 2
+    # Snapshots grow monotonically and include everything so far.
+    assert progress[0].audio.shape[0] < progress[-1].audio.shape[0]
+    # No progress events without the option.
+    seg_off = make_segmenter()
+    events_off = feed(seg_off, [0.9] * 12 + [0.0] * 12)
+    assert not any(isinstance(e, UtteranceProgress) for e in events_off)
+
+
 def test_barge_in_speech_is_kept_for_transcription() -> None:
     """The audio that triggered a barge-in must appear in the utterance."""
     seg = make_segmenter()

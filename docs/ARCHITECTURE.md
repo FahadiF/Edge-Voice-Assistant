@@ -175,10 +175,13 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
 
 ## 8. Engine API (frontend contract)
 
-- **WebSocket** `/ws`: bidirectional event stream — `state_changed`, `partial_transcript`,
-  `final_transcript`, `assistant_token`, `assistant_sentence`, `speaking_progress`,
-  `barge_in`, `metrics_tick`; client → `set_mode(ptt|always)`, `ptt_down/up`,
-  `interrupt`, `text_message` (typed input).
+- **WebSocket** `/ws`: bidirectional event stream. Server → client events are the
+  engine's typed event set (authoritative definitions in `eva/core/events.py`,
+  implemented M2): `StateChanged`, `SpeechStarted`, `SpeechFinished`,
+  `BargeInDetected`, `PartialTranscript`, `FinalTranscript`, `LlmStarted`,
+  `LlmToken`, `LlmSentence`, `LlmFinished`, `TtsStarted`, `TtsAudioReady`,
+  `TtsFinished`, `TurnStarted`, `TurnFinished`, `TurnCancelled`; client →
+  `set_mode(ptt|always)`, `ptt_down/up`, `interrupt`, `text_message` (typed input).
 - **REST**: settings CRUD, profiles/personas, model list/download/switch,
   conversations (list/export/import), diagnostics, logs.
 - Audio I/O stays in the engine process (server owns the sound devices); frontends

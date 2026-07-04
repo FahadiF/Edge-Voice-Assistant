@@ -29,12 +29,16 @@ barge-in confirmation at the configured window (default 200 ms) with the
 triggering speech retained for ASR. Deferred to M7: prefer WASAPI/low-latency
 host APIs (MME default reports ≈210 ms loop delay).
 
-## M2 — Streaming pipeline v1 (CLI)
-Ports (ASR/LLM/TTS) + adapters: faster-whisper, llama.cpp (Qwen3-4B Q4), Kokoro.
-Turn FSM with epochs, sentence chunker, streaming playback. Model manager v1
-(download, verify, cache). CLI voice loop with per-stage latency metrics.
-**Exit:** spoken multi-turn conversation, time-to-first-audio ≤ ~1.5 s on the
-RTX 3060 profile; all FSM logic unit-tested with fake adapters.
+## M2 — Streaming pipeline v1 (CLI) ✅ (completed 2026-07-04)
+Event system + turn epochs (ADR-006), ASR/LLM/TTS ports + registries + adapters
+(faster-whisper, llama.cpp with Qwen3.5-4B Q4 — ADR-002 amendment, Kokoro via
+kokoro-onnx — ADR-012), asyncio turn orchestrator with producer/consumer/speaker
+pipelining and full cancellation, punctuation-aware sentence chunker, partial
+transcripts, conversation history, model manager backend (catalog, downloads,
+resolution), per-turn metrics. CLI: `eva run`, `eva models`, `eva bench`.
+**Exit met:** streaming spoken conversation end-to-end; orchestrator control
+flow (including barge-in cancellation and repeated interruptions) unit-tested
+with fake engines; benchmark results recorded in the changelog.
 
 ## M3 — Barge-in complete (product priority #1)
 Epoch cancellation wired through every stage (LLM abort, TTS cancel, playback ramp,

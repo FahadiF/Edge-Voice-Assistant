@@ -6,6 +6,63 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — M2: Streaming conversational pipeline
+
+**Added**
+- Event system (`eva.core.events`): typed, JSON-serializable engine events
+  (turn lifecycle, transcripts, LLM tokens/sentences, TTS, state changes) on an
+  asyncio event bus with bounded per-subscriber queues and thread-safe publish.
+- Turn management (`eva.core.turn`): monotonic turn epochs as the cancellation
+  backbone (ADR-006); every pipeline artifact is epoch-tagged and stale work
+  aborts at the next boundary.
+- Engine ports + registries: `ASREngine`, `LLMEngine` (streaming + per-token
+  abort contract), `TTSEngine` (sentence-granular synthesis, voice discovery),
+  mirroring the M1 VAD registry (ADR-010).
+- Adapters: faster-whisper (CTranslate2, CUDA→CPU fallback, greedy decode
+  tuned for short utterances), llama.cpp (GGUF, streaming chat completion,
+  abort per token, Windows CUDA DLL resolution), Kokoro via kokoro-onnx
+  (torch-free, 24→16 kHz resampling at the adapter boundary) — ADR-012.
+- Turn orchestrator (`eva.conversation.orchestrator`): asyncio pipeline —
+  LLM producer thread → token consumer → sentence chunker → speak worker;
+  barge-in/supersede/shutdown cancellation; partial transcripts from
+  segmenter `UtteranceProgress` snapshots; per-turn metrics.
+- Punctuation-aware sentence chunker (abbreviation/decimal guards, clause-
+  boundary force-split for run-on generations).
+- Conversation history with turn windowing (persistence lands in M4).
+- Model manager backend: catalog as data (ids, licenses, sizes, VRAM/RAM
+  needs, verified download URLs), atomic downloads with progress, install/
+  remove/resolve, disk usage; consistency tests keep settings/profiles/catalog
+  aligned.
+- Default LLM updated to **Qwen3.5-4B** Q4_K_M (ADR-002 amendment).
+- CLI: `eva run` (interactive voice loop with live token streaming),
+  `eva models list|download|remove`, `eva bench` (reproducible end-to-end
+  pipeline benchmark using TTS-generated speech — no microphone needed).
+- Per-turn metrics collection (ASR, TTFT, tokens/s, first-sentence TTS, TTFA,
+  total) with session summary.
+- Dependencies: faster-whisper, kokoro-onnx, llama-cpp-python (CUDA wheel) +
+  nvidia CUDA runtime wheels.
+- 56 new unit tests (127 total): event bus, turn controller, chunker,
+  history, resampler, model manager (truncation detection, resume, failure
+  atomicity), and full orchestrator coverage with fake engines (streaming
+  order, barge-in cancellation, superseding, repeated interruptions, failure
+  paths, partial transcripts, metrics).
+
+**Fixed**
+- Model downloads now verify received bytes against Content-Length and resume
+  via HTTP Range on retry — a dropped connection previously produced a
+  silently truncated model file that failed at load time.
+
+**Benchmarks** (RTX 3060 Laptop 6 GB, Ryzen 9 5900HX; `eva bench`, warm run)
+- ASR (faster-whisper small int8, CUDA): 490 ms for 2.9 s of speech
+- Time to first token (ASR + LLM prefill): 535 ms
+- LLM (Qwen3.5-4B Q4_K_M, full GPU offload): 65 tok/s
+- First reply sentence ready: 140 ms after generation start
+- First-sentence TTS (Kokoro, CPU): ~1.3 s (RTF ≈ 0.6)
+- Estimated time to first audio: ~2.0 s — dominated by first-sentence TTS;
+  identified M3/M7 lever: chunked/streamed synthesis of the first segment
+  (kokoro-onnx supports incremental synthesis) and/or shorter first segment.
+- Model load time (all three engines): ~16 s cold.
+
 ### 2026-07-03 — M1: Full-duplex audio core
 
 **Added**

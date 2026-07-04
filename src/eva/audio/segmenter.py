@@ -57,11 +57,20 @@ class UtteranceDiscarded:
     speech_ms: int
 
 
-SegmenterEvent = SpeechStart | BargeIn | UtteranceEnd | UtteranceDiscarded
+@dataclass(frozen=True)
+class UtteranceProgress:
+    """Periodic snapshot of an in-progress utterance (drives partial ASR)."""
+
+    audio: Frame
+    duration_ms: int
+
+
+SegmenterEvent = SpeechStart | BargeIn | UtteranceEnd | UtteranceDiscarded | UtteranceProgress
 
 
 class SpeechSegmenter:
-    def __init__(self, settings: VADSettings) -> None:
+    def __init__(self, settings: VADSettings, *, partial_interval_ms: int | None = None) -> None:
+        self._partial_interval_ms = partial_interval_ms
         self._threshold = settings.threshold
         self._silence_timeout_ms = settings.silence_timeout_ms
         self._min_speech_ms = settings.min_speech_ms
@@ -79,6 +88,7 @@ class SpeechSegmenter:
         self._silence_ms = 0
         self._total_ms = 0
         self._barge_in_fired = False
+        self._since_progress_ms = 0
         self._pre_roll.clear()
         self._pre_roll_ms = 0
 
@@ -102,6 +112,7 @@ class SpeechSegmenter:
                 self._silence_ms = 0
                 self._total_ms = chunk_ms
                 self._barge_in_fired = False
+                self._since_progress_ms = 0
                 events.append(SpeechStart())
                 events.extend(self._maybe_barge_in(playback_active))
             else:
@@ -122,6 +133,15 @@ class SpeechSegmenter:
             events.append(self._finish(forced=False))
         elif self._total_ms >= self._max_utterance_ms:
             events.append(self._finish(forced=True))
+        elif self._partial_interval_ms is not None:
+            self._since_progress_ms += chunk_ms
+            if self._since_progress_ms >= self._partial_interval_ms:
+                self._since_progress_ms = 0
+                events.append(
+                    UtteranceProgress(
+                        audio=np.concatenate(self._buffer), duration_ms=self._total_ms
+                    )
+                )
         return events
 
     def _maybe_barge_in(self, playback_active: bool) -> list[SegmenterEvent]:

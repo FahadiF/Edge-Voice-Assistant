@@ -106,6 +106,103 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
     return run_echo_test(settings, record_seconds=args.record_seconds, loops=args.loops)
 
 
+def _cmd_run(_: argparse.Namespace) -> int:
+    from eva.engine import build_assistant, required_models
+    from eva.models.manager import ModelManager
+    from eva.voice_loop import main_run
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    manager = ModelManager(paths)
+    missing = [m for m in required_models(settings) if not manager.is_installed(m)]
+    if missing:
+        print("Required models are not installed yet:")
+        for model_id in missing:
+            print(f"  eva models download {model_id}")
+        return 1
+    return main_run(build_assistant(settings, paths))
+
+
+def _cmd_models(args: argparse.Namespace) -> int:
+    from eva.models.manager import ModelManager
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    manager = ModelManager(paths)
+
+    if args.models_command == "list":
+        settings = load_settings(paths.settings_file)
+        active = {settings.llm.model, settings.asr.model}
+        print(f"{'':2}{'id':<32} {'kind':<5} {'license':<12} {'size':>8}  status")
+        for info in manager.available():
+            installed = manager.is_installed(info.id)
+            marker = "*" if info.id in active else " "
+            size = sum(f.size_mb for f in info.files)
+            size_str = f"{size} MB" if size else "—"
+            status = "installed" if installed else "available"
+            if info.managed_by == "engine" and not installed:
+                status = "auto (on first use)"
+            print(
+                f"{marker:2}{info.id:<32} {info.kind:<5} {info.license:<12} {size_str:>8}  {status}"
+            )
+        print("\n* = active in settings")
+        return 0
+
+    if args.models_command == "download":
+        last_shown = -1
+
+        def progress(filename: str, done: int, total: int) -> None:
+            nonlocal last_shown
+            pct = int(done * 100 / total) if total else 0
+            if pct != last_shown:
+                last_shown = pct
+                mb = done // 1_048_576
+                print(f"\r{filename}: {mb} MB ({pct}%)", end="", flush=True)
+
+        manager.download(args.model_id, progress)
+        print(f"\n'{args.model_id}' installed.")
+        return 0
+
+    if args.models_command == "remove":
+        manager.remove(args.model_id)
+        print(f"'{args.model_id}' removed.")
+        return 0
+    return 2
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from eva.benchmark.pipeline import PipelineBenchmark
+    from eva.engine import build_assistant
+    from eva.llm.base import GenerationParams
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    assistant = build_assistant(settings, paths)
+    print("Loading models...")
+    assistant.preload()
+    bench = PipelineBenchmark(
+        assistant.asr,
+        assistant.llm,
+        assistant.tts,
+        voice=settings.tts.voice,
+        system_prompt=settings.conversation.system_prompt,
+        params=GenerationParams(
+            temperature=settings.conversation.temperature,
+            top_p=settings.conversation.top_p,
+            max_tokens=settings.conversation.max_tokens,
+        ),
+    )
+    print(f"\nRunning pipeline benchmark ({args.rounds} round(s))...\n")
+    for i in range(args.rounds):
+        report = bench.run(args.text)
+        print(f"── Round {i + 1} ──")
+        print(report.render())
+        print()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eva",
@@ -138,6 +235,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_echo.add_argument("--record-seconds", type=float, default=4.0)
     p_echo.add_argument("--loops", type=int, default=2)
     p_echo.set_defaults(func=_cmd_echo_test)
+
+    p_run = sub.add_parser("run", help="Start the voice assistant (interactive)")
+    p_run.set_defaults(func=_cmd_run)
+
+    p_models = sub.add_parser("models", help="Manage models")
+    models_sub = p_models.add_subparsers(dest="models_command", required=True)
+    models_sub.add_parser("list", help="List available and installed models")
+    p_dl = models_sub.add_parser("download", help="Download a model")
+    p_dl.add_argument("model_id")
+    p_rm = models_sub.add_parser("remove", help="Remove an installed model")
+    p_rm.add_argument("model_id")
+    p_models.set_defaults(func=_cmd_models)
+
+    p_bench = sub.add_parser("bench", help="Run the end-to-end pipeline benchmark (no mic needed)")
+    p_bench.add_argument(
+        "--text", default="What is the capital of Finland and what is it known for?"
+    )
+    p_bench.add_argument("--rounds", type=int, default=1)
+    p_bench.set_defaults(func=_cmd_bench)
 
     return parser
 

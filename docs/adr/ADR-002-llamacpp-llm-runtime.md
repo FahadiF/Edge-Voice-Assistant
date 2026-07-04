@@ -1,6 +1,15 @@
-# ADR-002: llama.cpp (GGUF) as the LLM runtime, Qwen3-4B-Instruct default
+# ADR-002: llama.cpp (GGUF) as the LLM runtime, Qwen3.5-4B default
 
-Status: Accepted · Date: 2026-07-03
+Status: Accepted · Date: 2026-07-03 · Amended: 2026-07-04
+
+> **Amendment (2026-07-04, M2):** default model updated from Qwen3-4B-Instruct
+> to **Qwen3.5-4B** (released 2026-03): same runtime, same ~2.7 GB Q4_K_M
+> footprint, better instruction quality, 100+ languages, reasoning off by
+> default (the right trade-off for voice latency). Qwen3-4B-Instruct-2507
+> remains in the catalog as the fallback. On Windows, CUDA builds of
+> llama-cpp-python resolve their runtime DLLs from the pip-installed
+> `nvidia-*-cu12` wheels via a PATH prepend in the adapter (the loader uses
+> legacy DLL search semantics).
 
 ## Context
 The thesis used `transformers` + Qwen2.5-1.5B fp16 (~3 GB VRAM, blocking

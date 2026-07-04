@@ -28,10 +28,13 @@ Completed milestones:
 
 - **M0 – Project Foundation**
 - **M1 – Audio Foundation** (full-duplex audio, echo cancellation, voice activity detection)
+- **M2 – Streaming Pipeline** (streaming speech recognition, language model, and speech
+  synthesis with turn management and cancellation; `eva run` provides a spoken
+  conversation from the command line)
 
 Next milestone:
 
-**M2 – Streaming Pipeline** (speech recognition, language model, speech synthesis)
+**M3 – Barge-In** (end-to-end voice interruption)
 
 See the project roadmap for implementation progress.
 
