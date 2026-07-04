@@ -1,3 +1,8 @@
+![Version](https://img.shields.io/github/v/release/FahadiF/Edge-Voice-Assistant?include_prereleases)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
+![License](https://img.shields.io/github/license/FahadiF/Edge-Voice-Assistant)
+
 # Edge Voice Assistant
 
 An offline AI voice assistant designed for natural, low-latency conversations on local hardware.
