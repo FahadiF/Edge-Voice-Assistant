@@ -6,6 +6,40 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — Guided first-run onboarding
+
+**Added**
+- Interactive setup wizard (`eva/onboarding.py`): on `eva run`, if the system
+  is not fully set up, EVA explains what will happen (detected hardware,
+  recommended runtime, required models with sizes and a time estimate), asks for
+  one confirmation, then installs the runtime, downloads models, verifies, and
+  starts the assistant — with step-by-step progress. No documentation required
+  (ADR-014).
+- `eva first-run` command: runs the wizard directly; `--setup-only` finishes
+  setup without starting; `--yes` auto-confirms.
+- `eva run --yes` for non-interactive/automated first runs.
+- Persisted `SetupState` (`config/setup_state.json`) for first-time-vs-repair
+  messaging and future config migration; the authoritative readiness gate
+  remains the real installed artifacts.
+- `download_mb_hint` on catalog entries so the wizard shows honest sizes for
+  engine-managed models (e.g. Faster Whisper).
+
+**Changed**
+- `eva doctor` and the `run`/`bench` preflight now share one `check_readiness`
+  implementation with the wizard (no duplicated readiness logic).
+- `eva run` no longer just prints commands when setup is incomplete — it guides
+  the user through it. Failures are reported in friendly language; tracebacks
+  are never shown to end users.
+
+**Preserved**
+- `eva setup`, `eva doctor`, `eva models`, `eva diagnose` remain first-class
+  developer tools; the wizard reuses them rather than duplicating logic.
+
+**Tests**
+- +16 tests (158 total): onboarding readiness, plan + estimates,
+  confirm/decline, non-interactive blocking, full-run step execution, friendly
+  failure, and state persistence — all hermetic (no network, models, or audio).
+
 ### 2026-07-04 — M2 packaging fix: installable from a clean checkout
 
 **Fixed (release blocker)**

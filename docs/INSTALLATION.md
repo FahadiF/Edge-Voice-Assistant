@@ -1,7 +1,31 @@
 # Installation Guide
 
-Edge Voice Assistant runs fully offline after a one-time setup. Installation has
-three stages:
+Edge Voice Assistant runs fully offline after a one-time setup.
+
+## Quickest start (guided)
+
+```bash
+git clone <your-repo-url> edge-voice-assistant
+cd edge-voice-assistant
+python -m venv .venv && .venv\Scripts\Activate.ps1   # Linux: source .venv/bin/activate
+pip install -e .
+eva run
+```
+
+On first run, `eva run` detects that setup is incomplete and launches a guided
+wizard: it shows your hardware, the recommended runtime, and the models to
+download (with sizes and a time estimate), asks once to continue, then installs
+everything and starts the assistant. No further commands or documentation
+needed. `eva first-run` launches the same wizard on demand.
+
+The manual, stage-by-stage flow below is for developers and advanced users who
+want to control each step.
+
+---
+
+## Manual installation (developer flow)
+
+Installation has three stages:
 
 1. Install the application and its base dependencies (ASR, TTS, audio, VAD).
 2. Install the LLM runtime for your hardware (`eva setup`).
@@ -150,6 +174,7 @@ Any `MISSING` line is printed with the exact command to fix it.
 | `eva version` | Print version | base |
 | `eva diagnose` | Hardware, configuration, and paths | base |
 | `eva doctor` | Dependency and model readiness | base |
+| `eva first-run` | Guided setup wizard | base |
 | `eva setup` | Install the LLM runtime | base |
 | `eva devices` | List audio devices | base |
 | `eva listen` | Live VAD/segmentation monitor | base + microphone |
@@ -162,8 +187,13 @@ Any `MISSING` line is printed with the exact command to fix it.
 
 ## Troubleshooting
 
-- **`eva run` says "setup is incomplete"** — run `eva doctor`; it lists each
-  missing runtime or model with the command to fix it.
+- **The setup wizard was cancelled or interrupted** — run `eva first-run` to
+  resume; it re-detects what is still missing and continues.
+- **`eva run` in a script/CI exits without starting** — a non-interactive shell
+  cannot answer the wizard prompt; run `eva run --yes` (or `eva first-run --yes`)
+  to auto-confirm, or complete setup manually first.
+- **Force setup to run again** — `eva first-run` always shows the wizard; it
+  re-verifies and only installs what is missing.
 - **CUDA build fails to load (`llama.dll` dependency error)** — the NVIDIA
   cudart/cuBLAS wheels are missing; re-run `eva setup --cuda`, or fall back to
   `eva setup --cpu`.

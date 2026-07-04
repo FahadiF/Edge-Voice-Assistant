@@ -55,12 +55,16 @@ port (`base.py`), its `registry.py`, and its adapters.
 
 ## Running the assistant (from M2)
 
+New users just run `eva run` and follow the guided wizard (ADR-014). The manual
+developer flow:
+
 ```bash
 eva setup                                        # install the LLM runtime (CPU/CUDA auto)
 eva models download qwen3.5-4b-instruct-q4_k_m   # ~2.7 GB
 eva models download kokoro-82m-v1.0              # ~340 MB
 eva doctor                                       # confirm everything is ready
-eva run                                          # interactive voice loop
+eva run                                          # interactive voice loop (guided if not ready)
+eva first-run                                    # run the setup wizard on demand
 eva bench                                        # end-to-end pipeline benchmark, no mic needed
 ```
 
