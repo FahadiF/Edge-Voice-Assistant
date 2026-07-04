@@ -29,6 +29,14 @@ htmlcov/
 /data/
 /conversations/
 
+# Private / internal engineering documents — not for public distribution.
+# Public docs (API.md, ARCHITECTURE.md, INSTALLATION.md, ROADMAP.md, adr/)
+# stay committed as normal project documentation.
+docs/HANDOFF/
+docs/DEVELOPMENT.md
+docs/THESIS_ANALYSIS.md
+docs/ARCHITECTURE_DIAGRAMS.md
+
 # Frontend (added in M5)
 node_modules/
 web/dist/

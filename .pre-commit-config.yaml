@@ -1,0 +1,41 @@
+# Local formatting/lint gate — mirrors the CI workflow (.github/workflows/ci.yml)
+# so mistakes are caught before push, not after. See docs/DEVELOPMENT.md for setup.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # Pinned to the exact ruff version pyproject.toml/CI use, so a hook pass and a
+  # CI pass never disagree.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Strict type checking needs the project's own environment (pydantic plugin,
+  # third-party stubs configured in pyproject.toml) — running it via the
+  # pre-commit-managed isolated venv would require duplicating that setup, so
+  # this uses `language: system` (the developer's active environment) instead.
+  # Optional and push-time only: mypy is slow enough that gating every commit
+  # on it would hurt the edit-commit loop; `git commit` stays fast, `git push`
+  # still catches type errors before they reach CI.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict, project environment)
+        entry: mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

@@ -6,6 +6,28 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — CI fix: import order + pre-commit hooks
+
+**Fixed (release blocker)**
+- GitHub Actions failed lint with `I001` on `tests/test_language.py` and
+  `tests/test_server_engine_and_conversation.py`. Root cause: adding
+  `tests/__init__.py` (the earlier `ModuleNotFoundError` fix) changed how
+  ruff's import sorter classifies `tests.*` imports as first-party, and the
+  existing import order in those two files no longer matched. Fixed with
+  `ruff check --fix` — pure import reordering, no functional change.
+  Verified with a completely fresh `.ruff_cache` and a clean virtual
+  environment: `ruff check`, `ruff format --check`, `mypy` (both platform
+  targets), and the full 264-test suite all pass with the exact CI commands.
+
+**Added**
+- Pre-commit hooks (`.pre-commit-config.yaml`): trailing-whitespace,
+  end-of-file-fixer, mixed-line-ending, check-yaml/toml, merge-conflict and
+  large-file guards, and `ruff check --fix` + `ruff format` on every commit
+  (ruff pinned to the exact version CI uses); `mypy` (strict) on every push.
+  Documented in `docs/DEVELOPMENT.md`, including the one real caveat: the
+  mypy hook runs against whatever's on `PATH`, so it requires the project's
+  virtual environment to be active.
+
 ### 2026-07-04 — M2.6: Platform API & UI backend
 
 **Added**

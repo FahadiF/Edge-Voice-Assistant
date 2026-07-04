@@ -22,6 +22,41 @@ pytest -m "not integration"
 Integration tests that need real audio devices or downloaded models are marked
 `@pytest.mark.integration` and run manually: `pytest -m integration`.
 
+## Pre-commit hooks
+
+Installed with the `dev` extra (`pre-commit>=3.8`). One-time setup per clone:
+
+```bash
+pre-commit install                          # runs on every `git commit`
+pre-commit install --hook-type pre-push     # runs the mypy hook on every `git push`
+```
+
+What runs, and when:
+
+| Hook | Stage | Fixes automatically? |
+|---|---|---|
+| trailing-whitespace, end-of-file-fixer, mixed-line-ending | commit | yes |
+| check-yaml, check-toml, check-merge-conflict, check-added-large-files (>1 MB) | commit | no — blocks the commit |
+| `ruff check --fix` | commit | yes, for auto-fixable rules; remaining issues block the commit |
+| `ruff format` | commit | yes |
+| `mypy` (strict) | **push** | no — blocks the push |
+
+`.pre-commit-config.yaml` pins the `ruff-pre-commit` hook to the exact ruff
+version `pyproject.toml`/CI use, so a local pass and a CI pass can never
+disagree. When a commit-time hook rewrites a file (whitespace, ruff fixes),
+`git commit` aborts and shows what changed — `git add` the result and commit
+again.
+
+The mypy hook runs with `language: system`, i.e. against whatever `mypy` is
+first on `PATH` — **it needs your project virtual environment active** (so its
+`mypy` — the one with `fastapi`, `pydantic`, and the rest of this project's
+dependencies importable — resolves ahead of any other Python installation).
+If `git push` reports missing-import errors that `mypy` alone doesn't, check
+`which mypy` (or `where mypy` on Windows) points into `.venv` first. Run
+`pre-commit run --all-files` at any time to check the whole tree without
+committing; `git commit --no-verify` / `git push --no-verify` bypass the
+hooks entirely — do not use that as a habit, only for a deliberate one-off.
+
 ## Architecture rules
 
 - Read `ARCHITECTURE.md` and the ADRs before changing module boundaries.
