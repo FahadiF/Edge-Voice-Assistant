@@ -74,9 +74,34 @@ async def run_voice_loop(assistant: Assistant) -> None:
             await renderer
 
 
+def _startup_banner(assistant: Assistant) -> None:
+    """Show exactly which profile, models, and devices are active (ADR-015)."""
+    from eva.hardware import detect_hardware, recommend_profile
+    from eva.models.manager import ModelManager
+
+    settings = assistant.settings
+    tier = recommend_profile(detect_hardware())
+
+    def display_name(model_id: str) -> str:
+        from eva.config.paths import get_app_paths
+
+        try:
+            return ModelManager(get_app_paths()).info(model_id).display_name
+        except Exception:
+            return model_id
+
+    print(f"\nProfile: {settings.profile} (hardware tier: {tier.display_name})")
+    print(f"  LLM: {display_name(settings.llm.model)}  [{assistant.llm.device}]")
+    print(f"  ASR: {display_name(settings.asr.model)}  [{assistant.asr.device}]")
+    print(f"  TTS: {display_name(settings.tts.model)}  [{assistant.tts.device}]")
+    print(f"  VAD: {settings.vad.engine}  [cpu]")
+    print(f"  Language: {settings.conversation.language}")
+
+
 def main_run(assistant: Assistant) -> int:
     print("Loading models — this can take a minute on first run...")
     assistant.preload()
+    _startup_banner(assistant)
     assistant.start_audio()
     print("\nReady. Speak into the microphone; interrupt any time by talking over it.")
     print("Ctrl+C to exit.\n")

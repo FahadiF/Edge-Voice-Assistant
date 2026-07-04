@@ -37,7 +37,7 @@ class AudioSystem:
     ) -> None:
         self._settings = settings
         self.processor = create_processor(settings.audio)
-        self.playback = PlaybackQueue()
+        self.playback = PlaybackQueue(fade_ms=settings.audio.fade_out_ms)
         self.capture_ring = FrameRing(int(_CAPTURE_RING_SECONDS * 100))  # 10 ms frames
         self.raw_tap = FrameRing(int(_CAPTURE_RING_SECONDS * 100)) if enable_raw_tap else None
         self.stream = DuplexAudioStream(

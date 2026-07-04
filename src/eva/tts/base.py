@@ -15,6 +15,9 @@ from eva.audio.frames import Frame
 
 
 class TTSEngine(ABC):
+    device: str = "unloaded"
+    """Device the model actually landed on ("cuda"/"cpu"); set by load()."""
+
     @abstractmethod
     def load(self) -> None:
         """Load model weights. Idempotent."""

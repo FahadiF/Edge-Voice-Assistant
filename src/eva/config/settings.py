@@ -42,11 +42,18 @@ class AudioSettings(_Section):
     input_device: str | None = Field(None, description="Input device name; None = system default")
     output_device: str | None = Field(None, description="Output device name; None = system default")
     sample_rate: Literal[16000] = Field(16000, description="Pipeline sample rate (Hz)")
-    mic_gain: Annotated[float, Field(ge=0.0, le=4.0)] = 1.0
-    speaker_volume: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
-    echo_cancellation: bool = True
-    noise_suppression: bool = True
-    auto_gain_control: bool = True
+    mic_gain: Annotated[float, Field(ge=0.0, le=4.0)] = Field(
+        1.0, description="Microphone gain multiplier"
+    )
+    speaker_volume: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        1.0, description="Playback volume"
+    )
+    echo_cancellation: bool = Field(True, description="WebRTC acoustic echo cancellation")
+    noise_suppression: bool = Field(True, description="WebRTC noise suppression")
+    auto_gain_control: bool = Field(True, description="WebRTC automatic gain control")
+    fade_out_ms: Annotated[int, Field(ge=10, le=500)] = Field(
+        40, description="Playback fade-out on interruption (click-free stop)"
+    )
     duplex_mode: Literal["full-duplex", "half-duplex", "push-to-talk"] = Field(
         "full-duplex", description="Fallback ladder position (see ADR-005)"
     )
@@ -66,7 +73,7 @@ class VADSettings(_Section):
     max_utterance_s: Annotated[int, Field(ge=5, le=120)] = Field(
         30, description="Hard recording timeout"
     )
-    barge_in_enabled: bool = True
+    barge_in_enabled: bool = Field(True, description="Allow interrupting the assistant by voice")
     barge_in_confirm_ms: Annotated[int, Field(ge=50, le=2000)] = Field(
         200, description="Confirmed speech required to trigger barge-in during playback"
     )
@@ -78,9 +85,15 @@ class VADSettings(_Section):
 class ASRSettings(_Section):
     engine: str = Field("faster-whisper", description="ASR engine id (registry key)")
     model: str = Field("faster-whisper/small", description="Installed ASR model id")
-    language: str | None = Field(None, description="ISO 639-1 hint; None = auto-detect")
-    device: Literal["auto", "cuda", "cpu"] = "auto"
-    compute_type: Literal["auto", "int8", "float16", "float32"] = "auto"
+    language: str | None = Field(
+        None, description="ISO 639-1 hint; None = follow conversation language"
+    )
+    device: Literal["auto", "cuda", "cpu"] = Field(
+        "auto", description="Inference device; auto tries CUDA, then CPU"
+    )
+    compute_type: Literal["auto", "int8", "float16", "float32"] = Field(
+        "auto", description="Numeric precision; auto = int8"
+    )
     partial_transcripts: bool = Field(
         True, description="Transcribe in-progress utterances for live feedback"
     )
@@ -92,20 +105,29 @@ class ASRSettings(_Section):
 class LLMSettings(_Section):
     engine: str = Field("llamacpp", description="LLM engine id (registry key)")
     model: str = Field("qwen3.5-4b-instruct-q4_k_m", description="Installed LLM model id")
-    context_length: Annotated[int, Field(ge=512, le=131072)] = 8192
+    context_length: Annotated[int, Field(ge=512, le=131072)] = Field(
+        8192, description="Context window in tokens (VRAM grows with this)"
+    )
     gpu_layers: Annotated[int, Field(ge=-1, le=200)] = Field(
         -1, description="-1 = offload as many layers as fit (auto)"
     )
     threads: Annotated[int, Field(ge=0, le=128)] = Field(0, description="0 = auto (physical cores)")
-    batch_size: Annotated[int, Field(ge=1, le=4096)] = 512
+    batch_size: Annotated[int, Field(ge=1, le=4096)] = Field(
+        512, description="Prompt-processing batch size"
+    )
 
 
 class TTSSettings(_Section):
     engine: str = Field("kokoro", description="TTS engine id (registry key)")
-    voice: str = Field("af_heart", description="Voice id within the active engine")
-    speed: Annotated[float, Field(ge=0.5, le=2.0)] = 1.0
+    model: str = Field("kokoro-82m-v1.0", description="Installed TTS model id")
+    voice: str = Field(
+        "af_heart", description="Voice id within the active engine (language may override)"
+    )
+    speed: Annotated[float, Field(ge=0.5, le=2.0)] = Field(
+        1.0, description="Speech rate multiplier"
+    )
     pitch: Annotated[float, Field(ge=0.5, le=2.0)] = Field(
-        1.0, description="Engines without pitch control ignore this"
+        1.0, description="Pitch multiplier; engines without pitch control ignore this"
     )
     streaming: bool = Field(True, description="Sentence-chunked synthesis during generation")
 
@@ -117,17 +139,34 @@ class ConversationSettings(_Section):
     system_prompt: str = Field(
         "You are a helpful voice assistant. Answer conversationally and concisely — "
         "one to three short sentences unless the user asks for detail.",
-        description="Base system prompt (personas layer on top of this)",
+        description="Base system prompt (personas and language notes layer on top)",
     )
     persona: str = Field("default", description="Active persona id")
-    memory_enabled: bool = True
+    language: str = Field(
+        "en", description="Conversation language (BCP-47 code from the language registry)"
+    )
+    memory_enabled: bool = Field(True, description="Keep conversation history across turns")
     max_history_turns: Annotated[int, Field(ge=1, le=200)] = Field(
         20, description="Turns kept verbatim before summarization kicks in"
     )
-    temperature: Annotated[float, Field(ge=0.0, le=2.0)] = 0.4
-    top_p: Annotated[float, Field(ge=0.0, le=1.0)] = 0.9
-    max_tokens: Annotated[int, Field(ge=16, le=8192)] = 512
-    stop_sequences: list[str] = Field(default_factory=list)
+    temperature: Annotated[float, Field(ge=0.0, le=2.0)] = Field(
+        0.4, description="Sampling temperature (higher = more varied replies)"
+    )
+    top_p: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        0.9, description="Nucleus-sampling probability mass"
+    )
+    max_tokens: Annotated[int, Field(ge=16, le=8192)] = Field(
+        512, description="Maximum tokens per reply"
+    )
+    stop_sequences: list[str] = Field(
+        default_factory=list, description="Extra sequences that end generation"
+    )
+    sentence_min_chars: Annotated[int, Field(ge=1, le=200)] = Field(
+        12, description="Minimum segment length before speech starts (avoids fragment replies)"
+    )
+    sentence_max_chars: Annotated[int, Field(ge=50, le=2000)] = Field(
+        350, description="Force a speakable split if generation runs on without punctuation"
+    )
 
 
 # ──────────────────────── Server / UI / Developer ────────────────────────
@@ -135,20 +174,22 @@ class ConversationSettings(_Section):
 
 class ServerSettings(_Section):
     host: str = Field("127.0.0.1", description="Bind address; localhost-only by default")
-    port: Annotated[int, Field(ge=1024, le=65535)] = 8765
+    port: Annotated[int, Field(ge=1024, le=65535)] = Field(8765, description="API server port")
 
 
 class UISettings(_Section):
-    theme: Literal["dark", "light", "system"] = "system"
-    scale: Annotated[float, Field(ge=0.75, le=2.0)] = 1.0
-    reduced_motion: bool = False
+    theme: Literal["dark", "light", "system"] = Field("system", description="Color theme")
+    scale: Annotated[float, Field(ge=0.75, le=2.0)] = Field(1.0, description="UI scale factor")
+    reduced_motion: bool = Field(False, description="Disable non-essential animations")
 
 
 class DeveloperSettings(_Section):
-    debug: bool = False
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    debug: bool = Field(False, description="Verbose diagnostics for development")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        "INFO", description="Minimum level written to the log"
+    )
     log_json: bool = Field(False, description="Emit structured JSON logs to file")
-    metrics_enabled: bool = True
+    metrics_enabled: bool = Field(True, description="Collect per-turn latency metrics")
 
 
 # ──────────────────────── Root ────────────────────────
@@ -157,8 +198,14 @@ class DeveloperSettings(_Section):
 class Settings(_Section):
     """Root settings document. Persisted as JSON; edited by UI, API, or hand."""
 
-    schema_version: int = SETTINGS_SCHEMA_VERSION
-    profile: str = Field("auto", description="Hardware profile id, or 'auto' to follow detection")
+    schema_version: int = Field(
+        SETTINGS_SCHEMA_VERSION, description="Settings document version (for migration)"
+    )
+    profile: str = Field(
+        "balanced",
+        description="Model preset id (balanced/fast/high-accuracy/low-memory/developer), "
+        "or 'custom' when models are chosen manually",
+    )
     audio: AudioSettings = Field(default_factory=AudioSettings)
     vad: VADSettings = Field(default_factory=VADSettings)
     asr: ASRSettings = Field(default_factory=ASRSettings)

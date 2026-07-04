@@ -41,6 +41,7 @@ class KokoroTTS(TTSEngine):
             self._kokoro = Kokoro(str(self._model_path), str(self._voices_path))
         except Exception as exc:
             raise ModelError(f"Cannot load Kokoro TTS: {exc}") from exc
+        self.device = "cpu"
         logger.info("Kokoro TTS loaded (%s)", self._model_path.name)
 
     def unload(self) -> None:

@@ -23,6 +23,7 @@ Structure:
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ from eva.runtime import (
     llm_runtime_available,
     probe_runtimes,
 )
+
+logger = logging.getLogger(__name__)
 
 # Rough download size of the llama.cpp runtime wheels, for the setup estimate.
 _RUNTIME_DOWNLOAD_MB = {"cpu": 40, "cuda": 500}
@@ -157,6 +160,32 @@ def build_plan(settings: Settings, paths: AppPaths) -> SetupPlan:
         runtime_installed=llm_runtime_available(),
         models=models,
     )
+
+
+def resolve_and_persist_settings(settings: Settings, paths: AppPaths) -> Settings:
+    """Pin the active configuration to disk (ADR-015).
+
+    On first run the settings file does not exist, so model selection would
+    silently follow code defaults — and change whenever a default changes.
+    This resolves the preset against the detected hardware tier and writes
+    `settings.json`, making the selection explicit, visible, and stable across
+    restarts. A `custom` profile is persisted as-is (manual choices win).
+    """
+    from eva.config.settings import save_settings
+    from eva.hardware.presets import CUSTOM_PROFILE_ID, apply_preset
+
+    if settings.profile != CUSTOM_PROFILE_ID:
+        tier = recommend_profile(detect_hardware())
+        apply_preset(settings, settings.profile, tier.id)
+    save_settings(settings, paths.settings_file)
+    logger.info(
+        "Configuration persisted: profile=%s llm=%s asr=%s tts=%s",
+        settings.profile,
+        settings.llm.model,
+        settings.asr.model,
+        settings.tts.model,
+    )
+    return settings
 
 
 # ──────────────────────────── wizard ────────────────────────────
@@ -301,6 +330,11 @@ def run_onboarding(
         interactive = sys.stdin.isatty()
 
     state = SetupState.load(paths)
+    # Pin the configuration before planning: with no settings file, model
+    # selection would follow code defaults and could change between releases
+    # (ADR-015). After this, the plan reflects the persisted choice.
+    if not paths.settings_file.exists():
+        resolve_and_persist_settings(settings, paths)
     plan = build_plan(settings, paths)
 
     if plan.is_complete and not force:

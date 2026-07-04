@@ -21,15 +21,17 @@ htmlcov/
 .vscode/
 *.swp
 
-# Runtime artifacts (never commit user data or models)
+# Runtime artifacts (never commit user data or models).
+# Anchored to the repo root: an unanchored "models/" would also match
+# src/eva/models/ and silently exclude source code from commits.
 *.log
-models/
-data/
-conversations/
+/models/
+/data/
+/conversations/
 
 # Frontend (added in M5)
 node_modules/
-frontend/dist/
+web/dist/
 
 # OS
 Thumbs.db

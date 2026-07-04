@@ -188,6 +188,79 @@ def _cmd_models(args: argparse.Namespace) -> int:
         manager.remove(args.model_id)
         print(f"'{args.model_id}' removed.")
         return 0
+
+    if args.models_command == "info":
+        settings = load_settings(paths.settings_file)
+        card = manager.describe(args.model_id, settings)
+        width = max(len(k) for k in card)
+        for key, value in card.items():
+            if value in (None, "", 0) and key not in ("installed", "active", "compatible"):
+                continue
+            print(f"{key.replace('_', ' '):<{width + 2}}{value}")
+        return 0
+
+    if args.models_command == "use":
+        from eva.config.settings import save_settings
+        from eva.hardware.presets import CUSTOM_PROFILE_ID
+
+        settings = load_settings(paths.settings_file)
+        info = manager.info(args.model_id)
+        if info.kind == "llm":
+            settings.llm.model = info.id
+        elif info.kind == "asr":
+            settings.asr.model = info.id
+        elif info.kind == "tts":
+            settings.tts.model = info.id
+            settings.tts.engine = info.engine
+        elif info.kind == "vad":
+            settings.vad.engine = info.engine
+        settings.profile = CUSTOM_PROFILE_ID  # manual choice overrides presets
+        save_settings(settings, paths.settings_file)
+        print(f"Active {info.kind.upper()} set to '{info.id}' (profile: custom). Saved.")
+        if not manager.is_installed(info.id):
+            print(f"Note: not installed yet — run: eva models download {info.id}")
+        return 0
+    return 2
+
+
+def _cmd_profiles(args: argparse.Namespace) -> int:
+    from eva.config.settings import save_settings
+    from eva.hardware.presets import apply_preset, preset_registry, register_builtin_presets
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    register_builtin_presets()
+    tier = recommend_profile(detect_hardware())
+
+    if args.profiles_command == "list":
+        print(f"Hardware tier: {tier.id} ({tier.display_name})\n")
+        for preset in preset_registry.snapshot().values():
+            marker = "*" if preset.id == settings.profile else " "
+            models = preset.for_tier(tier.id)
+            print(f"{marker} {preset.id:<14} {preset.description}")
+            print(f"    LLM {models.llm_model} | ASR {models.asr_model} | TTS {models.tts_model}")
+        if settings.profile == "custom":
+            print("* custom         (models chosen manually)")
+        print("\n* = active profile")
+        return 0
+
+    if args.profiles_command == "set":
+        apply_preset(settings, args.preset_id, tier.id)
+        save_settings(settings, paths.settings_file)
+        print(f"Profile '{args.preset_id}' applied for tier '{tier.id}' and saved:")
+        print(f"  LLM: {settings.llm.model}")
+        print(f"  ASR: {settings.asr.model}")
+        print(f"  TTS: {settings.tts.model}")
+        from eva.models.manager import ModelManager
+
+        manager = ModelManager(paths)
+        from eva.engine import required_models
+
+        missing = [m for m in required_models(settings) if not manager.is_installed(m)]
+        for model_id in missing:
+            print(f"  Note: '{model_id}' is not installed — run: eva models download {model_id}")
+        return 0
     return 2
 
 
@@ -369,7 +442,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_dl.add_argument("model_id")
     p_rm = models_sub.add_parser("remove", help="Remove an installed model")
     p_rm.add_argument("model_id")
+    p_info = models_sub.add_parser("info", help="Show the full model card")
+    p_info.add_argument("model_id")
+    p_use = models_sub.add_parser("use", help="Set a model as active (persists; profile→custom)")
+    p_use.add_argument("model_id")
     p_models.set_defaults(func=_cmd_models)
+
+    p_profiles = sub.add_parser("profiles", help="Model presets (Balanced, Fast, …)")
+    profiles_sub = p_profiles.add_subparsers(dest="profiles_command", required=True)
+    profiles_sub.add_parser("list", help="List presets and the active one")
+    p_pset = profiles_sub.add_parser("set", help="Apply a preset for the detected hardware tier")
+    p_pset.add_argument("preset_id")
+    p_profiles.set_defaults(func=_cmd_profiles)
 
     p_bench = sub.add_parser("bench", help="Run the end-to-end pipeline benchmark (no mic needed)")
     p_bench.add_argument(

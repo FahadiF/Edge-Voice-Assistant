@@ -50,6 +50,7 @@ class FasterWhisperASR(ASREngine):
                     compute_type=compute_type,
                     download_root=root,
                 )
+                self.device = device
                 logger.info(
                     "faster-whisper '%s' loaded (%s, %s)", self._model_name, device, compute_type
                 )

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections import deque
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -125,9 +126,14 @@ class StateChanged(Event):
 class EventBus:
     """Fan-out pub/sub bound to one asyncio loop."""
 
-    def __init__(self) -> None:
+    def __init__(self, history_size: int = 100) -> None:
         self._subscribers: list[asyncio.Queue[Event]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._history: deque[Event] = deque(maxlen=history_size)
+
+    def recent_events(self) -> list[Event]:
+        """The most recent published events (diagnostics; newest last)."""
+        return list(self._history)
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind the loop used by `publish_threadsafe` (call once at startup)."""
@@ -144,6 +150,7 @@ class EventBus:
 
     def publish(self, event: Event) -> None:
         """Publish from the event-loop thread. Never blocks."""
+        self._history.append(event)
         for queue in self._subscribers:
             if queue.full():
                 with contextlib.suppress(asyncio.QueueEmpty):

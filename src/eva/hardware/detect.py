@@ -64,7 +64,7 @@ class HardwareReport(BaseModel):
         return max(usable, key=lambda g: g.vram_total_mb, default=None)
 
 
-def _run_probe(cmd: list[str]) -> str | None:
+def run_probe(cmd: list[str]) -> str | None:
     """Run an external probe command; None on any failure."""
     if shutil.which(cmd[0]) is None:
         return None
@@ -107,7 +107,7 @@ def _parse_nvidia_smi(output: str) -> list[GpuInfo]:
 
 
 def _detect_nvidia() -> list[GpuInfo]:
-    output = _run_probe(
+    output = run_probe(
         [
             "nvidia-smi",
             "--query-gpu=name,memory.total,memory.free,driver_version",
@@ -123,7 +123,7 @@ def _detect_rocm() -> list[GpuInfo]:
     """Minimal ROCm presence probe. Reported VRAM parsing varies across rocm-smi
     versions, so we only assert presence; profile logic treats unknown VRAM as CPU-tier.
     """
-    output = _run_probe(["rocm-smi", "--showproductname"])
+    output = run_probe(["rocm-smi", "--showproductname"])
     if output is None:
         return []
     names = [

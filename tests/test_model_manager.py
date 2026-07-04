@@ -161,6 +161,52 @@ class TestManager:
         assert (target_dir / first.filename).read_bytes() == payload
         assert "bytes=4-" in seen_ranges
 
+    def test_describe_full_model_card(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from eva.config.settings import Settings
+
+        card = manager.describe("qwen3.5-4b-instruct-q4_k_m", Settings())
+        for key in (
+            "name",
+            "version",
+            "provider",
+            "license",
+            "languages",
+            "context_length",
+            "quantization",
+            "vram_mb",
+            "ram_mb",
+            "disk_usage_mb",
+            "installed",
+            "update_available",
+            "active",
+            "compatible",
+        ):
+            assert key in card, key
+        assert card["provider"] == "Alibaba (Qwen)"
+        assert card["active"] is True  # it is the settings default
+        assert card["installed"] is False  # isolated test home
+
+    def test_describe_flags_incompatible_models(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from eva.hardware.detect import CpuInfo, HardwareReport, MemoryInfo
+
+        cpu_only = HardwareReport(
+            os_name="t",
+            os_version="1",
+            python_version="3.12",
+            cpu=CpuInfo(name="c", physical_cores=4, logical_cores=8),
+            memory=MemoryInfo(total_mb=8000, available_mb=4000),
+            gpus=[],
+        )
+        monkeypatch.setattr("eva.hardware.detect.detect_hardware", lambda: cpu_only)
+        monkeypatch.setattr("eva.hardware.detect_hardware", lambda: cpu_only)
+        card = manager.describe("qwen3.5-9b-instruct-q4_k_m")
+        assert card["compatible"] is False
+        assert "VRAM" in str(card["compatibility_notes"])
+
     def test_disk_usage(self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             manager,

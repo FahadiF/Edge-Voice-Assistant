@@ -75,11 +75,16 @@ class LlamaCppLLM(LLMEngine):
             )
         except Exception as exc:
             raise ModelError(f"Cannot load LLM '{self._model_path.name}': {exc}") from exc
+        import llama_cpp
+
+        gpu_active = self._gpu_layers != 0 and bool(llama_cpp.llama_supports_gpu_offload())
+        self.device = "cuda" if gpu_active else "cpu"
         logger.info(
-            "llama.cpp loaded %s (ctx=%d, gpu_layers=%d)",
+            "llama.cpp loaded %s (ctx=%d, gpu_layers=%d, device=%s)",
             self._model_path.name,
             self._context_length,
             self._gpu_layers,
+            self.device,
         )
 
     def unload(self) -> None:

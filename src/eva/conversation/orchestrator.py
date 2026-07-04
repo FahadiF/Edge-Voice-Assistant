@@ -41,6 +41,12 @@ from eva.audio.segmenter import (
 from eva.config.settings import Settings
 from eva.conversation.chunker import SentenceChunker
 from eva.conversation.history import ConversationHistory
+from eva.conversation.language import (
+    effective_asr_language,
+    effective_system_prompt,
+    effective_voice,
+    resolve_language,
+)
 from eva.core.events import (
     BargeInDetected,
     EventBus,
@@ -99,8 +105,11 @@ class Orchestrator:
         self._tts = tts
         self._metrics = metrics or MetricsCollector()
         self._controller = TurnController()
+        language = resolve_language(settings)
+        self._asr_language = effective_asr_language(settings, language)
+        self._voice = effective_voice(settings, language)
         self._history = ConversationHistory(
-            settings.conversation.system_prompt,
+            effective_system_prompt(settings, language),
             max_turns=settings.conversation.max_history_turns,
         )
         self._params = GenerationParams(
@@ -110,6 +119,7 @@ class Orchestrator:
             stop=tuple(settings.conversation.stop_sequences),
         )
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._state: str = "idle"
         self._events: asyncio.Queue[SegmenterEvent | None] = asyncio.Queue()
         self._turn_task: asyncio.Task[None] | None = None
         self._partial_task: asyncio.Task[None] | None = None
@@ -118,6 +128,24 @@ class Orchestrator:
     @property
     def metrics(self) -> MetricsCollector:
         return self._metrics
+
+    @property
+    def state(self) -> str:
+        """Current pipeline state: idle / listening / thinking / speaking."""
+        return self._state
+
+    @property
+    def pending_audio_events(self) -> int:
+        """Depth of the capture→orchestrator event queue (diagnostics)."""
+        return self._events.qsize()
+
+    @property
+    def current_epoch(self) -> int:
+        return self._controller.epoch
+
+    def _set_state(self, state: str) -> None:
+        self._state = state
+        self._bus.publish(StateChanged(state=state))  # type: ignore[arg-type]
 
     # ── input bridge (called from the capture thread) ──
 
@@ -137,7 +165,7 @@ class Orchestrator:
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._bus.bind_loop(self._loop)
-        self._bus.publish(StateChanged(state="listening"))
+        self._set_state("listening")
         try:
             while True:
                 event = await self._events.get()
@@ -146,7 +174,7 @@ class Orchestrator:
                 await self._dispatch(event)
         finally:
             await self._cancel_turn("shutdown")
-            self._bus.publish(StateChanged(state="idle"))
+            self._set_state("idle")
 
     async def _dispatch(self, event: SegmenterEvent) -> None:
         match event:
@@ -177,7 +205,7 @@ class Orchestrator:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             self._bus.publish(TurnCancelled(epoch=stale_epoch, reason=reason))
-            self._bus.publish(StateChanged(state="listening"))
+            self._set_state("listening")
 
     # ── partial transcription (best-effort, never blocks the pipeline) ──
 
@@ -185,9 +213,7 @@ class Orchestrator:
         self._partial_busy = True
         try:
             epoch = self._controller.epoch
-            result = await asyncio.to_thread(
-                self._asr.transcribe, audio, self._settings.asr.language
-            )
+            result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
             if result.text and self._controller.is_current(epoch):
                 self._bus.publish(PartialTranscript(epoch=epoch, text=result.text))
         except Exception:
@@ -201,7 +227,7 @@ class Orchestrator:
         epoch = self._controller.advance()
         t0 = time.perf_counter()
         self._bus.publish(TurnStarted(epoch=epoch))
-        self._bus.publish(StateChanged(state="thinking"))
+        self._set_state("thinking")
         error: str | None = None
         metrics = TurnMetrics(epoch=epoch)
         try:
@@ -215,14 +241,14 @@ class Orchestrator:
         self._metrics.record(metrics)
         self._bus.publish(TurnFinished(epoch=epoch, error=error))
         if self._controller.is_current(epoch):
-            self._bus.publish(StateChanged(state="listening"))
+            self._set_state("listening")
 
     async def _pipeline(self, epoch: int, audio: Frame, t0: float) -> TurnMetrics:
         def elapsed_ms() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
         # ── ASR ──
-        result = await asyncio.to_thread(self._asr.transcribe, audio, self._settings.asr.language)
+        result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
         asr_ms = elapsed_ms()
         user_text = result.text.strip()
         if self._controller.is_stale(epoch):
@@ -271,12 +297,12 @@ class Orchestrator:
                 if not started:
                     started = True
                     self._bus.publish(TtsStarted(epoch=epoch))
-                    self._bus.publish(StateChanged(state="speaking"))
+                    self._set_state("speaking")
                 synth_start = time.perf_counter()
                 pcm = await asyncio.to_thread(
                     self._tts.synthesize,
                     sentence,
-                    voice=self._settings.tts.voice,
+                    voice=self._voice,
                     speed=self._settings.tts.speed,
                 )
                 if self._controller.is_stale(epoch):
@@ -290,7 +316,10 @@ class Orchestrator:
         speaker = asyncio.create_task(speak_worker())
 
         # ── token consumer ──
-        chunker = SentenceChunker()
+        chunker = SentenceChunker(
+            min_chars=self._settings.conversation.sentence_min_chars,
+            max_chars=self._settings.conversation.sentence_max_chars,
+        )
         reply_parts: list[str] = []
         token_count = 0
         ttft_ms = 0

@@ -3,6 +3,11 @@
 The single composition root used by the CLI today and the server in M5.
 Model ids come from settings, files from the ModelManager, engines from their
 registries — nothing here names a concrete implementation.
+
+Load order is deterministic (ADR-015): the LLM loads first and owns the GPU
+(architecture §5), then ASR takes what remains, then TTS (CPU). This keeps
+device placement — and therefore latency behavior — stable across restarts
+instead of depending on which engine grabbed VRAM first.
 """
 
 from __future__ import annotations
@@ -26,10 +31,6 @@ from eva.tts.registry import create_tts
 
 logger = logging.getLogger(__name__)
 
-# The active TTS model per engine id (until per-engine model selection lands
-# in settings with the M5 model-manager UI).
-_TTS_MODEL_BY_ENGINE = {"kokoro": "kokoro-82m-v1.0"}
-
 
 @dataclass
 class Assistant:
@@ -49,20 +50,29 @@ class Assistant:
         self.audio.stop()
 
     def preload(self) -> None:
-        """Load all models up front so the first turn has no load latency."""
+        """Load all models up front so the first turn has no load latency.
+
+        Order matters: LLM first (owns the GPU), then ASR (uses leftover VRAM
+        or falls back to CPU — visibly), then TTS (CPU). See ADR-015.
+        """
         logger.info("Loading models (first run may download weights)...")
-        self.asr.load()
         self.llm.load()
+        self.asr.load()
         self.tts.load()
+
+    def active_models(self) -> dict[str, str]:
+        """kind → model id actually configured (for banners and diagnostics)."""
+        return {
+            "llm": self.settings.llm.model,
+            "asr": self.settings.asr.model,
+            "tts": self.settings.tts.model,
+            "vad": self.settings.vad.engine,
+        }
 
 
 def required_models(settings: Settings) -> list[str]:
     """Model ids the current settings need (for preflight checks)."""
-    ids = [settings.llm.model]
-    tts_model = _TTS_MODEL_BY_ENGINE.get(settings.tts.engine)
-    if tts_model is not None:
-        ids.append(tts_model)
-    return ids
+    return [settings.llm.model, settings.tts.model]
 
 
 def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = None) -> Assistant:
@@ -76,11 +86,7 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
 
     llm_path = manager.files_for(settings.llm.model)["model"]
     llm = create_llm(settings, llm_path)
-
-    tts_model = _TTS_MODEL_BY_ENGINE.get(settings.tts.engine)
-    tts_files = manager.files_for(tts_model) if tts_model else {}
-    tts = create_tts(settings, tts_files)
-
+    tts = create_tts(settings, manager.files_for(settings.tts.model))
     asr = create_asr(settings, paths)  # engine-managed weights (downloads on first load)
 
     orchestrator: Orchestrator | None = None

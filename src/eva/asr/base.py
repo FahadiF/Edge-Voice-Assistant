@@ -26,6 +26,9 @@ class TranscriptionResult(BaseModel):
 class ASREngine(ABC):
     """Utterance-level speech recognizer over 16 kHz mono int16 audio."""
 
+    device: str = "unloaded"
+    """Device the model actually landed on ("cuda"/"cpu"); set by load()."""
+
     @abstractmethod
     def load(self) -> None:
         """Load model weights. Idempotent; called before first transcribe."""
