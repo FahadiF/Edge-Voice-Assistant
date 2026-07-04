@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
@@ -7,6 +8,8 @@ build/
 dist/
 .venv/
 venv/
+env/
+ENV/
 edge_env/
 
 # Tooling caches
@@ -15,11 +18,16 @@ edge_env/
 .ruff_cache/
 .coverage
 htmlcov/
+.cache/
+.huggingface/
+.ipynb_checkpoints/
 
 # IDE
 .idea/
 .vscode/
 *.swp
+*.tmp
+*.bak
 
 # Runtime artifacts (never commit user data or models).
 # Anchored to the repo root: an unanchored "models/" would also match
@@ -29,13 +37,10 @@ htmlcov/
 /data/
 /conversations/
 
-# Private / internal engineering documents — not for public distribution.
-# Public docs (API.md, ARCHITECTURE.md, INSTALLATION.md, ROADMAP.md, adr/)
-# stay committed as normal project documentation.
+# Private / internal engineering documents
 docs/HANDOFF/
 docs/DEVELOPMENT.md
 docs/THESIS_ANALYSIS.md
-docs/ARCHITECTURE_DIAGRAMS.md
 
 # Frontend (added in M5)
 node_modules/
