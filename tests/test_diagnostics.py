@@ -35,7 +35,6 @@ def _stub_assistant() -> SimpleNamespace:
         pending_audio_events=0,
         metrics=metrics,
     )
-    ring = SimpleNamespace(dropped=0)
     audio = SimpleNamespace(
         is_speaking=False,
         pipeline=SimpleNamespace(level_dbfs=-42.0),

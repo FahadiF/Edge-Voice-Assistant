@@ -145,7 +145,7 @@ class Orchestrator:
 
     def _set_state(self, state: str) -> None:
         self._state = state
-        self._bus.publish(StateChanged(state=state))  # type: ignore[arg-type]
+        self._bus.publish(StateChanged(state=state))
 
     # ── input bridge (called from the capture thread) ──
 
