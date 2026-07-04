@@ -71,3 +71,30 @@ def test_validate_assignment_guards_runtime_changes() -> None:
     s = Settings()
     with pytest.raises(ValueError):
         s.vad.threshold = 5.0  # out of [0, 1]
+
+
+def test_every_field_has_ui_documentation() -> None:
+    """The settings schema is the UI's source of truth (ADR-009): every leaf
+    field must carry a description so settings pages can render themselves."""
+    from pydantic import BaseModel
+
+    missing: list[str] = []
+
+    def walk(model: type[BaseModel], prefix: str) -> None:
+        for name, field in model.model_fields.items():
+            annotation = field.annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                walk(annotation, f"{prefix}{name}.")
+            elif not field.description:
+                missing.append(f"{prefix}{name}")
+
+    walk(Settings, "")
+    assert not missing, f"settings fields missing descriptions: {missing}"
+
+
+def test_schema_exports_bounds_for_ui() -> None:
+    schema = Settings.model_json_schema()
+    vad = schema["$defs"]["VADSettings"]["properties"]["threshold"]
+    assert vad["minimum"] == 0.0
+    assert vad["maximum"] == 1.0
+    assert "description" in vad
