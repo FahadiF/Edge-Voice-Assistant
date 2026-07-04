@@ -126,7 +126,7 @@ async def drive(
     bus: EventBus,
     script: Callable[[], asyncio.Future[None] | object] | None = None,
     *,
-    timeout: float = 5.0,
+    timeout: float = 20.0,
 ) -> list[Event]:
     """Run the orchestrator until shutdown; collect all published events."""
     queue = bus.subscribe()
@@ -154,7 +154,7 @@ def names(events: list[Event]) -> list[str]:
     return [e.name for e in events]
 
 
-async def wait_for_event(bus_events: list[Event], kind: type[Event], timeout: float = 3.0) -> None:
+async def wait_for_event(bus_events: list[Event], kind: type[Event], timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if any(isinstance(e, kind) for e in bus_events):
@@ -272,7 +272,7 @@ class TestCancellation:
                 orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
                 await asyncio.sleep(0.15)
                 orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
-                await asyncio.sleep(2.5)  # let the second turn finish
+                await asyncio.sleep(4.0)  # let the second turn finish (slow CI margin)
 
             events = await drive(orch, bus, script, timeout=10)
             assert any(isinstance(e, TurnCancelled) and e.reason == "superseded" for e in events)

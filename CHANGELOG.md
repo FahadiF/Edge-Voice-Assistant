@@ -6,6 +6,61 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — M2.5: Production hardening
+
+**Fixed (release blockers)**
+- **CI failed on every run because `src/eva/models/` was never committed**: the
+  unanchored `.gitignore` pattern `models/` (meant for downloaded weights) also
+  matched the source package. Runtime-artifact ignores are now anchored to the
+  repo root, and a package-integrity test imports every `eva` module so a
+  missing package can never pass CI again. GitHub Actions bumped to
+  checkout@v5 / setup-python@v6 (Node deprecation warnings).
+- **Inconsistent behavior across restarts** (different model selected, changed
+  barge-in feel) — root-caused to unpersisted configuration, silent
+  order-dependent device placement, and zero startup visibility; fixed
+  architecturally (ADR-015), not by tuning thresholds.
+
+**Added**
+- Persistent configuration: first run resolves the active preset against the
+  detected hardware tier and writes `settings.json`; model selection is stable
+  across restarts and releases, with a pinning regression test.
+- Model presets (ADR-015): Balanced / Fast / High Accuracy / Low Memory /
+  Developer as registry data per hardware tier; `eva profiles list|set`;
+  manual `eva models use <id>` persists and flips the profile to `custom`.
+- Startup banner: profile, hardware tier, all four active models (LLM/ASR/
+  TTS/VAD), the device each engine actually landed on, and the language.
+- Deterministic engine load order (LLM → ASR → TTS): the LLM owns the GPU;
+  engine ports expose the `device` actually used.
+- Multilingual foundation (ADR-016): language registry with per-language ASR
+  hints, prompt notes, and voice preferences; wired through the orchestrator;
+  English, Finnish, Swedish, Bengali (tested) plus German and Spanish;
+  graceful voice fallback when TTS lacks a native voice.
+- Model manager as UI backend: `describe()` full model card (name, version,
+  provider, license, languages, context length, VRAM/RAM, quantization, disk
+  size, install state, update placeholder, active flag, hardware
+  compatibility); `eva models info <id>`; provider/version metadata on every
+  catalog entry.
+- Developer diagnostics API (`eva.metrics.diagnostics`): JSON-serializable
+  runtime snapshot — active models and devices, pipeline state, turn epoch,
+  playback/VAD levels, queue depths, dropped frames, CPU/RAM/GPU/VRAM usage,
+  last-turn latency metrics (TTFT/TTFA/tokens-per-s), and recent events (the
+  bus now keeps a bounded history).
+- Configuration system audit: every settings field now carries a description
+  (schema-enforced by test); previously hidden defaults promoted to settings
+  (`tts.model`, `audio.fade_out_ms`, sentence-chunker bounds,
+  `conversation.language`).
+
+**Changed**
+- `run_probe` made public (shared by hardware detection and diagnostics);
+  the hidden TTS-model mapping in the engine assembly was replaced by the
+  `tts.model` setting.
+
+**Tests**
+- +37 tests (195 total): package integrity, presets (including preset↔catalog
+  consistency), configuration persistence and stability pinning, language
+  resolution for en/fi/sv/bn, diagnostics snapshots, model cards and
+  compatibility flags, settings-documentation enforcement.
+
 ### 2026-07-04 — Guided first-run onboarding
 
 **Added**

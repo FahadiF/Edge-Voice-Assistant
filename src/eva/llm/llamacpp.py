@@ -26,13 +26,14 @@ def _register_cuda_dll_paths() -> None:
     be on PATH before the first import.
     """
     global _dll_paths_registered
-    if _dll_paths_registered or sys.platform != "win32":
+    if _dll_paths_registered:
         return
-    site_packages = Path(sys.prefix) / "Lib" / "site-packages"
-    nvidia_bins = [str(p) for p in (site_packages / "nvidia").glob("*/bin") if p.is_dir()]
-    if nvidia_bins:
-        os.environ["PATH"] = os.pathsep.join([*nvidia_bins, os.environ.get("PATH", "")])
     _dll_paths_registered = True
+    if sys.platform == "win32":
+        site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+        nvidia_bins = [str(p) for p in (site_packages / "nvidia").glob("*/bin") if p.is_dir()]
+        if nvidia_bins:
+            os.environ["PATH"] = os.pathsep.join([*nvidia_bins, os.environ.get("PATH", "")])
 
 
 class LlamaCppLLM(LLMEngine):

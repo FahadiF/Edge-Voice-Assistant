@@ -11,6 +11,7 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -140,7 +141,9 @@ def _cpu_name() -> str:
     ``platform.processor()`` on Windows returns the family/stepping identifier;
     the marketing name lives in the registry. Linux exposes it in /proc/cpuinfo.
     """
-    if platform.system() == "Windows":
+    # sys.platform (not platform.system()) so type checkers analyze the right
+    # branch per platform — winreg only exists in Windows stubs.
+    if sys.platform == "win32":
         try:
             import winreg
 

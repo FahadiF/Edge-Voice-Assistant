@@ -40,6 +40,18 @@ resolution), per-turn metrics. CLI: `eva run`, `eva models`, `eva bench`.
 flow (including barge-in cancellation and repeated interruptions) unit-tested
 with fake engines; benchmark results recorded in the changelog.
 
+## M2.5 — Production hardening ✅ (completed 2026-07-04)
+CI made authoritative (root cause: a `.gitignore` pattern excluded
+`src/eva/models/` from the repository — fixed, plus a package-integrity test).
+Deterministic runtime configuration (ADR-015): persisted settings, model
+presets (Balanced/Fast/High Accuracy/Low Memory/Developer + custom), startup
+banner with actual device placement, deterministic LLM→ASR→TTS load order.
+Multilingual foundation (ADR-016): language registry (en/fi/sv/bn tested).
+Model manager `describe()` cards + `eva models info|use`, `eva profiles`.
+Developer diagnostics API (runtime snapshot: models, devices, state, resources,
+latency metrics, events). Configuration audit: all fields documented,
+hidden defaults promoted to settings. 195 tests.
+
 ## M3 — Barge-in complete (product priority #1)
 Epoch cancellation wired through every stage (LLM abort, TTS cancel, playback ramp,
 buffer retention of the interrupting speech). Repeated-interruption stress tests,

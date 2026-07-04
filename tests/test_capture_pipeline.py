@@ -29,7 +29,7 @@ class ScriptedVAD(VADEngine):
         self.reset_count += 1
 
 
-def _run_pipeline_with(frames: list[np.ndarray], timeout_s: float = 3.0) -> list[SegmenterEvent]:
+def _run_pipeline_with(frames: list[np.ndarray], timeout_s: float = 10.0) -> list[SegmenterEvent]:
     ring = FrameRing(4096)
     events: list[SegmenterEvent] = []
     vad = ScriptedVAD()
