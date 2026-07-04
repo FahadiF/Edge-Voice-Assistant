@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.server_fakes import build_fake_assistant
 
 from eva.config.paths import AppPaths
 from eva.server import create_app
+from tests.server_fakes import build_fake_assistant
 
 
 @pytest.fixture

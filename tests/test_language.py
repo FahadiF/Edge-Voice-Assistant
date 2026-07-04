@@ -90,10 +90,9 @@ class TestOrchestratorIntegration:
         orch_settings = orch._settings
         orch_settings.conversation.language = "fi"
         # Rebuild with Finnish configured.
-        from tests.test_orchestrator import FakeASR, FakeAudioOut, FakeLLM, FakeTTS
-
         from eva.conversation.orchestrator import Orchestrator
         from eva.core.events import EventBus
+        from tests.test_orchestrator import FakeASR, FakeAudioOut, FakeLLM, FakeTTS
 
         orch2 = Orchestrator(
             orch_settings, EventBus(), FakeAudioOut(), FakeASR(), FakeLLM(), FakeTTS()
