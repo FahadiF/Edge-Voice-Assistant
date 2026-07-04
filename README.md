@@ -1,79 +1,193 @@
 ![Version](https://img.shields.io/github/v/release/FahadiF/Edge-Voice-Assistant?include_prereleases)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
-![License](https://img.shields.io/badge/License-Apache%202.0-blue).
+![License](https://img.shields.io/github/license/FahadiF/Edge-Voice-Assistant)
 
 # Edge Voice Assistant
 
-An offline AI voice assistant designed for natural, low-latency conversations on local hardware.
+An offline AI voice assistant designed for natural, low-latency conversations entirely on local hardware.
 
-Edge Voice Assistant runs entirely on your computer after the required AI models are installed. It combines local speech recognition, language models, and speech synthesis into a modular voice platform that prioritizes privacy, responsiveness, and extensibility.
+Edge Voice Assistant combines local speech recognition, language models, and speech synthesis into a modular AI platform that prioritizes **privacy**, **responsiveness**, **extensibility**, and **full local execution**.
+
+Once the required AI models are installed, the assistant operates completely offline without requiring cloud APIs or Internet connectivity.
+
+---
 
 ## Highlights
 
 - Fully offline after initial model installation
-- Natural voice conversations with streaming speech recognition and response generation
-- Real-time voice interruption (barge-in)
-- Modular architecture with interchangeable AI models
-- Desktop and local web interfaces powered by the same backend
-- Cross-platform support for Windows and Linux
-- Built for developers, researchers, and edge AI applications
+- Natural real-time voice conversations
+- Streaming speech recognition and response generation
+- Voice interruption (barge-in) with fast cancellation
+- Modular AI architecture with interchangeable engines
+- Local REST + WebSocket API
+- Cross-platform support (Windows & Linux)
+- Automatic hardware detection and model recommendations
+- Designed for developers, researchers, and edge AI applications
+
+---
 
 ## Project Vision
 
-Edge Voice Assistant is designed as a long-term open-source platform for local AI interaction.
+Edge Voice Assistant is designed as a long-term open-source platform for conversational AI on edge devices.
 
-The architecture is intentionally modular so that language models, speech recognition engines, text-to-speech engines, memory systems, plugins, and future multimodal capabilities can evolve independently.
+Rather than being tied to a single AI model or technology stack, the architecture is intentionally modular so that every subsystem can evolve independently.
 
-## Current Status
+Current and future interchangeable components include:
+
+- Speech Recognition (ASR)
+- Large Language Models (LLMs)
+- Text-to-Speech (TTS)
+- Voice Activity Detection (VAD)
+- Memory systems
+- Plugins
+- Personas
+- Desktop UI
+- Web UI
+- Future multimodal capabilities
+
+The long-term goal is to provide a production-quality foundation for private, local-first conversational AI.
+
+---
+
+# Current Status
 
 The project is under active development.
 
-Completed milestones:
+## Completed Milestones
 
-- **M0 – Project Foundation**
-- **M1 – Audio Foundation** (full-duplex audio, echo cancellation, voice activity detection)
-- **M2 – Streaming Pipeline** (streaming speech recognition, language model, and speech
-  synthesis with turn management and cancellation; `eva run` provides a spoken
-  conversation from the command line)
-- **M2.5 – Production Hardening** (persisted configuration, model presets,
-  multilingual foundation, developer diagnostics)
-- **M2.6 – Platform API** (FastAPI + WebSocket backend at `eva serve` — the
-  CLI, and eventually the desktop and web apps, are all clients of the same
-  engine; see [docs/API.md](docs/API.md))
-- **M3 – Natural Voice Conversation** (streaming TTS synthesis for lower
-  time-to-first-audio and faster interruption, richer runtime diagnostics,
-  clean shutdown on Ctrl+C at every stage)
+- ✅ **M0 – Project Foundation**
+- ✅ **M1 – Audio Foundation**
+  - Full-duplex audio
+  - Echo cancellation
+  - Voice activity detection
+  - Audio diagnostics
 
-Next milestone:
+- ✅ **M2 – Streaming AI Pipeline**
+  - Streaming ASR
+  - Local LLM
+  - Streaming TTS
+  - Turn management
+  - Cancellation
+  - Offline conversation (`eva run`)
 
-**M4 – Conversation Engine** (persistent memory, personas, multiple voices)
+- ✅ **M2.5 – Production Hardening**
+  - Persistent configuration
+  - Hardware profiles
+  - Model presets
+  - Multilingual foundation
+  - Diagnostics
+  - Guided first-run experience
 
-See the project roadmap for implementation progress.
+- ✅ **M2.6 – Platform API**
+  - FastAPI backend
+  - REST API
+  - WebSocket events
+  - Plugin framework
+  - Shared engine architecture
 
-## Hardware Targets
+- ✅ **M3 – Natural Voice Conversation**
+  - Faster interruption
+  - Lower time-to-first-audio
+  - Streaming speech synthesis
+  - Improved runtime diagnostics
+  - Graceful shutdown
+
+---
+
+## Current Development
+
+🚧 **M4 – Conversation Engine**
+
+Planned features include:
+
+- Persistent conversation memory
+- Personas
+- Multiple assistant voices
+- Long-term memory
+- Memory retrieval
+- Context management
+
+See the [Roadmap](docs/ROADMAP.md) for future milestones.
+
+---
+
+# Hardware Targets
 
 Primary development platform
 
 - NVIDIA RTX 3060 Laptop GPU (6 GB VRAM)
+- AMD Ryzen 9 5900HX
 - 16 GB RAM
 
-The application is designed to scale across different hardware profiles and automatically recommend suitable AI models.
+The assistant automatically detects available hardware and recommends suitable AI models and runtime configurations.
 
-## Documentation
+Designed to scale from CPU-only systems to modern consumer GPUs.
+
+---
+
+# Documentation
 
 | Document | Description |
 |----------|-------------|
-| Architecture | Overall system architecture |
-| Roadmap | Development milestones |
-| ADRs | Architecture Decision Records |
-| Developer Guide | Development workflow |
-| API Reference | Backend APIs |
-| Plugin SDK | Extension development |
-| Benchmark Guide | Performance evaluation |
+| [Installation Guide](docs/INSTALLATION.md) | Installation and first-time setup |
+| [Architecture](docs/ARCHITECTURE.md) | System architecture overview |
+| [Roadmap](docs/ROADMAP.md) | Development roadmap |
+| [API Reference](docs/API.md) | REST & WebSocket API |
+| [Architecture Decision Records](docs/adr/) | Design decisions |
+| [GitHub Releases](../../releases) | Release history |
 
-## Project Background
+---
 
-Edge Voice Assistant is the production successor to the research prototype developed during my Master's thesis at the University of Vaasa.
+# Research Background
 
-The original thesis implementation is preserved separately as a historical research artifact while this repository focuses on long-term product development.
+Edge Voice Assistant originated from my Master's thesis research in **Sustainable and Autonomous Systems** at the **University of Vaasa**.
+
+The original research prototype has been preserved separately as a historical implementation, while this repository represents the long-term open-source continuation of that work.
+
+**Original thesis repository**
+
+https://github.com/FahadiF/Modular-Software-Implementation-Edge-Voice-Chatbot
+
+The goal of this repository is to evolve the research prototype into a modular, extensible, production-oriented platform for offline conversational AI.
+
+---
+
+# Acknowledgements
+
+This project began during my Master's thesis at the **University of Vaasa**.
+
+I would like to express my sincere gratitude to my thesis supervisor,
+
+**Jani Boutellier**  
+https://github.com/jboutell
+
+for his guidance, valuable feedback, and support throughout the research that inspired this project.
+
+I am also grateful to the open-source community and the developers of the projects that make modern local AI possible, including:
+
+- llama.cpp
+- faster-whisper
+- Kokoro ONNX
+- Silero VAD
+- ONNX Runtime
+- FastAPI
+- CTranslate2
+
+---
+
+# Contributing
+
+Contributions, discussions, bug reports, and feature requests are welcome.
+
+As the project continues to evolve, contributions that improve performance, modularity, documentation, accessibility, and hardware compatibility are especially appreciated.
+
+Please open an Issue before submitting large architectural changes.
+
+---
+
+# License
+
+This project is licensed under the **MIT License**.
+
+See the [LICENSE](LICENSE) file for details.
