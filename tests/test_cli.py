@@ -41,17 +41,34 @@ def test_setup_dry_run_prints_command(capsys: pytest.CaptureFixture[str]) -> Non
     assert "abetlen.github.io" in out
 
 
-def test_run_without_setup_guides_user(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # Force "nothing installed" so run() reports guidance, not a traceback.
+def test_run_not_ready_returns_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    from eva.onboarding import OnboardingResult
+
+    # Onboarding could not complete (e.g. non-interactive, nothing installed).
     monkeypatch.setattr(
-        "eva.cli._readiness_problems",
-        lambda settings, paths: [
-            "missing runtime 'llama_cpp' (language model (LLM)) — run: eva setup"
-        ],
+        "eva.onboarding.run_onboarding",
+        lambda *a, **k: OnboardingResult(ready=False, declined=False),
     )
     assert main(["run"]) == 1
-    out = capsys.readouterr().out
-    assert "setup is incomplete" in out.lower()
-    assert "eva doctor" in out
+
+
+def test_run_user_declined_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    from eva.onboarding import OnboardingResult
+
+    monkeypatch.setattr(
+        "eva.onboarding.run_onboarding",
+        lambda *a, **k: OnboardingResult(ready=False, declined=True),
+    )
+    assert main(["run"]) == 0
+
+
+def test_first_run_setup_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from eva.onboarding import OnboardingResult
+
+    monkeypatch.setattr(
+        "eva.onboarding.run_onboarding", lambda *a, **k: OnboardingResult(ready=True)
+    )
+    assert main(["first-run", "--setup-only"]) == 0
+    assert "eva run" in capsys.readouterr().out

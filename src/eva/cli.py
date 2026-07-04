@@ -1,9 +1,10 @@
 """Command-line entry point.
 
 Commands: ``version``, ``diagnose``, ``doctor`` (dependency/model readiness),
-``setup`` (install the LLM runtime for the detected hardware), ``devices``,
-``listen``, ``echo-test``, ``models``, ``run`` (voice loop), ``bench``.
-``serve`` (engine server) arrives in M5.
+``first-run`` (guided setup wizard), ``setup`` (install the LLM runtime),
+``devices``, ``listen``, ``echo-test``, ``models``, ``run`` (voice loop; runs the
+wizard automatically when setup is incomplete), ``bench``. ``serve`` (engine
+server) arrives in M5.
 """
 
 from __future__ import annotations
@@ -108,43 +109,38 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
     return run_echo_test(settings, record_seconds=args.record_seconds, loops=args.loops)
 
 
-def _readiness_problems(settings: object, paths: object) -> list[str]:
-    """Collect actionable messages for anything missing before a live turn.
-
-    Checks both runtime dependencies (the llama.cpp LLM runtime is not a base
-    dependency) and required model files, so the user sees every gap at once
-    with the exact command to fix each — never a raw traceback.
-    """
-    from eva.engine import required_models
-    from eva.models.manager import ModelManager
-    from eva.runtime import missing_runtimes
-
-    problems = [
-        f"missing runtime '{s.module}' ({s.purpose}) — {s.remedy}" for s in missing_runtimes()
-    ]
-    manager = ModelManager(paths)  # type: ignore[arg-type]
-    problems += [
-        f"missing model '{m}' — run: eva models download {m}"
-        for m in required_models(settings)  # type: ignore[arg-type]
-        if not manager.is_installed(m)
-    ]
-    return problems
-
-
-def _cmd_run(_: argparse.Namespace) -> int:
+def _cmd_run(args: argparse.Namespace) -> int:
+    """Start the assistant, guiding the user through setup if anything is missing."""
     from eva.engine import build_assistant
+    from eva.onboarding import run_onboarding
     from eva.voice_loop import main_run
 
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
-    problems = _readiness_problems(settings, paths)
-    if problems:
-        print("Cannot start yet — setup is incomplete:")
-        for problem in problems:
-            print(f"  - {problem}")
-        print("\nRun `eva doctor` for a full readiness report.")
-        return 1
+
+    result = run_onboarding(settings, paths, assume_yes=args.yes)
+    if not result.ready:
+        return 0 if result.declined else 1
+    return main_run(build_assistant(settings, paths))
+
+
+def _cmd_first_run(args: argparse.Namespace) -> int:
+    """Launch the onboarding wizard directly, then start the assistant if ready."""
+    from eva.engine import build_assistant
+    from eva.onboarding import run_onboarding
+    from eva.voice_loop import main_run
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+
+    result = run_onboarding(settings, paths, assume_yes=args.yes, force=True)
+    if not result.ready:
+        return 0 if result.declined else 1
+    if args.setup_only:
+        print("Setup verified. Run `eva run` to start talking.")
+        return 0
     return main_run(build_assistant(settings, paths))
 
 
@@ -199,16 +195,17 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     from eva.benchmark.pipeline import PipelineBenchmark
     from eva.engine import build_assistant
     from eva.llm.base import GenerationParams
+    from eva.onboarding import check_readiness, readiness_problems
 
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
-    problems = _readiness_problems(settings, paths)
+    problems = readiness_problems(check_readiness(settings, paths))
     if problems:
         print("Cannot benchmark yet — setup is incomplete:")
         for problem in problems:
             print(f"  - {problem}")
-        print("\nRun `eva doctor` for a full readiness report.")
+        print("\nRun `eva first-run` for guided setup, or `eva doctor` for details.")
         return 1
     assistant = build_assistant(settings, paths)
     print("Loading models...")
@@ -235,42 +232,31 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(_: argparse.Namespace) -> int:
-    from eva.engine import required_models
-    from eva.models.manager import ModelManager
-    from eva.runtime import probe_runtimes
+    from eva.onboarding import check_readiness
 
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
-    ok = True
+    items = check_readiness(settings, paths)
 
-    print("Runtime dependencies")
-    print("--------------------")
-    for status in probe_runtimes():
-        mark = "ok     " if status.installed else "MISSING"
-        line = f"[{mark}] {status.module:<16} {status.purpose}"
-        if not status.installed:
-            ok = False
-            line += f"\n            -> {status.remedy}"
-        print(line)
+    def show(category: str, title: str) -> None:
+        print(f"{title}\n{'-' * len(title)}")
+        for item in (i for i in items if i.category == category):
+            mark = "ok     " if item.ok else "MISSING"
+            line = f"[{mark}] {item.name:<28} {item.detail}"
+            if not item.ok:
+                line += f"\n            -> {item.remedy}"
+            print(line)
 
-    print("\nModels")
-    print("------")
-    manager = ModelManager(paths)
-    for model_id in required_models(settings):
-        installed = manager.is_installed(model_id)
-        mark = "ok     " if installed else "MISSING"
-        line = f"[{mark}] {model_id}"
-        if not installed:
-            ok = False
-            line += f"\n            -> eva models download {model_id}"
-        print(line)
+    show("runtime", "Runtime dependencies")
+    print()
+    show("model", "Models")
 
     print()
-    if ok:
+    if all(i.ok for i in items):
         print("All checks passed. `eva run` is ready.")
         return 0
-    print("Setup is incomplete. Fix the items above (or run `eva setup`), then re-check.")
+    print("Setup is incomplete. Run `eva first-run` for guided setup, or fix the items above.")
     return 1
 
 
@@ -365,8 +351,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_echo.add_argument("--loops", type=int, default=2)
     p_echo.set_defaults(func=_cmd_echo_test)
 
-    p_run = sub.add_parser("run", help="Start the voice assistant (interactive)")
+    p_run = sub.add_parser("run", help="Start the voice assistant (guided setup on first run)")
+    p_run.add_argument("--yes", "-y", action="store_true", help="Auto-confirm setup prompts")
     p_run.set_defaults(func=_cmd_run)
+
+    p_first = sub.add_parser("first-run", help="Run the guided setup wizard")
+    p_first.add_argument("--yes", "-y", action="store_true", help="Auto-confirm setup prompts")
+    p_first.add_argument(
+        "--setup-only", action="store_true", help="Finish setup without starting the assistant"
+    )
+    p_first.set_defaults(func=_cmd_first_run)
 
     p_models = sub.add_parser("models", help="Manage models")
     models_sub = p_models.add_subparsers(dest="models_command", required=True)
