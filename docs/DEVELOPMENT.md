@@ -66,11 +66,16 @@ eva doctor                                       # confirm everything is ready
 eva run                                          # interactive voice loop (guided if not ready)
 eva first-run                                    # run the setup wizard on demand
 eva bench                                        # end-to-end pipeline benchmark, no mic needed
+eva profiles list                                # model presets for the detected hardware tier
+eva config show                                  # print the current settings document
+eva serve                                        # platform API + WebSocket (see docs/API.md)
 ```
 
 faster-whisper weights download automatically on first use (~460 MB for `small`).
-See `docs/INSTALLATION.md` for the full setup guide and ADR-013 for why the LLM
-runtime is a separate `eva setup` step.
+See `docs/INSTALLATION.md` for the full setup guide, ADR-013 for why the LLM
+runtime is a separate `eva setup` step, and `docs/API.md`/ADR-017 for the
+platform API that `eva serve` exposes (the CLI is one client of the same
+engine services — no logic is duplicated between them).
 
 ## Clean-environment smoke test (release gate)
 

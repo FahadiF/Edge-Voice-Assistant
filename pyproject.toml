@@ -33,6 +33,10 @@ dependencies = [
     # `pip install` installs a runnable ASR + TTS stack with no compiler.
     "faster-whisper>=1.1",    # ASR (CTranslate2) — ADR-003
     "kokoro-onnx>=0.4",       # TTS (ONNX Runtime) — ADR-004, ADR-012
+    # Platform API (M2.6) — the CLI is one client of this same server (ADR-017).
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "websockets>=13",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +45,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "httpx>=0.27",  # FastAPI TestClient transport
 ]
 # LLM runtime (llama.cpp / GGUF, ADR-002). llama-cpp-python ships NO wheels on
 # PyPI (sdist only → needs a C++ toolchain), so it is not a base dependency.
@@ -111,6 +116,10 @@ module = [
     "llama_cpp.*",
     "kokoro_onnx.*",
 ]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["uvicorn.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

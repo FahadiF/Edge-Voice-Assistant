@@ -56,5 +56,7 @@ def test_critical_subpackages_present() -> None:
         "eva.hardware",
         "eva.metrics",
         "eva.benchmark",
+        "eva.server",
+        "eva.plugins",
     ):
         importlib.import_module(package)

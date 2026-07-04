@@ -2,9 +2,13 @@
 
 Commands: ``version``, ``diagnose``, ``doctor`` (dependency/model readiness),
 ``first-run`` (guided setup wizard), ``setup`` (install the LLM runtime),
-``devices``, ``listen``, ``echo-test``, ``models``, ``run`` (voice loop; runs the
-wizard automatically when setup is incomplete), ``bench``. ``serve`` (engine
-server) arrives in M5.
+``devices``, ``listen``, ``echo-test``, ``models``, ``profiles``, ``config``,
+``run`` (voice loop; runs the wizard automatically when setup is incomplete),
+``bench``, ``serve`` (platform API server — see ``eva.server``, ADR-017).
+
+The CLI is one client of the same engine services the platform API exposes
+(``ModelManager``, ``eva.config.service``, ``eva.onboarding``, …) — it does not
+duplicate their logic.
 """
 
 from __future__ import annotations
@@ -373,6 +377,52 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the platform API server (ADR-017). The CLI's other commands are a
+    separate, lighter-weight client of the same underlying services — `eva
+    serve` is for the desktop app, a web UI, or any external integration."""
+    import uvicorn
+
+    from eva.server import create_app
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    host = args.host or settings.server.host
+    port = args.port or settings.server.port
+    print(f"Edge Voice Assistant API on http://{host}:{port}")
+    print(f"  Docs:      http://{host}:{port}/docs")
+    print(f"  WebSocket: ws://{host}:{port}/api/v1/ws")
+    uvicorn.run(create_app(paths), host=host, port=port, log_level="info")
+    return 0
+
+
+def _cmd_config(args: argparse.Namespace) -> int:
+    """Settings inspection/reset — the same `eva.config.service` functions the
+    Settings API uses (no duplicated logic between CLI and server)."""
+    from eva.config import service as settings_service
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+
+    if args.config_command == "show":
+        current = load_settings(paths.settings_file)
+        print(current.model_dump_json(indent=2))
+        return 0
+
+    if args.config_command == "schema":
+        import json
+
+        print(json.dumps(settings_service.get_schema(), indent=2))
+        return 0
+
+    if args.config_command == "reset":
+        settings_service.reset_settings(paths)
+        print(f"Settings reset to defaults and saved to {paths.settings_file}")
+        return 0
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eva",
@@ -461,6 +511,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_bench.add_argument("--rounds", type=int, default=1)
     p_bench.set_defaults(func=_cmd_bench)
+
+    p_serve = sub.add_parser(
+        "serve", help="Run the platform API server (desktop/web/plugin backend)"
+    )
+    p_serve.add_argument("--host", default=None, help="Override settings.server.host")
+    p_serve.add_argument("--port", type=int, default=None, help="Override settings.server.port")
+    p_serve.set_defaults(func=_cmd_serve)
+
+    p_config = sub.add_parser("config", help="Inspect or reset the settings document")
+    config_sub = p_config.add_subparsers(dest="config_command", required=True)
+    config_sub.add_parser("show", help="Print the current settings as JSON")
+    config_sub.add_parser("schema", help="Print the settings JSON Schema")
+    config_sub.add_parser("reset", help="Reset settings to schema defaults")
+    p_config.set_defaults(func=_cmd_config)
 
     return parser
 

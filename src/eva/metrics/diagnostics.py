@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import psutil
 from pydantic import BaseModel, ConfigDict
 
+from eva.config.settings import Settings
 from eva.hardware.detect import run_probe
 from eva.metrics.turn import TurnMetrics
 
@@ -86,6 +87,35 @@ class RuntimeSnapshot(BaseModel):
     metrics_summary: str
     # Events
     recent_events: list[str]  # newest last
+
+
+def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
+    """Snapshot for when no assistant is built/running yet (e.g. server up,
+    engine not started). Configuration and system resources are still real;
+    pipeline/device fields report their at-rest values."""
+    return RuntimeSnapshot(
+        profile=settings.profile,
+        language=settings.conversation.language,
+        models={
+            "llm": settings.llm.model,
+            "asr": settings.asr.model,
+            "tts": settings.tts.model,
+            "vad": settings.vad.engine,
+        },
+        devices={"llm": "unloaded", "asr": "unloaded", "tts": "unloaded", "vad": "unloaded"},
+        state="idle",
+        epoch=0,
+        playback_active=False,
+        input_level_dbfs=-120.0,
+        pending_audio_events=0,
+        capture_ring_depth=0,
+        capture_frames_dropped=0,
+        resources=sample_resources(),
+        last_turn=None,
+        turns_completed=0,
+        metrics_summary="No completed turns.",
+        recent_events=[],
+    )
 
 
 class DiagnosticsProvider:

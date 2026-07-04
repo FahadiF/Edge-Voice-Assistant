@@ -72,3 +72,36 @@ def test_first_run_setup_only(
     )
     assert main(["first-run", "--setup-only"]) == 0
     assert "eva run" in capsys.readouterr().out
+
+
+def test_config_show_prints_json(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    assert main(["config", "show"]) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert "llm" in body
+
+
+def test_config_schema_prints_json_schema(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    assert main(["config", "schema"]) == 0
+    schema = json.loads(capsys.readouterr().out)
+    assert "VADSettings" in schema["$defs"]
+
+
+def test_config_reset(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["config", "reset"]) == 0
+    assert "reset to defaults" in capsys.readouterr().out.lower()
+
+
+def test_serve_command_starts_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {}
+
+    def fake_run(app: object, host: str, port: int, log_level: str) -> None:
+        calls["host"] = host
+        calls["port"] = port
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+    assert main(["serve", "--host", "0.0.0.0", "--port", "9999"]) == 0
+    assert calls == {"host": "0.0.0.0", "port": 9999}

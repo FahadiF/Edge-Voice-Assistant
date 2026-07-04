@@ -6,6 +6,49 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — M2.6: Platform API & UI backend
+
+**Added**
+- FastAPI platform API (ADR-017): versioned REST under `/api/v1` plus one
+  WebSocket event stream. `eva serve` runs it; the CLI is now one client of
+  the same engine services the server exposes (Part 10 — no duplicated logic).
+- `eva/server/`: app factory (localhost-only CORS, uniform `EvaError` → HTTP
+  status mapping, OpenAPI/Swagger UI generated automatically), `ServerState`
+  (the single engine-lifecycle owner — explicit `POST /engine/start`, never
+  an implicit side effect of the server booting), and one router per concern:
+  settings, models, diagnostics, plugins, conversation, engine, system.
+- WebSocket (`/api/v1/ws`): forwards every existing engine event
+  (transcripts, LLM tokens/sentences, TTS/playback, state transitions, turn
+  lifecycle) plus new `ModelDownloadProgress/Completed/Failed` and
+  `EngineStarted/Stopped` events; sends an initial `snapshot` so clients never
+  need to poll before their first live event. `EventBus` now keeps bounded
+  history for reconnects/diagnostics.
+- Settings API: GET/PUT/PATCH/validate/reset + JSON Schema, all backed by a
+  new shared `eva.config.service` module (also used by the new `eva config
+  show|schema|reset` CLI group).
+- Model manager API: list/info/download (background, progress via WebSocket)/
+  remove/activate — the full `describe()` model card exposed over HTTP.
+- Diagnostics API: `RuntimeSnapshot` with and without a running engine
+  (`snapshot_idle` for the "server up, engine not started" state).
+- Plugin API (`eva/plugins/`, ADR-011 backend): manifest schema + a genuinely
+  functional `PluginManager` using standard entry points (group
+  `eva.plugins`) — discover/enable/disable/reload, empty by default until a
+  plugin package exists.
+- Conversation API: history, current turn, interrupt/cancel (new
+  `Orchestrator.interrupt()` — barge-in reachable without a microphone; new
+  `TurnCancelled` reason `"manual"`), clear, export/import (new
+  `ConversationHistory.turns`/`load_turns`).
+- `docs/API.md` (endpoint map + WebSocket protocol) and ADR-017.
+- 69 new tests (264 total): every router, the WebSocket stream (including
+  disconnect/unsubscribe and multi-client fan-out), the plugin manager against
+  fake entry points, the settings service, and full engine start/stop/interrupt/
+  export/import cycles against a fake engine — plus a real end-to-end check
+  against the installed Qwen3.5/faster-whisper/Kokoro models on reference
+  hardware (LLM/ASR on CUDA, TTS on CPU, matching the M2.5 startup banner).
+- Verified in a clean virtual environment (standing release gate): base
+  install includes FastAPI/uvicorn/websockets with no compiler required;
+  `eva serve` runs as a real subprocess answering HTTP and OpenAPI requests.
+
 ### 2026-07-04 — M2.5: Production hardening
 
 **Fixed (release blockers)**

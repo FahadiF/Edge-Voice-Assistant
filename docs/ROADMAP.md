@@ -52,6 +52,28 @@ Developer diagnostics API (runtime snapshot: models, devices, state, resources,
 latency metrics, events). Configuration audit: all fields documented,
 hidden defaults promoted to settings. 195 tests.
 
+## M2.6 — Platform API & UI backend ✅ (completed 2026-07-04)
+FastAPI platform API (ADR-017): versioned REST (`/api/v1`) + one WebSocket
+event stream, so the CLI, desktop app, web UI, and plugins are all thin
+clients of the same engine. Routers: settings (get/put/patch/validate/reset +
+JSON Schema), models (list/info/download/remove/activate, background
+downloads with WebSocket progress), diagnostics (`RuntimeSnapshot`, idle and
+running), plugins (ADR-011 backend: manifest + entry-point discovery +
+enable/disable/reload), conversation (history/current/interrupt/cancel/clear/
+export/import), engine lifecycle (explicit start/stop, never implicit).
+`ServerState` is the single lifecycle owner; every router reuses existing
+services (no duplicated logic — Part 10). `eva serve` CLI command; `eva
+config show|schema|reset` shares the new `eva.config.service` module with the
+Settings API. OpenAPI/Swagger UI generated automatically.
+**Exit met:** 264 tests total (69 new) covering every router, the WebSocket
+stream (multi-client fan-out, disconnect/unsubscribe), the plugin manager
+against fake entry points, and full engine start/stop/interrupt/export/import
+cycles; verified against the real installed models on reference hardware
+(LLM/ASR on CUDA, TTS on CPU via the API, matching the M2.5 startup banner);
+clean-environment smoke test passed (FastAPI/uvicorn/websockets are base
+dependencies with universal wheels — no clean-install regression); `eva
+serve` verified as a real subprocess answering HTTP + OpenAPI requests.
+
 ## M3 — Barge-in complete (product priority #1)
 Epoch cancellation wired through every stage (LLM abort, TTS cancel, playback ramp,
 buffer retention of the interrupting speech). Repeated-interruption stress tests,
@@ -65,11 +87,14 @@ profiles, settings manager surfaces, conversation export/import (JSON), text
 normalization pre-TTS, multiple voices.
 **Exit:** persistent multi-session memory; switchable personalities and voices.
 
-## M5 — Server API + Web UI
-FastAPI + WebSocket protocol (versioned), React UI. Conversation view with live
-partial transcripts and token streaming, mic state, push-to-talk & always-listening
-toggle. Full settings surface per ADR-009 (LM Studio / Open WebUI / Home Assistant class),
-driven by the settings schema and component registries. Sections:
+## M5 — Web UI
+The platform API and WebSocket protocol are already built (M2.6); this
+milestone is the React UI consuming them — no new backend surface expected,
+only whatever small gaps using it in anger reveals. Conversation view with
+live partial transcripts and token streaming, mic state, push-to-talk &
+always-listening toggle. Full settings surface per ADR-009 (LM Studio / Open
+WebUI / Home Assistant class), driven by the settings schema and component
+registries. Sections:
 - **General**: startup behavior, language, default interaction mode
 - **Language Models / Speech Recognition / Speech Synthesis / Voice Detection**:
   per-subsystem model manager pages — installed & active models, size, quantization,

@@ -173,19 +173,27 @@ plug in as adapters.
 
 See ADR-002…ADR-005 for full rationale and rejected alternatives.
 
-## 8. Engine API (frontend contract)
+## 8. Engine API (frontend contract) — implemented M2.6 (ADR-017)
 
-- **WebSocket** `/ws`: bidirectional event stream. Server → client events are the
-  engine's typed event set (authoritative definitions in `eva/core/events.py`,
-  implemented M2): `StateChanged`, `SpeechStarted`, `SpeechFinished`,
-  `BargeInDetected`, `PartialTranscript`, `FinalTranscript`, `LlmStarted`,
-  `LlmToken`, `LlmSentence`, `LlmFinished`, `TtsStarted`, `TtsAudioReady`,
-  `TtsFinished`, `TurnStarted`, `TurnFinished`, `TurnCancelled`; client →
-  `set_mode(ptt|always)`, `ptt_down/up`, `interrupt`, `text_message` (typed input).
-- **REST**: settings CRUD, profiles/personas, model list/download/switch,
-  conversations (list/export/import), diagnostics, logs.
+- **WebSocket** `/api/v1/ws`: server → client event stream — the same typed
+  events the orchestrator has always published (`eva/core/events.py`):
+  `StateChanged`, `SpeechStarted`, `PartialTranscript`, `FinalTranscript`,
+  `LlmStarted/Token/Sentence/Finished`, `TtsStarted/AudioReady/Finished`,
+  `TurnStarted/Finished/Cancelled`, `BargeInDetected`, plus
+  `ModelDownloadProgress/Completed/Failed` and `EngineStarted/Stopped`. An
+  initial `snapshot` message on connect means clients never poll for state.
+  Client → server control is REST, not WebSocket messages (see `docs/API.md`).
+- **REST** (`/api/v1`): settings (get/put/patch/validate/reset + JSON Schema),
+  models (list/info/download/remove/activate), diagnostics (`RuntimeSnapshot`),
+  plugins (list/enable/disable/reload), conversation (history/current/
+  interrupt/cancel/clear/export/import), engine (status/readiness/start/stop),
+  system/health. Full endpoint map in `docs/API.md`; OpenAPI/Swagger UI is
+  generated automatically at `/docs`.
 - Audio I/O stays in the engine process (server owns the sound devices); frontends
   only render state. This keeps the web UI trivial and audio latency out of the browser.
+- The engine does not start when the server process starts — `POST
+  /api/v1/engine/start` is explicit, so `eva serve` never opens a microphone
+  or loads models as a side effect of being run.
 
 ## 9. Quality & testing strategy
 

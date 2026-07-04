@@ -48,7 +48,7 @@ class TurnFinished(Event):
 
 class TurnCancelled(Event):
     epoch: int
-    reason: Literal["barge-in", "superseded", "shutdown"]
+    reason: Literal["barge-in", "superseded", "shutdown", "manual"]
 
 
 # ── Capture / ASR ──
@@ -121,6 +121,44 @@ class TtsFinished(Event):
 
 class StateChanged(Event):
     state: Literal["idle", "listening", "thinking", "speaking"]
+
+
+# ── Model management (platform API) ──
+
+
+class ModelDownloadProgress(Event):
+    model_id: str
+    filename: str
+    bytes_done: int
+    bytes_total: int
+
+
+class ModelDownloadCompleted(Event):
+    model_id: str
+
+
+class ModelDownloadFailed(Event):
+    model_id: str
+    error: str
+
+
+# ── Engine lifecycle (platform API) ──
+
+
+class EngineStarted(Event):
+    pass
+
+
+class EngineStopped(Event):
+    pass
+
+
+class ErrorOccurred(Event):
+    """Surfaced to clients for errors that happen outside a specific turn
+    (e.g. a background model download failure)."""
+
+    message: str
+    context: str = ""
 
 
 class EventBus:

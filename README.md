@@ -36,6 +36,11 @@ Completed milestones:
 - **M2 – Streaming Pipeline** (streaming speech recognition, language model, and speech
   synthesis with turn management and cancellation; `eva run` provides a spoken
   conversation from the command line)
+- **M2.5 – Production Hardening** (persisted configuration, model presets,
+  multilingual foundation, developer diagnostics)
+- **M2.6 – Platform API** (FastAPI + WebSocket backend at `eva serve` — the
+  CLI, and eventually the desktop and web apps, are all clients of the same
+  engine; see [docs/API.md](docs/API.md))
 
 Next milestone:
 

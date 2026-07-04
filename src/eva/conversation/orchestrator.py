@@ -143,9 +143,29 @@ class Orchestrator:
     def current_epoch(self) -> int:
         return self._controller.epoch
 
+    @property
+    def history(self) -> ConversationHistory:
+        """Read/write access for the platform API (export/import/clear)."""
+        return self._history
+
     def _set_state(self, state: str) -> None:
         self._state = state
         self._bus.publish(StateChanged(state=state))
+
+    # ── external control (platform API — same event loop as run()) ──
+
+    async def interrupt(self) -> bool:
+        """Stop the current turn immediately (API equivalent of voice barge-in).
+
+        Used for both the API's "interrupt" and "cancel" actions — there is
+        only one way to stop a turn in this FSM; both names describe the same
+        operation from the caller's perspective. Returns False if nothing was
+        in flight.
+        """
+        if self._turn_task is None or self._turn_task.done():
+            return False
+        await self._cancel_turn("manual")
+        return True
 
     # ── input bridge (called from the capture thread) ──
 
