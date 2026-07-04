@@ -73,8 +73,16 @@ class AudioSystem:
         self.stream.stop()
 
     def say(self, pcm: npt.NDArray[np.int16]) -> None:
-        """Queue PCM for playback (16 kHz mono int16)."""
+        """Queue one PCM chunk for playback (16 kHz mono int16).
+
+        Does not flush the trailing partial frame — call `finish_utterance()`
+        once after the last chunk of an utterance so consecutive chunks (ADR-018
+        streaming synthesis) join without a silence pad at each boundary.
+        """
         self.playback.enqueue(pcm)
+
+    def finish_utterance(self) -> None:
+        """Flush the trailing partial frame after the last chunk of an utterance."""
         self.playback.flush_pending()
 
     def stop_speaking(self) -> None:

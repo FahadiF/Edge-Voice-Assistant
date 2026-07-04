@@ -167,6 +167,13 @@ class ConversationSettings(_Section):
     sentence_max_chars: Annotated[int, Field(ge=50, le=2000)] = Field(
         350, description="Force a speakable split if generation runs on without punctuation"
     )
+    first_sentence_min_chars: Annotated[int, Field(ge=1, le=200)] = Field(
+        6,
+        description=(
+            "Minimum length for the first spoken segment of a turn only (M3: lower than "
+            "sentence_min_chars to start audio sooner; later segments use sentence_min_chars)"
+        ),
+    )
 
 
 # ──────────────────────── Server / UI / Developer ────────────────────────

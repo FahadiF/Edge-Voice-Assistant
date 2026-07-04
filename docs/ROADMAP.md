@@ -74,12 +74,40 @@ clean-environment smoke test passed (FastAPI/uvicorn/websockets are base
 dependencies with universal wheels — no clean-install regression); `eva
 serve` verified as a real subprocess answering HTTP + OpenAPI requests.
 
-## M3 — Barge-in complete (product priority #1)
-Epoch cancellation wired through every stage (LLM abort, TTS cancel, playback ramp,
-buffer retention of the interrupting speech). Repeated-interruption stress tests,
-race-condition test suite, half-duplex + push-to-talk fallbacks.
-**Exit:** "No, stop" mid-reply audibly stops playback < 150 ms, the utterance is
-transcribed without repetition, and 20 consecutive rapid interruptions leave a clean state.
+## M3 — Natural Voice Conversation ✅ (completed 2026-07-04)
+Not a feature milestone — a latency and interruption-quality milestone. Pipeline
+inspection found the dominant TTFA cost was Kokoro synthesizing an entire sentence
+before any audio reached the speaker, which was also the largest gap in barge-in
+responsiveness (no cancellation checkpoint mid-synthesis). ADR-018 adds streaming
+TTS synthesis (`TTSEngine.synthesize_stream()`, additive/optional, default falls
+back to one chunk via `synthesize()`); `KokoroTTS` implements it via kokoro-onnx's
+native `create_stream()`. The orchestrator now plays audio chunk-by-chunk with an
+epoch check between chunks, closing the TTS-blocking gap in barge-in. Also: a
+lower first-sentence chunking threshold (earlier first sound), bounded/backpressured
+token and sentence queues (no unnecessary buffering), a measured barge-in
+audible-stop-latency metric (`BargeInLatencyMeasured`), the previously-defined-
+but-never-emitted `SpeechFinished` event now published, richer runtime diagnostics
+(queue depths, playback buffer seconds, barge-in count/latency — all additive to
+`RuntimeSnapshot`, no new API endpoints per ADR-017), and Ctrl+C now exits cleanly
+at every stage of `eva run` (model loading, audio startup, active conversation) and
+every other CLI command via a top-level backstop.
+Speculative LLM generation on unconfirmed partial transcripts was considered for
+further TTFA reduction and explicitly deferred to M4+: it would add a second
+speculative-cancellation path in the same milestone hardening the existing one —
+worse risk/reward during a hardening pass.
+**Exit met (automated):** 291 tests total (+27), including a 20-consecutive-
+rapid-interruption stress test, double-barge-in and zero-delay-burst race tests,
+bounded-queue backpressure tests (including a tight-bounds/short-timeout crash
+guard), and a chunk-boundary playback-smoothness test proving streamed chunks
+join without audible gaps. Full quality gate (ruff, mypy strict, pytest) green.
+**Not yet exit-tested (needs the reference machine, not reproducible in this
+environment):** the literal "<150 ms audible stop" and "20 consecutive real-mic
+interruptions" targets, which need a real microphone/speaker and a stopwatch or
+audio-level probe — the automated stress tests validate the *mechanism* (epoch
+correctness, no leaks, no crashes) under adversarial timing with fake engines,
+not the physical audio latency. Run `eva bench --rounds 3` and the manual
+interruption protocol on the RTX 3060 Laptop / Ryzen 9 5900HX reference machine
+before treating M3's product-facing exit criteria as fully met.
 
 ## M4 — Conversation engine
 SQLite conversation memory, history windowing + summarization, personas/system-prompt

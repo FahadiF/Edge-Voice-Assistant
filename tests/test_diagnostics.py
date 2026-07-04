@@ -33,12 +33,17 @@ def _stub_assistant() -> SimpleNamespace:
         state="listening",
         current_epoch=1,
         pending_audio_events=0,
+        token_queue_depth=0,
+        sentence_queue_depth=0,
+        barge_in_count=2,
+        last_barge_in_latency_ms=85,
         metrics=metrics,
     )
     audio = SimpleNamespace(
         is_speaking=False,
         pipeline=SimpleNamespace(level_dbfs=-42.0),
         capture_ring=_SizedRing(),
+        playback=SimpleNamespace(queued_seconds=lambda: 0.0),
     )
     return SimpleNamespace(
         settings=settings,
@@ -77,6 +82,11 @@ class TestSnapshot:
         assert snap.last_turn is not None
         assert snap.last_turn.ttfa_ms == 900
         assert snap.recent_events == ["TurnStarted"]
+        assert snap.token_queue_depth == 0
+        assert snap.sentence_queue_depth == 0
+        assert snap.playback_queued_seconds == 0.0
+        assert snap.barge_in_count == 2
+        assert snap.last_barge_in_latency_ms == 85
 
     def test_snapshot_serializes_to_json(self) -> None:
         provider = DiagnosticsProvider(_stub_assistant())  # type: ignore[arg-type]

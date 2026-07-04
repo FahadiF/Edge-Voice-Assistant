@@ -67,6 +67,20 @@ class BargeInDetected(Event):
     epoch: int  # epoch of the *cancelled* turn
 
 
+class BargeInLatencyMeasured(Event):
+    """Audible-stop latency for a barge-in (M3 validation target: < 150 ms).
+
+    `detected_to_silent_ms` is measured from the moment the turn epoch was
+    advanced (cancellation started) to the moment playback reports silent —
+    best-effort: if a new utterance starts speaking again before the old
+    audio drains, this can read as capped/elevated rather than accurate,
+    since playback silence is observed, not epoch-tagged.
+    """
+
+    epoch: int  # epoch of the *cancelled* turn
+    detected_to_silent_ms: int
+
+
 class PartialTranscript(Event):
     epoch: int
     text: str

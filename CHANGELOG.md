@@ -6,6 +6,76 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — M3: Natural Voice Conversation
+
+A latency/interruption-quality milestone, not a feature milestone. Pipeline
+inspection (see `docs/adr/ADR-018-tts-streaming-synthesis.md`) found the
+~0.9-2.0 s time-to-first-audio was dominated by Kokoro synthesizing an entire
+sentence before any audio reached the speaker — the same call was also the
+largest gap in barge-in responsiveness, since it gave the pipeline no
+cancellation checkpoint mid-synthesis.
+
+**Added**
+- ADR-018 + `TTSEngine.synthesize_stream()`: an additive, non-abstract port
+  method (default: one chunk via `synthesize()`, so every existing adapter is
+  unaffected). `KokoroTTS` overrides it via kokoro-onnx's native
+  `create_stream()`, bridging its async generator to a dedicated event loop
+  per call. The orchestrator's `speak_worker` now plays audio chunk-by-chunk,
+  checking turn-epoch staleness between chunks — closing the single largest
+  gap in "interruption while TTS is generating."
+- `conversation.first_sentence_min_chars` setting (default 6, vs. 12 for
+  later sentences): `SentenceChunker` gains an optional `first_chunk_min_chars`
+  override so the first sentence of a turn is spoken sooner.
+- `BargeInLatencyMeasured` event: detected-to-silent latency for every
+  barge-in, measured fire-and-forget so the measurement itself never delays
+  handling the next event (e.g. a second rapid interruption).
+- `SpeechFinished` event (defined since M2, never published) now emitted when
+  an utterance ends.
+- Bounded, backpressured token/sentence queues in the orchestrator (real
+  blocking `put()`/`run_coroutine_threadsafe` backpressure, not `put_nowait` +
+  `QueueFull`) — no unnecessary buffering, no crash under a pathological
+  long reply or a stalled consumer.
+- `RuntimeSnapshot` gains `token_queue_depth`, `sentence_queue_depth`,
+  `playback_queued_seconds`, `barge_in_count`, `last_barge_in_latency_ms` —
+  additive fields, no new API endpoints (ADR-017), consumable by the future
+  desktop/web UI's diagnostics page today.
+- `eva bench` reports a real TTFA breakdown (`asr_ms`/`ttft_ms`/
+  `first_chunk_ms`/`ttfa_ms`) measured through the same `synthesize_stream()`
+  path the live pipeline uses, not a full-sentence-blocking estimate.
+- Ctrl+C now exits cleanly at every stage of `eva run` — model loading, audio
+  startup, and an active conversation all funnel through one try/finally that
+  always calls `assistant.stop()`; every other CLI command gets a top-level
+  backstop in `main()` (exit code 130, no traceback).
+
+**Tests**
+- +27 tests (291 total): TTS streaming (ABC default fallback, Kokoro
+  multi-chunk streaming, early-stop cleanup simulating barge-in, error
+  wrapping), first-chunk chunking threshold, playback chunk-boundary gap
+  regression (with a contrast test proving the old per-chunk-flush behavior
+  *would* have gapped), bounded-queue backpressure (including a tight-bounds/
+  short-timeout crash guard), rapid double-barge-in, a 20-consecutive-
+  interruption stress test plus a zero-delay-burst variant, benchmark TTFA
+  breakdown, diagnostics field extensions, and CLI/voice-loop Ctrl+C handling
+  at every stage.
+
+**Deferred (documented, not implemented)**
+- Speculative LLM generation on unconfirmed partial transcripts: would cut
+  TTFA further but adds a second speculative-cancellation path at the same
+  time this milestone hardens the existing one — worse risk/reward during a
+  hardening pass. Candidate for M4+.
+- ASR remains fully blocking per utterance (CTranslate2 has no per-token
+  abort hook) — an accepted, bounded limitation (typically 200-400 ms),
+  unchanged by this milestone.
+
+**Not yet exit-tested**
+- The literal "<150 ms audible stop" and "20 consecutive real-mic
+  interruptions" targets need a real microphone/speaker and a stopwatch or
+  audio-level probe on the reference machine (RTX 3060 Laptop, Ryzen 9
+  5900HX) — not reproducible in this development environment. The automated
+  stress tests validate the cancellation *mechanism* (epoch correctness, no
+  leaked tasks, no crashes) under adversarial timing with fake engines, not
+  physical audio latency.
+
 ### 2026-07-04 — CI fix: import order + pre-commit hooks
 
 **Fixed (release blocker)**

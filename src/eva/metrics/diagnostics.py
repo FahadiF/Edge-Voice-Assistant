@@ -80,11 +80,16 @@ class RuntimeSnapshot(BaseModel):
     pending_audio_events: int
     capture_ring_depth: int
     capture_frames_dropped: int
+    token_queue_depth: int
+    sentence_queue_depth: int
+    playback_queued_seconds: float
     # Performance
     resources: ResourceUsage
-    last_turn: TurnMetrics | None
+    last_turn: TurnMetrics | None  # per-turn stage timing: asr_ms/ttft_ms/tts_first_ms/ttfa_ms
     turns_completed: int
     metrics_summary: str
+    barge_in_count: int
+    last_barge_in_latency_ms: int | None
     # Events
     recent_events: list[str]  # newest last
 
@@ -110,10 +115,15 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
         pending_audio_events=0,
         capture_ring_depth=0,
         capture_frames_dropped=0,
+        token_queue_depth=0,
+        sentence_queue_depth=0,
+        playback_queued_seconds=0.0,
         resources=sample_resources(),
         last_turn=None,
         turns_completed=0,
         metrics_summary="No completed turns.",
+        barge_in_count=0,
+        last_barge_in_latency_ms=None,
         recent_events=[],
     )
 
@@ -144,9 +154,14 @@ class DiagnosticsProvider:
             pending_audio_events=a.orchestrator.pending_audio_events,
             capture_ring_depth=len(a.audio.capture_ring),
             capture_frames_dropped=a.audio.capture_ring.dropped,
+            token_queue_depth=a.orchestrator.token_queue_depth,
+            sentence_queue_depth=a.orchestrator.sentence_queue_depth,
+            playback_queued_seconds=a.audio.playback.queued_seconds(),
             resources=sample_resources(),
             last_turn=turns[-1] if turns else None,
             turns_completed=sum(1 for t in turns if not t.cancelled),
             metrics_summary=a.orchestrator.metrics.summary(),
+            barge_in_count=a.orchestrator.barge_in_count,
+            last_barge_in_latency_ms=a.orchestrator.last_barge_in_latency_ms,
             recent_events=[e.name for e in a.bus.recent_events()],
         )

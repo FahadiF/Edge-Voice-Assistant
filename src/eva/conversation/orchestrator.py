@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import AsyncGenerator, Iterator
 from typing import Protocol
 
 from eva.asr.base import ASREngine
@@ -49,6 +50,7 @@ from eva.conversation.language import (
 )
 from eva.core.events import (
     BargeInDetected,
+    BargeInLatencyMeasured,
     EventBus,
     FinalTranscript,
     LlmFinished,
@@ -56,6 +58,7 @@ from eva.core.events import (
     LlmStarted,
     LlmToken,
     PartialTranscript,
+    SpeechFinished,
     SpeechStarted,
     StateChanged,
     TtsAudioReady,
@@ -73,6 +76,11 @@ from eva.tts.base import TTSEngine
 logger = logging.getLogger(__name__)
 
 _PLAYBACK_POLL_S = 0.05
+_BARGE_IN_POLL_S = 0.005  # fine-grained: the target itself is < 150 ms
+_BARGE_IN_LATENCY_TIMEOUT_S = 1.0  # safety cap; a hit means "unmeasured", not "slow"
+_TOKEN_QUEUE_MAXSIZE = 256  # bounds memory on a pathological long reply
+_SENTENCE_QUEUE_MAXSIZE = 32
+_QUEUE_BACKPRESSURE_TIMEOUT_S = 5.0  # cross-thread put() safety cap; never hit in practice
 
 
 class AudioOutput(Protocol):
@@ -80,10 +88,45 @@ class AudioOutput(Protocol):
 
     def say(self, pcm: Frame) -> None: ...
 
+    def finish_utterance(self) -> None: ...
+
     def stop_speaking(self) -> None: ...
 
     @property
     def is_speaking(self) -> bool: ...
+
+
+def _pull_or_none(it: Iterator[Frame]) -> Frame | None:
+    try:
+        return next(it)
+    except StopIteration:
+        return None
+
+
+def _close_iter(it: Iterator[Frame]) -> None:
+    close = getattr(it, "close", None)
+    if close is not None:
+        close()
+
+
+async def _drive_stream(sync_iter: Iterator[Frame]) -> AsyncGenerator[Frame, None]:
+    """Advance a blocking generator one item at a time without blocking the loop.
+
+    `next()` runs in the default executor per item, so a slow chunk (TTS
+    synthesis) never stalls the event loop. The underlying generator is always
+    closed on exit — normal exhaustion, an exception, or the caller stopping
+    early (e.g. on barge-in) — so an engine's cleanup (ADR-018: KokoroTTS
+    closes its dedicated event loop) always runs promptly.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            chunk = await loop.run_in_executor(None, _pull_or_none, sync_iter)
+            if chunk is None:
+                return
+            yield chunk
+    finally:
+        await loop.run_in_executor(None, _close_iter, sync_iter)
 
 
 class Orchestrator:
@@ -124,6 +167,11 @@ class Orchestrator:
         self._turn_task: asyncio.Task[None] | None = None
         self._partial_task: asyncio.Task[None] | None = None
         self._partial_busy = False
+        self._barge_in_count = 0
+        self._last_barge_in_latency_ms: int | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._current_tokens_queue: asyncio.Queue[str | None] | None = None
+        self._current_sentences_queue: asyncio.Queue[str | None] | None = None
 
     @property
     def metrics(self) -> MetricsCollector:
@@ -142,6 +190,26 @@ class Orchestrator:
     @property
     def current_epoch(self) -> int:
         return self._controller.epoch
+
+    @property
+    def barge_in_count(self) -> int:
+        """Number of barge-ins handled this session (diagnostics)."""
+        return self._barge_in_count
+
+    @property
+    def last_barge_in_latency_ms(self) -> int | None:
+        """Most recent detected-to-silent barge-in latency (diagnostics)."""
+        return self._last_barge_in_latency_ms
+
+    @property
+    def token_queue_depth(self) -> int:
+        """Pending LLM tokens not yet consumed by the chunker (diagnostics)."""
+        return self._current_tokens_queue.qsize() if self._current_tokens_queue else 0
+
+    @property
+    def sentence_queue_depth(self) -> int:
+        """Pending sentences not yet picked up by the speak worker (diagnostics)."""
+        return self._current_sentences_queue.qsize() if self._current_sentences_queue else 0
 
     @property
     def history(self) -> ConversationHistory:
@@ -194,7 +262,18 @@ class Orchestrator:
                 await self._dispatch(event)
         finally:
             await self._cancel_turn("shutdown")
+            await self._drain_background_tasks()
             self._set_state("idle")
+
+    async def _drain_background_tasks(self) -> None:
+        """Cancel any still-running fire-and-forget tasks (e.g. a barge-in
+        latency measurement in flight) so shutdown never leaves orphans."""
+        tasks = list(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     async def _dispatch(self, event: SegmenterEvent) -> None:
         match event:
@@ -203,7 +282,10 @@ class Orchestrator:
             case BargeIn():
                 self._bus.publish(BargeInDetected(epoch=self._controller.epoch))
                 await self._cancel_turn("barge-in")
-            case UtteranceEnd(audio=audio):
+            case UtteranceEnd(audio=audio, speech_ms=speech_ms):
+                self._bus.publish(
+                    SpeechFinished(epoch=self._controller.epoch, duration_ms=speech_ms)
+                )
                 # A new utterance always supersedes whatever is in flight
                 # (covers half-duplex mode, where no BargeIn event exists).
                 if self._turn_task is not None and not self._turn_task.done():
@@ -218,6 +300,7 @@ class Orchestrator:
     async def _cancel_turn(self, reason: str) -> None:
         stale_epoch = self._controller.epoch
         self._controller.advance()  # all in-flight work is now stale
+        cancel_started = time.perf_counter()
         self._audio.stop_speaking()
         task, self._turn_task = self._turn_task, None
         if task is not None and not task.done():
@@ -226,6 +309,25 @@ class Orchestrator:
                 await task
             self._bus.publish(TurnCancelled(epoch=stale_epoch, reason=reason))
             self._set_state("listening")
+        if reason == "barge-in":
+            # Fire-and-forget: measuring silence must never delay processing
+            # the next event (e.g. a second rapid barge-in). A strong
+            # reference is kept until completion so the task cannot be
+            # garbage-collected mid-flight.
+            measure_task = asyncio.create_task(
+                self._measure_barge_in_latency(stale_epoch, cancel_started)
+            )
+            self._background_tasks.add(measure_task)
+            measure_task.add_done_callback(self._background_tasks.discard)
+
+    async def _measure_barge_in_latency(self, epoch: int, started: float) -> None:
+        deadline = started + _BARGE_IN_LATENCY_TIMEOUT_S
+        while self._audio.is_speaking and time.perf_counter() < deadline:
+            await asyncio.sleep(_BARGE_IN_POLL_S)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        self._barge_in_count += 1
+        self._last_barge_in_latency_ms = latency_ms
+        self._bus.publish(BargeInLatencyMeasured(epoch=epoch, detected_to_silent_ms=latency_ms))
 
     # ── partial transcription (best-effort, never blocks the pipeline) ──
 
@@ -267,6 +369,9 @@ class Orchestrator:
         def elapsed_ms() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
+        self._current_tokens_queue = None
+        self._current_sentences_queue = None
+
         # ── ASR ──
         result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
         asr_ms = elapsed_ms()
@@ -280,13 +385,22 @@ class Orchestrator:
         # ── LLM producer thread → token queue ──
         self._bus.publish(LlmStarted(epoch=epoch))
         loop = asyncio.get_running_loop()
-        tokens: asyncio.Queue[str | None] = asyncio.Queue()
+        tokens: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_TOKEN_QUEUE_MAXSIZE)
+        self._current_tokens_queue = tokens
         messages = self._history.messages(user_text)
 
         def produce() -> None:
             def push(item: str | None) -> None:
+                # A blocking put (not put_nowait) applies real backpressure to
+                # the producer thread when the bounded queue is full, instead
+                # of raising QueueFull; a timeout guards against hanging this
+                # thread forever if the loop stops draining (e.g. shutdown).
                 with contextlib.suppress(RuntimeError):
-                    loop.call_soon_threadsafe(tokens.put_nowait, item)
+                    future = asyncio.run_coroutine_threadsafe(tokens.put(item), loop)
+                    try:
+                        future.result(timeout=_QUEUE_BACKPRESSURE_TIMEOUT_S)
+                    except TimeoutError:
+                        logger.warning("Token queue backpressure timeout; dropping token")
 
             try:
                 for token in self._llm.stream(
@@ -301,7 +415,8 @@ class Orchestrator:
         producer = asyncio.create_task(asyncio.to_thread(produce))
 
         # ── speak worker: sentences → TTS → playback ──
-        sentences: asyncio.Queue[str | None] = asyncio.Queue()
+        sentences: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_SENTENCE_QUEUE_MAXSIZE)
+        self._current_sentences_queue = sentences
         first_audio_ms = 0
         tts_first_ms = 0
 
@@ -319,19 +434,24 @@ class Orchestrator:
                     self._bus.publish(TtsStarted(epoch=epoch))
                     self._set_state("speaking")
                 synth_start = time.perf_counter()
-                pcm = await asyncio.to_thread(
-                    self._tts.synthesize,
-                    sentence,
-                    voice=self._voice,
-                    speed=self._settings.tts.speed,
+                sync_gen = self._tts.synthesize_stream(
+                    sentence, voice=self._voice, speed=self._settings.tts.speed
                 )
-                if self._controller.is_stale(epoch):
-                    continue
-                if first_audio_ms == 0:
-                    tts_first_ms = int((time.perf_counter() - synth_start) * 1000)
-                    first_audio_ms = elapsed_ms()
-                    self._bus.publish(TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms))
-                self._audio.say(pcm)
+                try:
+                    async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
+                        async for chunk in chunks:
+                            if self._controller.is_stale(epoch):
+                                break  # aclosing() shuts down _drive_stream, which
+                                # closes sync_gen (KokoroTTS: its event loop too)
+                            if first_audio_ms == 0:
+                                tts_first_ms = int((time.perf_counter() - synth_start) * 1000)
+                                first_audio_ms = elapsed_ms()
+                                self._bus.publish(
+                                    TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms)
+                                )
+                            self._audio.say(chunk)
+                finally:
+                    self._audio.finish_utterance()
 
         speaker = asyncio.create_task(speak_worker())
 
@@ -339,6 +459,7 @@ class Orchestrator:
         chunker = SentenceChunker(
             min_chars=self._settings.conversation.sentence_min_chars,
             max_chars=self._settings.conversation.sentence_max_chars,
+            first_chunk_min_chars=self._settings.conversation.first_sentence_min_chars,
         )
         reply_parts: list[str] = []
         token_count = 0
@@ -358,14 +479,16 @@ class Orchestrator:
                 self._bus.publish(LlmToken(epoch=epoch, token=token))
                 for sentence in chunker.feed(token):
                     self._bus.publish(LlmSentence(epoch=epoch, text=sentence))
-                    sentences.put_nowait(sentence)
+                    await sentences.put(sentence)
             tail = chunker.flush()
             if tail is not None and self._controller.is_current(epoch):
                 self._bus.publish(LlmSentence(epoch=epoch, text=tail))
-                sentences.put_nowait(tail)
+                await sentences.put(tail)
         finally:
-            sentences.put_nowait(None)
+            await sentences.put(None)
             await asyncio.gather(producer, speaker)
+            self._current_tokens_queue = None
+            self._current_sentences_queue = None
 
         llm_ms = int((time.perf_counter() - llm_start) * 1000)
         reply = "".join(reply_parts).strip()

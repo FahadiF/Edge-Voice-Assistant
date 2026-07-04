@@ -554,6 +554,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except EvaError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # `run` handles Ctrl+C with its own cleanup/summary; this is the
+        # backstop for every other command (bench, downloads, wizard
+        # prompts, ...) so none of them ever surface a raw traceback.
+        print("\nCancelled.", file=sys.stderr)
+        return 130  # conventional exit code for SIGINT
     return result
 
 

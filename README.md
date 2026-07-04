@@ -41,10 +41,13 @@ Completed milestones:
 - **M2.6 – Platform API** (FastAPI + WebSocket backend at `eva serve` — the
   CLI, and eventually the desktop and web apps, are all clients of the same
   engine; see [docs/API.md](docs/API.md))
+- **M3 – Natural Voice Conversation** (streaming TTS synthesis for lower
+  time-to-first-audio and faster interruption, richer runtime diagnostics,
+  clean shutdown on Ctrl+C at every stage)
 
 Next milestone:
 
-**M3 – Barge-In** (end-to-end voice interruption)
+**M4 – Conversation Engine** (persistent memory, personas, multiple voices)
 
 See the project roadmap for implementation progress.
 

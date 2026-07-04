@@ -73,6 +73,7 @@ After that, every engine event is forwarded as it happens:
 {"type": "TtsAudioReady", "data": {"epoch": 3, "ttfa_ms": 1180}}
 {"type": "StateChanged", "data": {"state": "speaking"}}
 {"type": "TurnCancelled", "data": {"epoch": 3, "reason": "barge-in"}}
+{"type": "BargeInLatencyMeasured", "data": {"epoch": 3, "detected_to_silent_ms": 62}}
 {"type": "ModelDownloadProgress", "data": {"model_id": "...", "bytes_done": ..., "bytes_total": ...}}
 ```
 

@@ -65,7 +65,9 @@ States: `IDLE → LISTENING → THINKING → SPEAKING → (LISTENING | IDLE)`
 3. `barge_in()` bumps the epoch. This single atomic action:
    - ramps playback down over ~40 ms (no click) and flushes the playback queue,
    - cancels the LLM token stream (asyncio cancellation → llama.cpp abort callback),
-   - cancels pending TTS synthesis,
+   - cancels pending TTS synthesis at the next streamed chunk boundary (M3/ADR-018:
+     `TTSEngine.synthesize_stream()` yields sub-sentence chunks, so a stale turn is
+     dropped mid-sentence rather than only between sentences),
    - transitions to `LISTENING` **retaining the audio already captured** (ring buffer
      includes the pre-trigger frames, so "No, stop" is not lost — unlike the thesis).
 4. Every consumer drops any item whose epoch < current. No stale replies can ever
@@ -90,7 +92,10 @@ user stops speaking ──► endpoint detected (VAD, ~300–500 ms adaptive)
 - **LLM → TTS**: a *sentence chunker* consumes the token stream and emits speakable
   segments (sentence or clause boundaries, with a min/max length policy) to TTS.
 - **TTS → playback**: synthesized segments queue into the playback ring; segment N+1
-  synthesizes while N plays.
+  synthesizes while N plays. Since M3 (ADR-018), synthesis itself is chunked below
+  the sentence level where the engine supports it (Kokoro via kokoro-onnx's native
+  phoneme-batch streaming) — the first audio for a sentence reaches the speaker
+  after the first chunk, not the whole sentence.
 - Adaptive endpointing: the fixed ~1 s silence wait is replaced by a shorter base
   window that lengthens when the partial transcript looks incomplete (trailing
   conjunction/comma heuristic) — natural pauses without premature cut-offs.

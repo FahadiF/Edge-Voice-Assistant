@@ -80,3 +80,30 @@ def test_multibyte_and_cjk_punctuation() -> None:
     c = SentenceChunker(min_chars=2)
     segments = feed_all(c, "你好。今天怎么样？")  # noqa: RUF001
     assert len(segments) >= 1
+
+
+def test_first_chunk_min_chars_applies_only_to_first_segment() -> None:
+    # min_chars=12 would defer "Hi." into the next sentence; a lower
+    # first_chunk_min_chars lets the first segment fire on its own so the
+    # first sound reaches the speaker sooner (M3/ADR-018).
+    c = SentenceChunker(min_chars=12, first_chunk_min_chars=2)
+    segments = feed_all(c, "Hi. It works fine now. Another sentence follows.")
+    assert segments[0] == "Hi."
+    # Second sentence is short too, but first_chunk_min_chars no longer
+    # applies — it falls back to the normal min_chars threshold.
+    assert segments[1] == "It works fine now."
+
+
+def test_first_chunk_min_chars_none_behaves_like_before() -> None:
+    c = SentenceChunker(min_chars=12, first_chunk_min_chars=None)
+    segments = feed_all(c, "Hi. It works fine now.")
+    assert segments == ["Hi. It works fine now."]
+
+
+def test_reset_restores_first_chunk_threshold() -> None:
+    c = SentenceChunker(min_chars=12, first_chunk_min_chars=2)
+    feed_all(c, "Hi. ")
+    c.reset()
+    segments = feed_all(c, "Hi. It works fine now.")
+    # After reset, the next turn's first segment is eligible again.
+    assert segments[0] == "Hi."

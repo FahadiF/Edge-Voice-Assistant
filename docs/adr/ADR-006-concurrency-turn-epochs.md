@@ -32,3 +32,22 @@ work kept running and blocked the new turn.
   tested with fake adapters, including double-interrupt races.
 - Free-threaded Python or subprocess isolation can be revisited later without
   changing the port contracts.
+
+## Amendment (M3, 2026-07-04): chunk-boundary cancellation + no separate `processing` state
+
+- **Cancellation checkpoint granularity increased for TTS.** "Per-sentence TTS
+  granularity" above described the only checkpoint that existed at the time —
+  cancellation checked once per sentence, because `TTSEngine.synthesize()` was a
+  single blocking call per sentence with nothing in between. ADR-018 adds
+  `synthesize_stream()`; the speak worker now checks epoch staleness **between
+  each streamed chunk**, not just between sentences. This is the same mechanism
+  described here (drop stale-epoch items at the next boundary), just with more
+  boundaries available for TTS specifically.
+- **No separate `processing` state was added.** M3 considered whether the
+  `idle/listening/thinking/speaking` FSM needed a fifth `processing` state for
+  "ASR done, LLM generating." Reviewing the code: `thinking` already covers
+  exactly that window (`_set_state("thinking")` is entered right after a turn
+  starts and holds through ASR and LLM generation until the first TTS chunk
+  flips it to `speaking`). A separate `processing` state would carry no new
+  information and would duplicate `thinking` — rejected as unnecessary
+  complexity, not an oversight.

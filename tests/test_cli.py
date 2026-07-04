@@ -18,6 +18,21 @@ def test_diagnose_command(capsys: pytest.CaptureFixture[str]) -> None:
         assert heading in out
 
 
+def test_keyboard_interrupt_exits_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """M3: Ctrl+C during any command must exit with a clean message and a
+    conventional exit code, never an uncaught traceback."""
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("eva.cli.detect_hardware", _boom)
+    code = main(["diagnose"])
+    assert code == 130
+    assert "Cancelled" in capsys.readouterr().err
+
+
 def test_no_command_errors() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main([])

@@ -4,6 +4,10 @@ Uses TTS to synthesize a spoken question, runs it through ASR → LLM → TTS
 exactly like a live turn, and reports per-stage timings. Because the input
 audio is generated, results are reproducible and comparable across models,
 quantizations, and hardware — the foundation the M7 benchmark reports build on.
+
+The first-reply-sentence stage uses `synthesize_stream()` (ADR-018), the same
+call the live orchestrator makes, so `first_chunk_ms`/`ttfa_ms` here reflect
+the actual streaming benefit rather than a full-sentence-blocking estimate.
 """
 
 from __future__ import annotations
@@ -11,9 +15,11 @@ from __future__ import annotations
 import logging
 import time
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict
 
 from eva.asr.base import ASREngine
+from eva.audio.frames import Frame
 from eva.conversation.chunker import SentenceChunker
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.tts.base import TTSEngine
@@ -36,11 +42,13 @@ class PipelineReport(BaseModel):
     transcript: str
     reply: str
     stages: tuple[StageTiming, ...]
+    asr_ms: int
     ttft_ms: int
-    ttfa_ms: int  # simulated: ASR + LLM-to-first-sentence + first-sentence TTS
+    first_chunk_ms: int  # first-sentence synthesis: time to first streamed chunk
+    ttfa_ms: int  # simulated: ASR + LLM-to-first-sentence + first TTS chunk
     tokens: int
     tokens_per_s: float
-    tts_rtf: float  # synthesis time / audio duration (lower is better)
+    tts_rtf: float  # full first-sentence synthesis time / audio duration
 
     def render(self) -> str:
         lines = [
@@ -54,7 +62,9 @@ class PipelineReport(BaseModel):
         lines.extend(f"{s.name:<28} {s.duration_ms:>6} ms  {s.detail}" for s in self.stages)
         lines += [
             "",
+            f"{'ASR':<28} {self.asr_ms:>6} ms",
             f"{'Time to first token':<28} {self.ttft_ms:>6} ms",
+            f"{'Time to first TTS chunk':<28} {self.first_chunk_ms:>6} ms",
             f"{'Time to first audio (est.)':<28} {self.ttfa_ms:>6} ms",
             f"{'LLM speed':<28} {self.tokens_per_s:>6.1f} tok/s ({self.tokens} tokens)",
             f"{'TTS real-time factor':<28} {self.tts_rtf:>6.2f}",
@@ -127,10 +137,26 @@ class PipelineBenchmark:
         stages.append(StageTiming(name="LLM (full generation)", duration_ms=llm_ms))
         stages.append(StageTiming(name="LLM (first sentence ready)", duration_ms=first_sentence_ms))
 
-        # 4. TTS of the first reply sentence (the TTFA-critical synthesis)
-        with timed("TTS (first reply sentence)", f'"{first_sentence[:40]}…"'):
-            first_pcm = self._tts.synthesize(first_sentence, voice=self._voice)
-        tts_first_ms = stages[-1].duration_ms
+        # 4. TTS of the first reply sentence — the TTFA-critical stage. Uses
+        #    synthesize_stream() (ADR-018), the same call the live orchestrator
+        #    makes, so first_chunk_ms reflects the real streaming benefit.
+        chunk_start = time.perf_counter()
+        chunk_parts: list[Frame] = []
+        first_chunk_ms = 0
+        for chunk in self._tts.synthesize_stream(first_sentence, voice=self._voice):
+            if not chunk_parts:
+                first_chunk_ms = int((time.perf_counter() - chunk_start) * 1000)
+            chunk_parts.append(chunk)
+        tts_total_ms = int((time.perf_counter() - chunk_start) * 1000)
+        stages.append(
+            StageTiming(
+                name="TTS (first chunk ready)",
+                duration_ms=first_chunk_ms,
+                detail=f'"{first_sentence[:40]}…"',
+            )
+        )
+        stages.append(StageTiming(name="TTS (full first sentence)", duration_ms=tts_total_ms))
+        first_pcm = np.concatenate(chunk_parts) if chunk_parts else np.zeros(0, dtype=np.int16)
         first_audio_secs = max(first_pcm.shape[0] / 16_000, 1e-6)
 
         asr_ms = stages[1].duration_ms
@@ -139,11 +165,13 @@ class PipelineBenchmark:
             transcript=transcript,
             reply=reply,
             stages=tuple(stages),
+            asr_ms=asr_ms,
             ttft_ms=asr_ms + ttft_ms,
-            ttfa_ms=asr_ms + first_sentence_ms + tts_first_ms,
+            first_chunk_ms=first_chunk_ms,
+            ttfa_ms=asr_ms + first_sentence_ms + first_chunk_ms,
             tokens=tokens,
             tokens_per_s=tokens / (llm_ms / 1000) if llm_ms else 0.0,
-            tts_rtf=(tts_first_ms / 1000) / first_audio_secs,
+            tts_rtf=(tts_total_ms / 1000) / first_audio_secs,
         )
 
 

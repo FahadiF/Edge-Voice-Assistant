@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable, Iterator
 
 import numpy as np
+import pytest
 
 from eva.asr.base import ASREngine, TranscriptionResult
 from eva.audio.frames import Frame
@@ -19,11 +20,13 @@ from eva.audio.segmenter import BargeIn, UtteranceEnd, UtteranceProgress
 from eva.config.settings import Settings
 from eva.conversation.orchestrator import Orchestrator
 from eva.core.events import (
+    BargeInLatencyMeasured,
     Event,
     EventBus,
     LlmFinished,
     LlmStarted,
     PartialTranscript,
+    SpeechFinished,
     TurnCancelled,
     TurnFinished,
 )
@@ -98,6 +101,9 @@ class FakeAudioOut:
 
     def say(self, pcm: Frame) -> None:
         self.spoken.append(pcm)
+
+    def finish_utterance(self) -> None:
+        pass
 
     def stop_speaking(self) -> None:
         self.stops += 1
@@ -179,6 +185,7 @@ class TestNormalTurn:
             events = await drive(orch, bus, script)
             order = names(events)
             for expected in (
+                "SpeechFinished",
                 "TurnStarted",
                 "FinalTranscript",
                 "LlmStarted",
@@ -191,6 +198,7 @@ class TestNormalTurn:
                 "TurnFinished",
             ):
                 assert expected in order, f"missing {expected} in {order}"
+            assert order.index("SpeechFinished") < order.index("TurnStarted")
             assert order.index("FinalTranscript") < order.index("LlmStarted")
             assert order.index("LlmStarted") < order.index("TtsStarted")
             # Audio actually reached the output.
@@ -198,6 +206,8 @@ class TestNormalTurn:
             assert tts.synthesized == ["Hello there.", "All good."]
             finished = next(e for e in events if isinstance(e, LlmFinished))
             assert finished.text == "Hello there. All good."
+            speech_finished = next(e for e in events if isinstance(e, SpeechFinished))
+            assert speech_finished.duration_ms == 800  # speech_ms from UtteranceEnd
 
         asyncio.run(scenario())
 
@@ -299,6 +309,75 @@ class TestCancellation:
 
         asyncio.run(scenario())
 
+    def test_rapid_double_barge_in_stays_clean(self) -> None:
+        """Two barge-ins fired back-to-back (e.g. a false start immediately
+        followed by the real interruption) must not crash, must not leave a
+        stale turn task running, and must settle to a clean listening state.
+        `_dispatch` serializes events one at a time, so the second BargeIn is
+        handled only once the first cancellation has fully settled — this
+        confirms that sequence is safe even with nothing left to cancel the
+        second time."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["tok "] * 100, delay_s=0.02)
+            orch, bus, audio, _ = make_orchestrator(llm=llm)
+            collected: list[Event] = []
+            q = bus.subscribe()
+
+            async def pump() -> None:
+                while True:
+                    collected.append(await q.get())
+
+            pump_task = asyncio.create_task(pump())
+            epoch_before = orch.current_epoch
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await wait_for_event(collected, LlmStarted)
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+                await asyncio.sleep(0.2)
+
+            await drive(orch, bus, script)
+            pump_task.cancel()
+
+            assert orch.current_epoch >= epoch_before + 2  # both barge-ins advanced the epoch
+            assert audio.stops >= 2
+            assert orch.state in ("listening", "idle")
+            assert orch._turn_task is None or orch._turn_task.done()
+            cancelled = [e for e in collected if isinstance(e, TurnCancelled)]
+            assert any(e.reason == "barge-in" for e in cancelled)
+
+        asyncio.run(scenario())
+
+    def test_barge_in_publishes_latency_measurement(self) -> None:
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["tok "] * 100, delay_s=0.02)
+            orch, bus, _, _ = make_orchestrator(llm=llm)
+            collected: list[Event] = []
+            q = bus.subscribe()
+
+            async def pump() -> None:
+                while True:
+                    collected.append(await q.get())
+
+            pump_task = asyncio.create_task(pump())
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await wait_for_event(collected, LlmStarted)
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+                await wait_for_event(collected, BargeInLatencyMeasured)
+
+            await drive(orch, bus, script)
+            pump_task.cancel()
+            measured = next(e for e in collected if isinstance(e, BargeInLatencyMeasured))
+            assert measured.detected_to_silent_ms >= 0
+            assert orch.barge_in_count == 1
+            assert orch.last_barge_in_latency_ms == measured.detected_to_silent_ms
+
+        asyncio.run(scenario())
+
     def test_repeated_barge_ins_stay_clean(self) -> None:
         async def scenario() -> None:
             llm = FakeLLM(tokens=["tok "] * 50, delay_s=0.01)
@@ -388,6 +467,66 @@ class TestPartials:
 
             events = await drive(orch, bus, script)
             assert not any(isinstance(e, PartialTranscript) for e in events)
+
+        asyncio.run(scenario())
+
+
+class TestQueueBackpressure:
+    def test_bounded_token_queue_delivers_every_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Shrink the token queue to force real wraparound; a slow-draining
+        consumer (slow FakeTTS-driven speak_worker) must apply backpressure
+        to the producer thread rather than lose or crash on tokens."""
+        import eva.conversation.orchestrator as orch_mod
+
+        monkeypatch.setattr(orch_mod, "_TOKEN_QUEUE_MAXSIZE", 2)
+        monkeypatch.setattr(orch_mod, "_SENTENCE_QUEUE_MAXSIZE", 1)
+
+        async def scenario() -> None:
+            tokens = [f"word{i} " for i in range(40)]
+            llm = FakeLLM(tokens=tokens)
+            orch, bus, _, _ = make_orchestrator(llm=llm)
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                for _ in range(300):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            events = await drive(orch, bus, script)
+            finished = next(e for e in events if isinstance(e, LlmFinished))
+            assert finished.tokens == len(tokens)
+            assert finished.text == "".join(tokens).strip()
+
+        asyncio.run(scenario())
+
+    def test_tight_bounds_and_short_timeout_never_crash_the_pipeline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression guard: with a 1-slot queue and a near-zero backpressure
+        timeout, the pipeline must still complete cleanly (no QueueFull
+        crash, no hang) even in the tightest configuration."""
+        import eva.conversation.orchestrator as orch_mod
+
+        monkeypatch.setattr(orch_mod, "_TOKEN_QUEUE_MAXSIZE", 1)
+        monkeypatch.setattr(orch_mod, "_QUEUE_BACKPRESSURE_TIMEOUT_S", 0.05)
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["a "] * 10)
+            orch, bus, _, _ = make_orchestrator(llm=llm)
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                for _ in range(300):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            # Must not raise/hang even though some tokens may be dropped.
+            events = await drive(orch, bus, script)
+            assert "TurnFinished" in names(events)
 
         asyncio.run(scenario())
 

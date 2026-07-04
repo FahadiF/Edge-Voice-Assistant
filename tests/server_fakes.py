@@ -75,6 +75,11 @@ class _FakeRing:
         return 0
 
 
+class _FakePlayback:
+    def queued_seconds(self) -> float:
+        return 0.0
+
+
 class FakeAudioSystem:
     """Satisfies both the orchestrator's AudioOutput protocol and the
     lifecycle/diagnostics surface `Assistant.audio` needs."""
@@ -83,11 +88,15 @@ class FakeAudioSystem:
         self.spoken: list[Frame] = []
         self.pipeline = _FakePipeline()
         self.capture_ring = _FakeRing()
+        self.playback = _FakePlayback()
         self._speaking = False
 
     # AudioOutput protocol (used by the orchestrator)
     def say(self, pcm: Frame) -> None:
         self.spoken.append(pcm)
+
+    def finish_utterance(self) -> None:
+        pass
 
     def stop_speaking(self) -> None:
         self._speaking = False

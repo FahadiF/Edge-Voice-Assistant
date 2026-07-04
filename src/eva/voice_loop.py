@@ -99,17 +99,21 @@ def _startup_banner(assistant: Assistant) -> None:
 
 
 def main_run(assistant: Assistant) -> int:
-    print("Loading models — this can take a minute on first run...")
-    assistant.preload()
-    _startup_banner(assistant)
-    assistant.start_audio()
-    print("\nReady. Speak into the microphone; interrupt any time by talking over it.")
-    print("Ctrl+C to exit.\n")
+    """Load models, start the voice loop, and always exit cleanly on Ctrl+C —
+    whether the interrupt lands during model loading, audio startup, or an
+    active conversation (M3: no stage should ever surface a raw traceback)."""
     try:
+        print("Loading models — this can take a minute on first run...")
+        assistant.preload()
+        _startup_banner(assistant)
+        assistant.start_audio()
+        print("\nReady. Speak into the microphone; interrupt any time by talking over it.")
+        print("Ctrl+C to exit.\n")
         asyncio.run(run_voice_loop(assistant))
     except KeyboardInterrupt:
-        pass
+        print("\nStopping...")
     finally:
         assistant.stop()
-        print("\n" + assistant.orchestrator.metrics.summary())
+        if assistant.orchestrator.metrics.turns:
+            print("\n" + assistant.orchestrator.metrics.summary())
     return 0
