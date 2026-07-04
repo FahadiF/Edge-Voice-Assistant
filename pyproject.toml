@@ -29,6 +29,10 @@ dependencies = [
     "sounddevice>=0.5",       # PortAudio duplex stream, one shared clock (ADR-005)
     "livekit>=1.1",           # WebRTC Audio Processing Module: AEC/NS/AGC
     "pysilero-vad>=2.1,<3",   # Silero VAD via onnxruntime (v3+ needs a C toolchain)
+    # Speech models (M2) — both publish universal wheels on PyPI, so a plain
+    # `pip install` installs a runnable ASR + TTS stack with no compiler.
+    "faster-whisper>=1.1",    # ASR (CTranslate2) — ADR-003
+    "kokoro-onnx>=0.4",       # TTS (ONNX Runtime) — ADR-004, ADR-012
 ]
 
 [project.optional-dependencies]
@@ -37,6 +41,19 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+]
+# LLM runtime (llama.cpp / GGUF, ADR-002). llama-cpp-python ships NO wheels on
+# PyPI (sdist only → needs a C++ toolchain), so it is not a base dependency.
+# These extras name the package; the prebuilt wheels come from the llama.cpp
+# wheel index and are selected automatically by `eva setup` (ADR-013), or
+# manually:
+#   CPU : pip install -e ".[cpu]"  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+#   CUDA: pip install -e ".[cuda]" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+cpu = ["llama-cpp-python>=0.3"]
+cuda = [
+    "llama-cpp-python>=0.3",
+    "nvidia-cuda-runtime-cu12",  # cudart — required by the CUDA llama.cpp wheel
+    "nvidia-cublas-cu12",        # cuBLAS  — required by the CUDA llama.cpp wheel
 ]
 
 [project.scripts]

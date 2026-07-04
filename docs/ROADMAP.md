@@ -109,6 +109,9 @@ automation, optional web search), macOS builds (Metal via llama.cpp), voice clon
 profile (Chatterbox), wake-word activation, multilingual UI.
 
 ## Standing rules
+- **Clean-environment smoke test is a per-milestone release gate:** a fresh venv +
+  `pip install -e ".[dev]"` must yield a runnable app (commands either work or fail
+  with actionable guidance — never `ModuleNotFoundError`). See ADR-013.
 - Correctness, modularity, testability before micro-optimization (optimization has a
   dedicated milestone: M7).
 - Every significant design decision gets a new or updated ADR.

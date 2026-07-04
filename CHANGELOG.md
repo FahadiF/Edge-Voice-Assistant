@@ -6,6 +6,34 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-04 — M2 packaging fix: installable from a clean checkout
+
+**Fixed (release blocker)**
+- Declared the ML runtimes that were used but missing from `pyproject.toml`.
+  `faster-whisper` and `kokoro-onnx` (both ship universal PyPI wheels) are now
+  base dependencies, so `pip install -e "."` yields a runnable ASR + TTS + audio
+  application with no compiler. Previously a clean checkout failed at runtime
+  with `No module named 'faster_whisper'` / `'llama_cpp'`.
+
+**Added**
+- `eva setup`: detects hardware and installs the `llama-cpp-python` build
+  (CPU or CUDA) from the llama.cpp wheel index — the LLM runtime has no PyPI
+  wheels, so it cannot be a plain dependency (ADR-013). Supports `--cpu`,
+  `--cuda`, `--dry-run`, `--force`.
+- `eva doctor`: readiness report listing every runtime and model as
+  `ok`/`MISSING` with the exact remedy command.
+- `[cpu]` and `[cuda]` optional-dependency extras for manual/reproducible
+  installs; the `[cuda]` extra also pulls the NVIDIA cudart/cuBLAS wheels.
+- `eva.runtime` module: runtime probing and install-command construction (pure,
+  unit-tested).
+- Preflight in `eva run` and `eva bench`: both now report missing runtimes and
+  models with actionable guidance instead of raising `ModuleNotFoundError`.
+- `docs/INSTALLATION.md` (Windows + Linux) and ADR-013.
+- 17 new tests (142 total): runtime probing, variant selection, install-command
+  construction, CLI `doctor`/`setup`/graceful-preflight behavior, and download
+  truncation/resume.
+- Established the clean-environment smoke test as a per-milestone release gate.
+
 ### 2026-07-04 — M2: Streaming conversational pipeline
 
 **Added**

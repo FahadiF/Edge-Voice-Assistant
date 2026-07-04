@@ -56,14 +56,29 @@ port (`base.py`), its `registry.py`, and its adapters.
 ## Running the assistant (from M2)
 
 ```bash
-eva models list                                  # catalog + install state
+eva setup                                        # install the LLM runtime (CPU/CUDA auto)
 eva models download qwen3.5-4b-instruct-q4_k_m   # ~2.7 GB
 eva models download kokoro-82m-v1.0              # ~340 MB
+eva doctor                                       # confirm everything is ready
 eva run                                          # interactive voice loop
 eva bench                                        # end-to-end pipeline benchmark, no mic needed
 ```
 
 faster-whisper weights download automatically on first use (~460 MB for `small`).
+See `docs/INSTALLATION.md` for the full setup guide and ADR-013 for why the LLM
+runtime is a separate `eva setup` step.
+
+## Clean-environment smoke test (release gate)
+
+Every milestone must pass this before it is considered done:
+
+```bash
+python -m venv /tmp/eva-clean && /tmp/eva-clean/bin/pip install -e ".[dev]"
+/tmp/eva-clean/bin/eva doctor      # base commands work; LLM runtime shows as MISSING
+/tmp/eva-clean/bin/eva bench       # must print guidance, never ModuleNotFoundError
+/tmp/eva-clean/bin/eva setup       # installs the LLM runtime
+/tmp/eva-clean/bin/eva doctor      # now all green
+```
 
 ## Adding an engine adapter
 

@@ -1,7 +1,9 @@
 """Command-line entry point.
 
-M0 provides ``eva diagnose`` and ``eva version``; later milestones add
-``eva run`` (voice loop), ``eva serve`` (engine server), and ``eva bench``.
+Commands: ``version``, ``diagnose``, ``doctor`` (dependency/model readiness),
+``setup`` (install the LLM runtime for the detected hardware), ``devices``,
+``listen``, ``echo-test``, ``models``, ``run`` (voice loop), ``bench``.
+``serve`` (engine server) arrives in M5.
 """
 
 from __future__ import annotations
@@ -106,20 +108,42 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
     return run_echo_test(settings, record_seconds=args.record_seconds, loops=args.loops)
 
 
-def _cmd_run(_: argparse.Namespace) -> int:
-    from eva.engine import build_assistant, required_models
+def _readiness_problems(settings: object, paths: object) -> list[str]:
+    """Collect actionable messages for anything missing before a live turn.
+
+    Checks both runtime dependencies (the llama.cpp LLM runtime is not a base
+    dependency) and required model files, so the user sees every gap at once
+    with the exact command to fix each — never a raw traceback.
+    """
+    from eva.engine import required_models
     from eva.models.manager import ModelManager
+    from eva.runtime import missing_runtimes
+
+    problems = [
+        f"missing runtime '{s.module}' ({s.purpose}) — {s.remedy}" for s in missing_runtimes()
+    ]
+    manager = ModelManager(paths)  # type: ignore[arg-type]
+    problems += [
+        f"missing model '{m}' — run: eva models download {m}"
+        for m in required_models(settings)  # type: ignore[arg-type]
+        if not manager.is_installed(m)
+    ]
+    return problems
+
+
+def _cmd_run(_: argparse.Namespace) -> int:
+    from eva.engine import build_assistant
     from eva.voice_loop import main_run
 
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
-    manager = ModelManager(paths)
-    missing = [m for m in required_models(settings) if not manager.is_installed(m)]
-    if missing:
-        print("Required models are not installed yet:")
-        for model_id in missing:
-            print(f"  eva models download {model_id}")
+    problems = _readiness_problems(settings, paths)
+    if problems:
+        print("Cannot start yet — setup is incomplete:")
+        for problem in problems:
+            print(f"  - {problem}")
+        print("\nRun `eva doctor` for a full readiness report.")
         return 1
     return main_run(build_assistant(settings, paths))
 
@@ -179,6 +203,13 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
+    problems = _readiness_problems(settings, paths)
+    if problems:
+        print("Cannot benchmark yet — setup is incomplete:")
+        for problem in problems:
+            print(f"  - {problem}")
+        print("\nRun `eva doctor` for a full readiness report.")
+        return 1
     assistant = build_assistant(settings, paths)
     print("Loading models...")
     assistant.preload()
@@ -203,6 +234,86 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor(_: argparse.Namespace) -> int:
+    from eva.engine import required_models
+    from eva.models.manager import ModelManager
+    from eva.runtime import probe_runtimes
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    ok = True
+
+    print("Runtime dependencies")
+    print("--------------------")
+    for status in probe_runtimes():
+        mark = "ok     " if status.installed else "MISSING"
+        line = f"[{mark}] {status.module:<16} {status.purpose}"
+        if not status.installed:
+            ok = False
+            line += f"\n            -> {status.remedy}"
+        print(line)
+
+    print("\nModels")
+    print("------")
+    manager = ModelManager(paths)
+    for model_id in required_models(settings):
+        installed = manager.is_installed(model_id)
+        mark = "ok     " if installed else "MISSING"
+        line = f"[{mark}] {model_id}"
+        if not installed:
+            ok = False
+            line += f"\n            -> eva models download {model_id}"
+        print(line)
+
+    print()
+    if ok:
+        print("All checks passed. `eva run` is ready.")
+        return 0
+    print("Setup is incomplete. Fix the items above (or run `eva setup`), then re-check.")
+    return 1
+
+
+def _cmd_setup(args: argparse.Namespace) -> int:
+    from eva.engine import required_models
+    from eva.models.manager import ModelManager
+    from eva.runtime import choose_variant, install_llama_runtime, llm_runtime_available
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+
+    report = detect_hardware()
+    variant = choose_variant(report, override=args.variant)
+    gpu = report.best_gpu
+    print(f"Hardware: {gpu.name if gpu else 'no GPU detected'}")
+    print(f"Selected LLM runtime build: {variant}\n")
+
+    if llm_runtime_available() and not args.force:
+        print("The llama.cpp runtime is already installed (use --force to reinstall).")
+    else:
+        code = install_llama_runtime(variant, dry_run=args.dry_run)
+        if code != 0:
+            print("\nRuntime installation failed; see the pip output above.", file=sys.stderr)
+            return code
+        if not args.dry_run:
+            print("llama.cpp runtime installed.")
+
+    manager = ModelManager(paths)
+    missing_models = [m for m in required_models(settings) if not manager.is_installed(m)]
+    print("\nNext steps")
+    print("----------")
+    if missing_models:
+        print("Download the required models:")
+        for model_id in missing_models:
+            print(f"  eva models download {model_id}")
+    else:
+        print("Required models are already installed.")
+    print("Then start the assistant:  eva run")
+    print("Verify readiness any time:  eva doctor")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eva",
@@ -221,6 +332,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ver = sub.add_parser("version", help="Print version")
     p_ver.set_defaults(func=_cmd_version)
+
+    p_doctor = sub.add_parser("doctor", help="Report dependency and model readiness")
+    p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_setup = sub.add_parser("setup", help="Install the LLM runtime for the detected hardware")
+    variant_group = p_setup.add_mutually_exclusive_group()
+    variant_group.add_argument(
+        "--cpu", dest="variant", action="store_const", const="cpu", help="Force the CPU build"
+    )
+    variant_group.add_argument(
+        "--cuda", dest="variant", action="store_const", const="cuda", help="Force the CUDA build"
+    )
+    p_setup.set_defaults(variant=None)
+    p_setup.add_argument("--force", action="store_true", help="Reinstall even if present")
+    p_setup.add_argument(
+        "--dry-run", action="store_true", help="Print the install command without running it"
+    )
+    p_setup.set_defaults(func=_cmd_setup)
 
     p_dev = sub.add_parser("devices", help="List audio input/output devices")
     p_dev.set_defaults(func=_cmd_devices)
