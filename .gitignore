@@ -19,6 +19,7 @@ edge_env/
 .coverage
 htmlcov/
 .cache/
+.claude
 .huggingface/
 .ipynb_checkpoints/
 
