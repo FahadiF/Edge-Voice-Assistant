@@ -6,6 +6,49 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-05 — M5: Web UI & Desktop Shell
+
+The first full consumer of the platform API (ADR-017): a production-quality
+React + TypeScript web UI, plus a minimal `pywebview` desktop shell landing
+a milestone early (ADR-023).
+
+**Added**
+- `web/`: React 18 + TypeScript (strict) + Vite frontend. TanStack Query for
+  REST, one zustand store for the WebSocket event stream, react-router,
+  hand-rolled accessible components (native `<dialog>`, ARIA), CSS-custom-
+  property theming (dark/light/system, driven by `settings.ui.theme`).
+- Ten pages: Dashboard, Conversation, Memory, Personas, Users, Models,
+  Voices, Settings, Diagnostics, Plugins — one per M5 part, each a pure
+  client of the existing REST/WebSocket API (no backend logic duplicated).
+- `Settings` page is fully schema-driven (ADR-009): a `SchemaForm` component
+  renders every section/field/bound/description from `GET /settings/schema`
+  — nothing hardcoded.
+- `src/eva/server/static.py` (ADR-023): serves the built UI as an SPA at `/`
+  when a build exists (env override → packaged dir → `web/dist`); the API
+  is byte-for-byte unchanged when no build is present.
+- `src/eva/desktop.py` (`eva-desktop`, optional `[desktop]` extra): starts
+  the same FastAPI app on a background thread and opens one native
+  `pywebview` window at it — no tray/hotkey/supervision/installer (M6).
+- `eva serve --open`: opens the built UI in the default browser.
+- ADR-023 (web UI architecture and hosting).
+- `docs/MANUAL_TESTING.md` §14: step-by-step validation for every page.
+- CI: a Node job (`npm ci && lint && build && test`) alongside the
+  existing Python job.
+
+**Testing**
+- Frontend: 26 vitest tests (WebSocket store reducers including epoch-
+  discipline drops, `SchemaForm` against a real captured schema fixture,
+  API client error handling), ESLint clean, `tsc -b` clean, production
+  build verified.
+- Backend: new `tests/test_server_static.py` (SPA mount/fallback/path-
+  escape safety) and `tests/test_desktop.py` (free-port allocation, health
+  polling, window launch — `pywebview` mocked since it's an optional
+  extra). Full existing suite stays green.
+- Manual: built UI served by the real backend against the real installed
+  models (`qwen3.5-4b-instruct-q4_k_m`, Kokoro) — engine start, live
+  dashboard, settings round-trip, voice preview decode, model catalog,
+  memory browsing, and context-preview all verified end-to-end.
+
 ### 2026-07-05 — Critical fix: multiple system messages crashed real conversations
 
 Real-hardware testing (after the integration pass below) found `eva run`

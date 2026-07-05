@@ -1,0 +1,52 @@
+.persona-prompt-snippet {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.persona-prompt-full {
+  white-space: pre-wrap;
+  background: var(--bg-sunken);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+}
+
+.persona-form {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.persona-form label {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.persona-form textarea {
+  font: inherit;
+  resize: vertical;
+}
+
+.persona-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.user-form {
+  display: grid;
+  gap: 12px;
+  max-width: 480px;
+}
+
+.user-form label {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 0.88rem;
+}

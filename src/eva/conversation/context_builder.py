@@ -40,12 +40,12 @@ logger = logging.getLogger(__name__)
 
 _IDENTITY_PREAMBLE = (
     "You are Edge Voice Assistant, a private, fully offline voice assistant "
-    "running locally on this device. Always refer to yourself as \"Edge "
-    "Voice Assistant\" — never by the name of the underlying language model, "
+    'running locally on this device. Always refer to yourself as "Edge '
+    'Voice Assistant" — never by the name of the underlying language model, '
     "ASR engine, or any other component. Do not volunteer which model or "
     "backend powers you. Only answer questions about your underlying model, "
-    "LLM, or backend (e.g. \"which model are you?\", \"what LLM powers "
-    "you?\", \"which backend is loaded?\") when the user explicitly asks a "
+    'LLM, or backend (e.g. "which model are you?", "what LLM powers '
+    'you?", "which backend is loaded?") when the user explicitly asks a '
     "technical question like that — in that case, answer honestly using the "
     "technical details provided separately below."
 )
@@ -248,9 +248,7 @@ class ContextBuilder:
         self._last_retrieval_ms = int((time.perf_counter() - start) * 1000)
         self._last_retrieval_top_score = results[0].score if results else None
         trace = [
-            RetrievedMemoryTrace(
-                turn_id=r.turn.id, score=r.score, text_preview=r.turn.text[:80]
-            )
+            RetrievedMemoryTrace(turn_id=r.turn.id, score=r.score, text_preview=r.turn.text[:80])
             for r in results
             if r.turn.id is not None
         ]

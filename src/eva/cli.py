@@ -565,9 +565,7 @@ def _cmd_memory(args: argparse.Namespace) -> int:
 
         if cmd == "show":
             for turn in memory.all_turns(args.conversation_id):
-                flags = "".join(
-                    f" [{f}]" for f in ("pinned", "favorite") if getattr(turn, f)
-                )
+                flags = "".join(f" [{f}]" for f in ("pinned", "favorite") if getattr(turn, f))
                 print(f"#{turn.id} [{turn.speaker}] {turn.created_at}{flags}: {turn.text}")
             return 0
 
@@ -597,8 +595,7 @@ def _cmd_memory(args: argparse.Namespace) -> int:
         if cmd == "archive":
             memory.archive_conversation(args.conversation_id, archived=not args.unset)
             print(
-                f"Conversation '{args.conversation_id}' "
-                f"{'restored' if args.unset else 'archived'}."
+                f"Conversation '{args.conversation_id}' {'restored' if args.unset else 'archived'}."
             )
             return 0
 
@@ -821,10 +818,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the platform API server (ADR-017). The CLI's other commands are a
     separate, lighter-weight client of the same underlying services — `eva
     serve` is for the desktop app, a web UI, or any external integration."""
+    import webbrowser
+
     import uvicorn
 
     from eva.conversation.personas import resolve_persona
     from eva.server import create_app
+    from eva.server.static import ui_dist_dir
 
     paths = get_app_paths()
     paths.ensure_exists()
@@ -832,12 +832,19 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or settings.server.host
     port = args.port or settings.server.port
     persona = resolve_persona(settings)
+    display_host = "127.0.0.1" if host == "0.0.0.0" else host
     print(f"Edge Voice Assistant API on http://{host}:{port}")
     print(f"  Docs:      http://{host}:{port}/docs")
     print(f"  WebSocket: ws://{host}:{port}/api/v1/ws")
     print(f"  Persona:   {persona.display_name} ({persona.id})")
     print(f"  Voice:     {settings.tts.voice}")
     print("  (Memory/user-profile stats become available after POST /api/v1/engine/start)")
+    if ui_dist_dir() is not None:
+        print(f"  Web UI:    http://{display_host}:{port}/")
+        if args.open:
+            webbrowser.open(f"http://{display_host}:{port}/")
+    elif args.open:
+        print("  --open requested, but no built web UI was found — skipping.")
     uvicorn.run(create_app(paths), host=host, port=port, log_level="info")
     return 0
 
@@ -1077,6 +1084,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_serve.add_argument("--host", default=None, help="Override settings.server.host")
     p_serve.add_argument("--port", type=int, default=None, help="Override settings.server.port")
+    p_serve.add_argument(
+        "--open", action="store_true", help="Open the web UI in the default browser once built"
+    )
     p_serve.set_defaults(func=_cmd_serve)
 
     p_config = sub.add_parser("config", help="Inspect or reset the settings document")

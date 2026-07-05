@@ -97,11 +97,32 @@ The project is under active development.
     diagnostics
   - [Manual testing guide](docs/MANUAL_TESTING.md) for the whole milestone
 
+- **M5 – Web UI & Desktop Shell**
+  - React + TypeScript web UI (`web/`) covering the dashboard, conversation,
+    memory, personas, user profiles, models, voices, settings, diagnostics,
+    and plugins — every capability M4 shipped, now reachable without the
+    CLI or raw HTTP
+  - Fully schema-driven settings UI (ADR-009) — no hardcoded field lists
+  - Live updates over the existing WebSocket event stream — no polling
+  - Minimal `pywebview` desktop shell (`eva-desktop`) hosting the same UI
+
 ### Next milestone
 
-**M5 – Web UI** (React frontend consuming the existing platform API)
+**M6 – Desktop polish** (tray icon, global push-to-talk hotkey, engine
+process supervision, first-run wizard window, installers)
 
 See the [Roadmap](docs/ROADMAP.md) for implementation progress.
+
+## Running the web UI
+
+```bash
+cd web && npm install && npm run build   # builds web/dist/
+eva serve --open                         # serves it at http://127.0.0.1:8765/
+```
+Or, for frontend development with live reload: `eva serve` in one terminal,
+`cd web && npm run dev` in another (proxies `/api` to the backend).
+
+For the desktop shell: `pip install -e ".[desktop]"` then `eva-desktop`.
 
 ---
 

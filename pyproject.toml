@@ -65,15 +65,22 @@ cuda = [
     "nvidia-cuda-runtime-cu12",  # cudart — required by the CUDA llama.cpp wheel
     "nvidia-cublas-cu12",        # cuBLAS  — required by the CUDA llama.cpp wheel
 ]
+# Minimal desktop shell (M5, ADR-007/ADR-023) — a native window hosting the
+# built web UI. Optional: the base CLI/server never imports pywebview.
+desktop = ["pywebview>=5"]
 
 [project.scripts]
 eva = "eva.cli:main"
+eva-desktop = "eva.desktop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-eva = ["py.typed"]
+# "server/static/ui/**" is where packaging copies the `npm run build` output
+# (ADR-023) — declared here so a build that DOES populate it ships the
+# assets; harmless (matches nothing) in a checkout that hasn't built the UI.
+eva = ["py.typed", "server/static/ui/**"]
 
 # ──────────────────────── tooling ────────────────────────
 
@@ -127,6 +134,11 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["uvicorn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional desktop extra (M5, ADR-023) — never imported by the base install.
+module = ["webview.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

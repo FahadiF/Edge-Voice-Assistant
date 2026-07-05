@@ -1,0 +1,99 @@
+.model-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg);
+}
+
+.model-active {
+  border-color: var(--accent);
+}
+
+.model-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.model-id {
+  margin-top: 2px;
+  font-size: 0.8rem;
+}
+
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.model-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.model-facts div {
+  display: flex;
+  gap: 6px;
+}
+
+.model-facts dt {
+  color: var(--text-muted);
+  min-width: 82px;
+}
+
+.model-facts dd {
+  margin: 0;
+}
+
+.model-notes {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.model-download-file {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.model-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.voice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.voice-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-active {
+  border-color: var(--accent);
+}
+
+.voice-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}

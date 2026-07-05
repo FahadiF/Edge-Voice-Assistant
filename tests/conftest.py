@@ -14,6 +14,11 @@ from eva.config.paths import AppPaths, get_app_paths
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "eva-home"
     monkeypatch.setenv("EVA_HOME", str(home))
+    # Point EVA_UI_DIST at a path with no index.html so tests never mount a
+    # real `web/dist` build that happens to exist in the checkout (ADR-023:
+    # an explicit override is authoritative — no fall-through). Tests that
+    # exercise UI hosting set their own value.
+    monkeypatch.setenv("EVA_UI_DIST", str(tmp_path / "no-ui"))
     return home
 
 

@@ -1,0 +1,179 @@
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--state-idle);
+}
+
+.status-idle .status-dot { background: var(--state-idle); }
+.status-listening .status-dot { background: var(--state-listening); animation: pulse 1.4s infinite; }
+.status-thinking .status-dot { background: var(--state-thinking); animation: pulse 0.9s infinite; }
+.status-speaking .status-dot { background: var(--state-speaking); animation: pulse 0.7s infinite; }
+
+@keyframes pulse {
+  50% { opacity: 0.35; }
+}
+
+.progress {
+  position: relative;
+  height: 20px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.progress-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.meter {
+  margin-bottom: 10px;
+}
+
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 3px;
+}
+
+.meter-value {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.meter-track {
+  height: 8px;
+  background: var(--bg-sunken);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  transition: width 0.4s ease;
+}
+
+.dialog-body {
+  margin-bottom: 14px;
+  color: var(--text-muted);
+}
+
+.dialog-require {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.dialog-require input {
+  display: block;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toast-host {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  max-width: 380px;
+}
+
+.toast-success { border-left: 4px solid var(--success); }
+.toast-error { border-left: 4px solid var(--danger); }
+.toast-info { border-left: 4px solid var(--accent); }
+
+.empty-state {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: 0.78rem;
+  margin-right: 4px;
+}
+
+.chip-success { border-color: var(--success); color: var(--success); }
+.chip-warning { border-color: var(--warning); color: var(--warning); }
+.chip-danger { border-color: var(--danger); color: var(--danger); }
+.chip-accent { border-color: var(--accent); color: var(--accent); }
+
+.turn-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.turn-actions button {
+  padding: 2px 8px;
+  font-size: 0.8rem;
+}

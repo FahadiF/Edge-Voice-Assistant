@@ -141,44 +141,46 @@ real N+1-query performance bug was found and fixed by that measurement
 before it shipped. Deferred to M5+ (documented, not silently dropped):
 `eva memory`/`eva user` CLI commands, real encryption-at-rest.
 
-## M5 — Web UI
-The platform API and WebSocket protocol are already built (M2.6); this
-milestone is the React UI consuming them — no new backend surface expected,
-only whatever small gaps using it in anger reveals. Conversation view with
-live partial transcripts and token streaming, mic state, push-to-talk &
-always-listening toggle. Full settings surface per ADR-009 (LM Studio / Open
-WebUI / Home Assistant class), driven by the settings schema and component
-registries. Sections:
-- **General**: startup behavior, language, default interaction mode
-- **Language Models / Speech Recognition / Speech Synthesis / Voice Detection**:
-  per-subsystem model manager pages — installed & active models, size, quantization,
-  context length, license, RAM/VRAM requirements, disk usage, compatibility,
-  download/remove/set-default/benchmark; voice picker, speech speed/pitch,
-  streaming toggle; VAD sensitivity, silence timeout, confidence threshold
-- **Conversation**: history browser, context window, sampling (temperature, top-p,
-  max tokens, stop sequences), export/import
-- **Memory**: retention policy, summarization, clearing
-- **Prompt Templates** and **Personalities**: registry-backed editors
-- **Audio**: devices, gain/volume, AEC/NS/AGC, barge-in, push-to-talk, always-listening
-- **Hardware**: detected CPU/GPU/RAM/VRAM/backend, capability tier, profile presets
-  (Balanced / Fast / High Accuracy / Low Memory / Developer / Custom), thread count /
-  GPU layers / batch / context / memory-limit overrides
-- **Performance**: live graphs (CPU/GPU/VRAM/RAM, per-stage latencies, TTFT, TTFA,
-  full-response time)
-- **Plugins**: manager (list/enable/disable/install/remove) per ADR-011
-- **Developer**: logs viewer, debug mode, benchmark suite, export logs, reload
-  models/plugins, config viewer
-- **Diagnostics**: hardware report, audio pipeline health, self-tests
-- **Appearance**: dark/light/system theme, UI scaling
-- **Accessibility**: reduced motion, keyboard navigation, captions-first mode
-- **Privacy**: data locations, retention, offline guarantee statement
-- **Updates**: manual engine/model update checks (offline-friendly)
-**Exit:** full product usable and fully configurable from a browser at localhost;
-API documented (OpenAPI + WebSocket protocol reference in docs/).
+## M5 — Web UI & Desktop Shell ✅ shipped
 
-## M6 — Desktop app
-pywebview shell, engine process supervision, tray + global PTT hotkey, first-run
-setup wizard (profile pick + model download).
+The platform API and WebSocket protocol were already built (M2.6); this
+milestone is the React + TypeScript UI consuming them — no new backend
+surface beyond the one anticipated gap (serving the built UI, ADR-023).
+Delivered:
+- **Dashboard**: live assistant/engine state, mic level, active models/
+  persona/profile/voice, memory stats, latency, resources — all pushed over
+  the WebSocket, zero polling
+- **Conversation**: streaming transcript (partials → finals → tokens),
+  interruption markers, timestamps, search, export/import/clear
+- **Memory**: search, pin/favorite/forget, archive/restore/merge/delete,
+  summarize, context-inspector (exact composed prompt + retrieval trace),
+  delete-all with typed confirmation
+- **Personas**: list/activate/create/edit/duplicate/delete + prompt preview
+- **User Profiles**: create/switch/edit/delete + client-side import/export
+- **Models**: full model cards (provider/license/languages/VRAM/RAM/size),
+  download with live WebSocket progress, activate/remove
+- **Voices**: search/filter by language+style, in-browser PCM preview
+  (Web Audio API, no container format), select + persists
+- **Settings**: fully schema-driven (ADR-009) from `GET /settings/schema` —
+  every section, field, bound, and description comes from the schema
+- **Diagnostics**: live resource meters + sparklines, queue depths, event
+  log, hardware summary
+- **Plugins**: list/enable/disable/reload (ADR-011)
+- **Desktop shell** (`eva-desktop`, optional `[desktop]` extra): a minimal
+  `pywebview` window hosting the same UI — landed a milestone early, scoped
+  down (window only; see M6 for the rest)
+
+**Exit:** full product usable and fully configurable from a browser at
+localhost, and from a native desktop window; API documented (OpenAPI +
+WebSocket protocol reference in docs/). ✅ Both met.
+
+## M6 — Desktop polish
+Tray icon, global push-to-talk hotkey, engine process supervision (auto-
+restart on crash, single-instance lock), first-run setup wizard as a native
+window (profile pick + model download), and installers (PyInstaller +
+Inno Setup / AppImage, per ADR-008). The window-hosting mechanics
+themselves (`eva-desktop`, `pywebview`) already shipped in M5 — M6 is the
+remaining desktop-specific polish around that shell.
 **Exit:** double-click launch to a working assistant on Windows and Linux dev boxes.
 
 ## M7 — Benchmarking & performance engineering

@@ -243,9 +243,7 @@ class TestRetrievalGating:
         result = builder.build(conv.id, "hi")
         assert result.trace.retrieved_memories == ()
 
-    def test_embedding_disabled_in_settings_skips_retrieval(
-        self, store: SQLiteMemoryStore
-    ) -> None:
+    def test_embedding_disabled_in_settings_skips_retrieval(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
         settings = Settings()
         settings.memory.embedding_enabled = False

@@ -151,13 +151,24 @@ edge-voice-assistant/
 │   ├── config/               # settings schema, persistence, app paths
 │   ├── benchmark/            # benchmark suite + report generation
 │   ├── metrics/              # per-stage latency, resource sampling, diagnostics
-│   ├── server/               # FastAPI app: REST + WebSocket (the API-first boundary)
+│   ├── server/               # FastAPI app: REST + WebSocket (the API-first boundary);
+│   │                         #   server/static.py mounts the built web UI when present (M5, ADR-023)
+│   ├── desktop.py            # minimal pywebview shell (M5, ADR-007/023) — starts the
+│   │                         #   same FastAPI app on a thread, opens one native window at it
 │   └── cli.py                # headless/dev interface — one file, one subparser group
 │                             #   per concern (models, profiles, config, personas, users,
 │                             #   voices, memory, profile — M4 integration pass), each a
 │                             #   thin client of the same services the API routers call
-├── web/                      # React + Vite web UI (consumes the API only)
-├── desktop/                  # desktop shell + tray/launcher (consumes the API only)
+├── web/                      # React + TypeScript + Vite web UI (M5, ADR-023) — talks to
+│   │                         #   /api/v1/* and the WebSocket only, never an eva.* import
+│   └── src/
+│       ├── api/              # typed REST client (client.ts, endpoints.ts, types.ts —
+│       │                     #   a hand-maintained mirror of the pydantic schemas)
+│       ├── ws/                # WebSocket connection + zustand live-state store
+│       ├── theme/             # design tokens + dark/light/system ThemeProvider
+│       ├── components/        # shared UI (Layout, SchemaForm, dialogs, toasts)
+│       └── pages/              # one page per M5 part: Dashboard, Conversation, Memory,
+│                               #   Personas, Users, Models, Voices, Settings, Diagnostics, Plugins
 ├── tests/                    # unit + integration (fake adapters, recorded audio)
 ├── packaging/                # PyInstaller specs, Inno Setup, AppImage recipe
 └── docs/                     # architecture, ADRs, guides, API reference
@@ -168,9 +179,12 @@ Subsystems may import `core` and `config` only — never each other's adapters �
 with one documented exception (ADR-010 amendment, M4): `memory` imports
 `embedding`'s port and registry, a genuine building-block relationship (turning
 text into a vector is not memory-specific), never the reverse. Business logic
-stays in engine services; `web/`, `desktop/`, and the CLI are pure API
+stays in engine services; `web/`, `desktop.py`, and the CLI are pure API
 consumers, so future clients (mobile app, third-party integrations) require no
-engine changes.
+engine changes. The FastAPI server itself gains one narrow rendering
+responsibility in M5 (ADR-023): serving the *built* `web/` output as a static
+SPA when one exists — this is not business logic, and the app is byte-for-byte
+the old API-only app when no build is present.
 
 ## 7. Default model stack (6 GB VRAM profile)
 

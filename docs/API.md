@@ -13,6 +13,14 @@ the raw OpenAPI document is at `GET /openapi.json`. This page is a map, not
 the source of truth — the running server's `/docs` always reflects the
 current code.
 
+The web UI (`web/`, M5, ADR-023) is the reference consumer of this whole
+API — every endpoint and WebSocket event below has a corresponding page or
+live element in it (`eva serve --open` after `npm run build` in `web/`).
+Its TypeScript type mirror (`web/src/api/types.ts`) is a second, executable
+description of these shapes; if you change a schema here, that file (and
+its pinned test in `web/src/components/SchemaForm.test.tsx`) needs the
+matching update.
+
 ## Conventions
 
 - All REST endpoints are versioned under `/api/v1`.

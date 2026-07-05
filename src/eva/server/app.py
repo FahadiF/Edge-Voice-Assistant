@@ -1,9 +1,11 @@
-"""FastAPI application factory (ADR-017).
+"""FastAPI application factory (ADR-017, ADR-023).
 
-The API is versioned under `/api/v1` and deliberately UI-agnostic: the CLI
-(`eva serve`), the future desktop shell, a future web frontend, and plugins
-are all just HTTP/WebSocket clients of this one server. Nothing here renders
-anything — no templates, no static files, no desktop or web UI code.
+The API is versioned under `/api/v1`; the CLI (`eva serve`), the desktop
+shell, the web frontend, and plugins are all just HTTP/WebSocket clients of
+this one server. The only rendering concern here: when a *built* web UI
+exists on disk (ADR-023 — packaged assets, a dev checkout's `web/dist`, or
+an `EVA_UI_DIST` override), it is served at `/` as a static SPA. With no
+build present, the app is exactly the old API-only app.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from eva.server.routers import (
     websocket,
 )
 from eva.server.state import ServerState
+from eva.server.static import mount_ui, ui_dist_dir
 
 API_PREFIX = "/api/v1"
 
@@ -85,5 +88,11 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
         api.include_router(router_module.router)
     api.include_router(websocket.router)
     app.include_router(api)
+
+    # Serve the built web UI when one exists (ADR-023). Mounted after every
+    # API route so /api/v1/*, /docs, and /openapi.json always win.
+    dist = ui_dist_dir()
+    if dist is not None:
+        mount_ui(app, dist)
 
     return app

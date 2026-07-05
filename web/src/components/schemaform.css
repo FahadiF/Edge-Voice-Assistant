@@ -1,0 +1,118 @@
+.schema-section {
+  display: grid;
+  gap: 18px;
+}
+
+.schema-field {
+  display: grid;
+  gap: 4px;
+  max-width: 560px;
+}
+
+.field-label {
+  font-weight: 600;
+}
+
+.field-help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.field-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+}
+
+.has-error input,
+.has-error select {
+  border-color: var(--danger);
+}
+
+.number-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.number-control input[type="range"] {
+  flex: 1;
+  max-width: 280px;
+}
+
+.number-control input[type="number"] {
+  width: 110px;
+}
+
+.tag-editor .tags {
+  margin-bottom: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-remove {
+  border: none;
+  background: none;
+  padding: 0 0 0 6px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.tag-input {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+
+.settings-nav button {
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.settings-nav button:hover {
+  background: var(--bg-sunken);
+}
+
+.settings-nav button.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+.settings-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    position: static;
+  }
+}

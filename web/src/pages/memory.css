@@ -1,0 +1,87 @@
+.context-input {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.context-input input {
+  flex: 1;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.search-results li {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--bg);
+}
+
+.search-results p {
+  margin: 6px 0 0;
+}
+
+.search-result-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.search-result-head .turn-actions {
+  margin-left: auto;
+}
+
+.merge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.context-result h3 {
+  font-size: 0.92rem;
+  margin: 14px 0 6px;
+}
+
+.context-messages {
+  display: grid;
+  gap: 8px;
+}
+
+.context-msg {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--bg);
+}
+
+.context-msg pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+}
+
+.role-system {
+  border-left: 3px solid var(--warning);
+}
+
+.role-user {
+  border-left: 3px solid var(--accent);
+}
+
+.role-assistant {
+  border-left: 3px solid var(--success);
+}

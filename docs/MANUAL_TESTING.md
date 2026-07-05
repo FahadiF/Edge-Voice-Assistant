@@ -1,10 +1,12 @@
-# Manual Testing Guide — M4 (Memory, Personalization & Intelligence)
+# Manual Testing Guide — M4 (Memory, Personalization & Intelligence) & M5 (Web UI)
 
-This guide lets someone with no source-code access validate every M4
+This guide lets someone with no source-code access validate every M4/M5
 capability end-to-end: memory persistence, semantic retrieval, summaries,
 personas, user profiles, voices, the REST API, the WebSocket stream, raw
-SQLite inspection, and diagnostics. Every step uses either the `eva` CLI or
-plain `curl`/`sqlite3` — nothing here requires reading the codebase.
+SQLite inspection, diagnostics, and — as of M5 — the React web UI and the
+minimal desktop shell. Sections 1–12 use the `eva` CLI or plain
+`curl`/`sqlite3`; [section 14](#14-web-ui-m5) walks the same capabilities
+through the browser. Nothing here requires reading the codebase.
 
 Assumes `eva doctor` reports all checks passing (models installed, runtime
 available). If not, run `eva first-run` first.
@@ -259,6 +261,130 @@ After steps 5-7 above, fully restart (`eva run` or `eva serve` +
 - [ ] `eva memory list` still shows every prior conversation
 - [ ] The startup banner (`eva run`) prints Persona / User profile / Voice /
       Memory counts matching the above
+
+---
+
+## 14. Web UI (M5)
+
+The React web UI is a pure client of the same REST/WebSocket API sections
+1–12 already exercise — nothing here is a separate code path. Build it once,
+then either serve it from the backend or run it against a dev server.
+
+### 14.0 Build and serve
+
+```bash
+cd web
+npm ci
+npm run build            # produces web/dist/
+cd ..
+eva serve --open         # opens http://127.0.0.1:8765/ once the build is found
+```
+Or, for live-reload frontend development against a running backend:
+```bash
+eva serve                # terminal 1
+cd web && npm run dev    # terminal 2 — http://localhost:5173, proxies /api
+```
+
+### 14.1 Dashboard
+
+Start the engine from the header button. Confirm live updates with **no
+page refresh**: assistant state pill changes (idle → listening → thinking →
+speaking) as you talk to `eva run`-equivalent activity (or trigger via
+`POST /conversation` activity through another client), microphone level bar
+moves, active models/persona/profile/voice match `eva diagnose`, memory
+stats match `eva memory stats`, and latency numbers appear after one turn.
+
+### 14.2 Conversation
+
+Have a conversation (via the engine — any client that drives it, since audio
+stays server-side per ADR-007). Confirm: partial transcript appears in
+italics and is replaced by the final one, the assistant's reply streams
+token-by-token, an interrupted turn shows an "— interrupted —" marker,
+**Export** downloads a JSON file matching `eva conversation export`-shape
+data, **Import** re-loads it, **Clear** empties the view, and the search box
+filters the visible transcript.
+
+### 14.3 Memory
+
+With the engine running: search returns results with score/match-reason
+chips; pin/favorite/forget update immediately; a conversation can be
+archived, restored, merged into another, summarized, and deleted; the
+**Context inspector** for a text like "what's my favorite color?" shows the
+exact single system message (identity + technical facts + retrieved
+memories + summary, all one block — ADR-021 Amendment 2) followed by
+strictly alternating user/assistant messages, matching what
+`eva memory show`/`GET /memory/context-preview` report.
+
+### 14.4 Personas
+
+Activate a different persona from the grid and confirm the Dashboard's
+"Personalization" card updates. Create a custom persona, duplicate an
+existing one, edit it, then delete it — confirm attempting to delete a
+built-in is not offered as an option. The prompt-preview panel matches
+`eva personas show <id>`.
+
+### 14.5 User profiles
+
+Create a profile, activate it, edit its nickname, export the list (JSON
+download), delete it, then import it back from the downloaded file.
+
+### 14.6 Models
+
+Confirm every installed model shows correct provider/license/languages/
+VRAM/RAM/size matching `eva models list`/`info`. Trigger a download (if any
+model is missing) and watch the live progress bar driven by WebSocket
+`ModelDownloadProgress` events — no polling, no page refresh needed.
+Activate a different model and confirm the "takes effect on restart" notice.
+
+### 14.7 Voices
+
+With the engine running, search/filter by language and style, click
+**Preview** and confirm audible playback (decoded from raw PCM via Web
+Audio — no container format round-trip), then **Use** a voice and confirm
+`eva voices list` shows it as active after the next restart.
+
+### 14.8 Settings
+
+Open a few different sections (Audio, Conversation, Memory, Appearance) and
+confirm every field, description, and bound (min/max, default) matches
+`eva config schema` for that section — nothing is hardcoded in the UI.
+Toggle the theme and confirm it applies instantly; save an invalid value
+(e.g. a temperature above the schema maximum) and confirm the field-level
+error appears before anything is saved; **Reset all to defaults** restores
+`eva config show`'s baseline.
+
+### 14.9 Diagnostics
+
+Confirm CPU/RAM/(GPU/VRAM if present) meters and sparklines move over a few
+seconds, queue depths and dropped-frame counters match
+`GET /api/v1/diagnostics`, and the event log fills as you interact with the
+assistant (excluding the high-frequency `LlmToken` stream, which is
+intentionally not logged here).
+
+### 14.10 Plugins
+
+If no plugins are installed, confirm the empty-state explanation appears
+rather than a blank page. If any are installed, confirm enable/disable/
+reload work and match `curl .../api/v1/plugins`.
+
+### 14.11 Desktop shell
+
+```bash
+pip install -e ".[desktop]"
+eva-desktop
+```
+Confirm a native window opens showing the same UI, and that closing the
+window also stops the backend process (no orphaned `eva serve` left
+running — check with your OS's process list).
+
+### 14.12 Responsive & accessibility spot-check
+
+Resize the browser to a narrow (mobile-width) viewport and confirm the
+sidebar collapses to a horizontal scrollable bar rather than overlapping
+content. Tab through a page using only the keyboard and confirm every
+interactive element shows a visible focus ring. Toggle your OS's
+"prefers-reduced-motion" setting (or the Settings page's "Reduced Motion")
+and confirm the state-pill pulse animation stops.
 
 ---
 
