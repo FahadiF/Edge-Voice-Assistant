@@ -32,6 +32,7 @@ from eva.core.events import (
 )
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.tts.base import TTSEngine
+from tests.server_fakes import FakeMemoryStore
 
 AUDIO = np.ones(16_000, dtype=np.int16)
 
@@ -123,7 +124,9 @@ def make_orchestrator(
     bus = EventBus()
     audio = FakeAudioOut()
     tts = tts or FakeTTS()
-    orch = Orchestrator(settings, bus, audio, asr or FakeASR(), llm or FakeLLM(), tts)
+    orch = Orchestrator(
+        settings, bus, audio, asr or FakeASR(), llm or FakeLLM(), tts, FakeMemoryStore()
+    )
     return orch, bus, audio, tts
 
 
@@ -239,7 +242,7 @@ class TestNormalTurn:
 
             events = await drive(orch, bus, script)
             assert names(events).count("TurnFinished") == 2
-            assert orch._history.turn_count == 2
+            assert len(orch.conversation_turns) == 2
 
         asyncio.run(scenario())
 

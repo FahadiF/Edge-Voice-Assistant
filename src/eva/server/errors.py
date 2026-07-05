@@ -16,6 +16,8 @@ from eva.core.errors import (
     ConfigError,
     EvaError,
     HardwareError,
+    MemoryNotFoundError,
+    MemoryStoreError,
     ModelError,
     ModelNotInstalledError,
     PluginError,
@@ -26,12 +28,14 @@ from eva.server.state import EngineNotRunningError
 _STATUS_BY_ERROR: tuple[tuple[type[EvaError], int], ...] = (
     (EngineNotRunningError, 409),
     (ModelNotInstalledError, 404),
+    (MemoryNotFoundError, 404),
     (RegistryError, 404),
     (PluginError, 404),
     (ConfigError, 400),
     (ModelError, 502),
     (AudioError, 503),
     (HardwareError, 503),
+    (MemoryStoreError, 500),
 )
 
 

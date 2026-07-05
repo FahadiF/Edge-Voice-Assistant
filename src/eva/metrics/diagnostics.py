@@ -90,6 +90,13 @@ class RuntimeSnapshot(BaseModel):
     metrics_summary: str
     barge_in_count: int
     last_barge_in_latency_ms: int | None
+    # Memory (M4, ADR-019/ADR-020)
+    memory_enabled: bool
+    memory_turn_count: int
+    memory_db_size_bytes: int
+    memory_embedding_count: int
+    last_retrieval_ms: int | None
+    last_retrieval_score_top1: float | None
     # Events
     recent_events: list[str]  # newest last
 
@@ -124,6 +131,12 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
         metrics_summary="No completed turns.",
         barge_in_count=0,
         last_barge_in_latency_ms=None,
+        memory_enabled=settings.memory.embedding_enabled,
+        memory_turn_count=0,
+        memory_db_size_bytes=0,
+        memory_embedding_count=0,
+        last_retrieval_ms=None,
+        last_retrieval_score_top1=None,
         recent_events=[],
     )
 
@@ -137,6 +150,7 @@ class DiagnosticsProvider:
     def snapshot(self) -> RuntimeSnapshot:
         a = self._assistant
         turns = a.orchestrator.metrics.turns
+        memory_stats = a.memory.stats()
         return RuntimeSnapshot(
             profile=a.settings.profile,
             language=a.settings.conversation.language,
@@ -163,5 +177,11 @@ class DiagnosticsProvider:
             metrics_summary=a.orchestrator.metrics.summary(),
             barge_in_count=a.orchestrator.barge_in_count,
             last_barge_in_latency_ms=a.orchestrator.last_barge_in_latency_ms,
+            memory_enabled=a.embedding is not None,
+            memory_turn_count=memory_stats.turn_count,
+            memory_db_size_bytes=memory_stats.db_size_bytes,
+            memory_embedding_count=memory_stats.embedded_turn_count,
+            last_retrieval_ms=a.orchestrator.last_retrieval_ms,
+            last_retrieval_score_top1=a.orchestrator.last_retrieval_score_top1,
             recent_events=[e.name for e in a.bus.recent_events()],
         )

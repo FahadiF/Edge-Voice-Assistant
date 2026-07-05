@@ -21,10 +21,14 @@ from eva.server.routers import (
     conversation,
     diagnostics,
     engine,
+    memory,
     models,
+    personas,
     plugins,
     settings,
     system,
+    users,
+    voices,
     websocket,
 )
 from eva.server.state import ServerState
@@ -65,7 +69,19 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
     register_exception_handlers(app)
 
     api = APIRouter(prefix=API_PREFIX)
-    for router_module in (system, settings, models, diagnostics, plugins, conversation, engine):
+    for router_module in (
+        system,
+        settings,
+        models,
+        diagnostics,
+        plugins,
+        conversation,
+        engine,
+        memory,
+        personas,
+        users,
+        voices,
+    ):
         api.include_router(router_module.router)
     api.include_router(websocket.router)
     app.include_router(api)

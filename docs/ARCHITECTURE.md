@@ -9,8 +9,9 @@ Status: Accepted. Decisions are recorded in [adr/](adr/).
    is a design bug.
 2. **Streaming everywhere.** No stage waits for the previous stage to finish completely.
 3. **Ports and adapters.** The core engine depends only on abstract interfaces
-   (`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`, `Tool`,
-   `AudioDevice`). Models are adapters; swapping one is a config change.
+   (`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`,
+   `UserProfileStore`, `MemoryRetriever`, `EmbeddingProvider`, `Summarizer`,
+   `Tool`, `AudioDevice`). Models are adapters; swapping one is a config change.
 4. **One headless engine, many frontends.** CLI, web UI, and desktop app are thin
    clients over the same engine API (WebSocket + REST on localhost).
 5. **Offline by construction.** The only network code lives in the model downloader.
@@ -129,11 +130,19 @@ edge-voice-assistant/
 │   ├── vad/                  # VADEngine port + registry + adapters (silero)
 │   ├── asr/                  # ASREngine port + registry + adapters (faster-whisper)
 │   ├── llm/                  # LLMEngine port + registry + adapters (llama.cpp)
-│   ├── tts/                  # TTSEngine port + registry + adapters (kokoro, piper)
-│   ├── conversation/         # orchestrator, history, sentence chunker,
-│   │                         #   prompt-template + personality registries
-│   ├── memory/               # MemoryStore port + registry + SQLite adapter,
-│   │                         #   conversation import/export
+│   ├── tts/                  # TTSEngine port + registry + adapters (kokoro, piper);
+│   │                         #   voices.py: voice registry over engine capability
+│   │                         #   discovery (M4, ADR-022)
+│   ├── embedding/            # EmbeddingProvider port + registry + ONNX adapter
+│   │                         #   (M4, ADR-020) — a memory building block, not
+│   │                         #   memory-specific (ADR-010 amendment)
+│   ├── conversation/         # orchestrator, history (turn pairing only — M4
+│   │                         #   moved storage/composition to memory/context_builder),
+│   │                         #   sentence chunker, language + persona registries,
+│   │                         #   context_builder.py (deterministic prompt composition)
+│   ├── memory/               # MemoryStore + UserProfileStore ports + registry +
+│   │                         #   SQLite adapter (one db, WAL, FTS5), NumpyMemoryRetriever,
+│   │                         #   LLMSummarizer, retention policy (M4, ADR-019/020)
 │   ├── tools/                # Tool port + registry (function-calling tools)
 │   ├── plugins/              # plugin SDK: manifest, discovery, lifecycle (ADR-011)
 │   ├── models/               # model manager: catalog, download, verify, licenses,
@@ -152,10 +161,13 @@ edge-voice-assistant/
 ```
 
 **Dependency direction:** `core` ← subsystems ← `conversation` ← `server` ← UIs.
-Subsystems may import `core` and `config` only — never each other's adapters.
-Business logic stays in engine services; `web/`, `desktop/`, and the CLI are pure
-API consumers, so future clients (mobile app, third-party integrations) require
-no engine changes.
+Subsystems may import `core` and `config` only — never each other's adapters —
+with one documented exception (ADR-010 amendment, M4): `memory` imports
+`embedding`'s port and registry, a genuine building-block relationship (turning
+text into a vector is not memory-specific), never the reverse. Business logic
+stays in engine services; `web/`, `desktop/`, and the CLI are pure API
+consumers, so future clients (mobile app, third-party integrations) require no
+engine changes.
 
 ## 7. Default model stack (6 GB VRAM profile)
 

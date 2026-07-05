@@ -135,6 +135,27 @@ class TTSSettings(_Section):
 # ──────────────────────── Conversation ────────────────────────
 
 
+class PersonaSettingsEntry(_Section):
+    """A user-created persona, persisted in settings (ADR-022) and converted
+    to a `PersonaProfile` by `eva.conversation.personas` at startup — kept
+    here, not imported from the conversation subsystem, so `eva.config`
+    stays a dependency leaf (subsystems depend on config, not vice versa)."""
+
+    id: str = Field(description="Unique persona id (must not collide with a built-in id)")
+    display_name: str = Field(description="Shown in the UI/CLI persona picker")
+    system_prompt: str = Field(description="Base instruction defining this persona's behavior")
+    verbosity: Literal["minimal", "concise", "normal", "detailed"] = Field(
+        "normal", description="How much detail replies should include"
+    )
+    tone: str = Field("neutral", description="Free-text tone descriptor (e.g. 'warm', 'blunt')")
+    reasoning_style: str = Field(
+        "direct", description="Free-text reasoning-style descriptor (e.g. 'step-by-step')"
+    )
+    temperature_override: Annotated[float, Field(ge=0.0, le=2.0)] | None = Field(
+        None, description="Override the conversation-level sampling temperature; None = inherit"
+    )
+
+
 class ConversationSettings(_Section):
     system_prompt: str = Field(
         "You are a helpful voice assistant. Answer conversationally and concisely — "
@@ -173,6 +194,85 @@ class ConversationSettings(_Section):
             "Minimum length for the first spoken segment of a turn only (M3: lower than "
             "sentence_min_chars to start audio sooner; later segments use sentence_min_chars)"
         ),
+    )
+    active_profile_id: str | None = Field(
+        None,
+        description=(
+            "Active user profile id (M4: nickname/preferences stored in the memory "
+            "database, ADR-022) — None if no profile has been created yet"
+        ),
+    )
+    custom_personas: list[PersonaSettingsEntry] = Field(
+        default_factory=list,
+        description=(
+            "User-created personas, registered alongside the built-ins at startup "
+            "(ADR-022) — persisted here because a persona is configuration, not "
+            "conversation data"
+        ),
+    )
+
+
+# ──────────────────────── Memory (M4, ADR-019/ADR-020) ────────────────────────
+
+
+class MemorySettings(_Section):
+    engine: str = Field("sqlite", description="Memory store engine id (registry key)")
+    embedding_enabled: bool = Field(
+        True,
+        description=(
+            "Compute and store embeddings for semantic search; if disabled or the "
+            "embedding model is not installed, search falls back to keyword-only"
+        ),
+    )
+    embedding_engine: str = Field(
+        "onnx-embedding", description="Embedding provider engine id (registry key)"
+    )
+    embedding_model: str = Field(
+        "all-minilm-l6-v2-onnx", description="Installed embedding model id"
+    )
+    retention_days: Annotated[int, Field(ge=1, le=36500)] | None = Field(
+        None, description="Delete turns older than this many days; None = keep forever"
+    )
+    max_turns_per_conversation: Annotated[int, Field(ge=10, le=1_000_000)] | None = Field(
+        None, description="Cap turns retained per conversation; None = unlimited"
+    )
+    auto_cleanup_enabled: bool = Field(
+        False, description="Apply the retention policy automatically on engine start"
+    )
+    encrypt_at_rest: bool = Field(
+        False,
+        description=(
+            "Reserved for a future encrypted-database adapter (ADR-019) — not yet "
+            "implemented; enabling this has no effect today"
+        ),
+    )
+    retrieval_top_k: Annotated[int, Field(ge=1, le=50)] = Field(
+        5, description="Number of semantically relevant memories the Context Builder retrieves"
+    )
+    retrieval_scan_limit: Annotated[int, Field(ge=100, le=100_000)] = Field(
+        2000,
+        description=(
+            "Maximum embedded turns scored per semantic search, most-recent-first — "
+            "bounds retrieval latency independent of total accumulated history"
+        ),
+    )
+    max_memory_chars: Annotated[int, Field(ge=100, le=20_000)] = Field(
+        2000, description="Character budget for retrieved-memory context (ADR-021)"
+    )
+    max_summary_chars: Annotated[int, Field(ge=100, le=20_000)] = Field(
+        1000, description="Character budget for the included conversation summary (ADR-021)"
+    )
+    recency_half_life_days: Annotated[float, Field(gt=0.0, le=3650.0)] = Field(
+        14.0, description="Retrieval recency-decay half-life: older memories score lower"
+    )
+    pinned_boost: Annotated[float, Field(ge=0.0, le=10.0)] = Field(
+        0.3, description="Retrieval score bonus for pinned turns"
+    )
+    favorite_boost: Annotated[float, Field(ge=0.0, le=10.0)] = Field(
+        0.15, description="Retrieval score bonus for favorited turns"
+    )
+    summarize_after_turns: Annotated[int, Field(ge=5, le=10_000)] = Field(
+        40, description="Summarize a conversation once it exceeds this many turns"
     )
 
 
@@ -219,6 +319,7 @@ class Settings(_Section):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     tts: TTSSettings = Field(default_factory=TTSSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     ui: UISettings = Field(default_factory=UISettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)

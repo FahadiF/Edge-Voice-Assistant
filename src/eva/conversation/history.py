@@ -1,17 +1,18 @@
-"""In-memory conversation history with turn windowing.
+"""`ConversationTurn`: the paired (user, assistant) shape the pre-M4
+`/conversation/history|export|import` API contract uses.
 
-M2 scope: system prompt + a sliding window of recent turns, composed into the
-LLM message list. Persistence and summarization arrive in M4 behind the
-MemoryStore port; the composition point is already isolated here so that change
-will not touch the orchestrator. `turns`/`load_turns` give the M2.6 platform
-API read/write access for the conversation export/import endpoints.
+Prompt composition and persistence moved to `MemoryStore` + `ContextBuilder`
+(ADR-019, ADR-021) in M4 — `ConversationHistory` (an in-process list, lost on
+restart) is gone. `pair_turns()` bridges the new speaker-granular
+`MemoryTurn` storage back to the paired shape that API contract already
+promises, so that surface does not change shape under M4.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from eva.llm.base import ChatMessage
+from eva.memory.models import MemoryTurn
 
 
 class ConversationTurn(BaseModel):
@@ -21,38 +22,16 @@ class ConversationTurn(BaseModel):
     assistant: str
 
 
-class ConversationHistory:
-    def __init__(self, system_prompt: str, max_turns: int = 20) -> None:
-        self._system_prompt = system_prompt
-        self._max_turns = max_turns
-        self._turns: list[tuple[str, str]] = []  # (user, assistant)
-
-    def add_turn(self, user_text: str, assistant_text: str) -> None:
-        self._turns.append((user_text, assistant_text))
-        if len(self._turns) > self._max_turns:
-            del self._turns[: len(self._turns) - self._max_turns]
-
-    def messages(self, user_text: str) -> list[ChatMessage]:
-        """Compose the message list for the next generation."""
-        messages = [ChatMessage(role="system", content=self._system_prompt)]
-        for user, assistant in self._turns:
-            messages.append(ChatMessage(role="user", content=user))
-            messages.append(ChatMessage(role="assistant", content=assistant))
-        messages.append(ChatMessage(role="user", content=user_text))
-        return messages
-
-    def clear(self) -> None:
-        self._turns.clear()
-
-    @property
-    def turn_count(self) -> int:
-        return len(self._turns)
-
-    @property
-    def turns(self) -> list[ConversationTurn]:
-        """Read-only view of the stored turns, oldest first (for API/export)."""
-        return [ConversationTurn(user=u, assistant=a) for u, a in self._turns]
-
-    def load_turns(self, turns: list[ConversationTurn]) -> None:
-        """Replace history with `turns` (import), respecting the turn window."""
-        self._turns = [(t.user, t.assistant) for t in turns[-self._max_turns :]]
+def pair_turns(turns: list[MemoryTurn]) -> list[ConversationTurn]:
+    """Pair consecutive (user, assistant) `MemoryTurn`s, oldest first, into
+    `ConversationTurn`s. An unpaired turn (e.g. the last one, awaiting a
+    reply) is skipped rather than guessed at."""
+    pairs: list[ConversationTurn] = []
+    i = 0
+    while i < len(turns) - 1:
+        if turns[i].speaker == "user" and turns[i + 1].speaker == "assistant":
+            pairs.append(ConversationTurn(user=turns[i].text, assistant=turns[i + 1].text))
+            i += 2
+        else:
+            i += 1
+    return pairs

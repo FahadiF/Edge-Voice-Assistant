@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from eva.core.registry import Registry
 
-ModelKind = Literal["llm", "asr", "tts", "vad"]
+ModelKind = Literal["llm", "asr", "tts", "vad", "embedding"]
 
 
 class ModelFile(BaseModel):
@@ -226,6 +226,35 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         license="MIT",
         managed_by="bundled",
         ram_mb=50,
+    ),
+    # ── Embedding (M4, ADR-020: semantic memory search) ──
+    ModelInfo(
+        id="all-minilm-l6-v2-onnx",
+        kind="embedding",
+        display_name="all-MiniLM-L6-v2 (ONNX)",
+        engine="onnx-embedding",
+        provider="sentence-transformers / Xenova (ONNX export)",
+        license="Apache-2.0",
+        files=(
+            ModelFile(
+                key="model",
+                url=_hf("Xenova/all-MiniLM-L6-v2", "onnx/model_quantized.onnx"),
+                filename="all-minilm-l6-v2.onnx",
+                size_mb=23,
+            ),
+            ModelFile(
+                key="tokenizer",
+                url=_hf("Xenova/all-MiniLM-L6-v2", "tokenizer.json"),
+                filename="all-minilm-l6-v2-tokenizer.json",
+                size_mb=1,
+            ),
+        ),
+        ram_mb=200,
+        languages="en",
+        notes=(
+            "384-dim sentence embeddings for memory semantic search (ADR-020). "
+            "Optional: memory search still works via keyword/FTS without it."
+        ),
     ),
 )
 

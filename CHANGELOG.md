@@ -6,6 +6,127 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-05 — M4: Memory, Personalization & Intelligence
+
+A large new subsystem: persistent conversation memory, semantic search,
+deterministic context composition, personas, user profiles, and voice
+metadata — the shift from "conversational assistant" to "personal
+assistant" the milestone brief asked for. Four new ADRs document the
+architecture decisions (docs-first, per instruction) before any of this was
+implemented; one of them (ADR-020) was amended mid-milestone after a real
+benchmark run exposed a design assumption that didn't hold up.
+
+**Added**
+- `eva/memory/` subsystem (ADR-019): `MemoryStore` + `UserProfileStore`
+  ports, `SQLiteMemoryStore`/`SQLiteUserProfileStore` adapter sharing one
+  connection, one database file (`conversations_dir/memory.db`, WAL mode,
+  numbered migrations, FTS5 full-text search with a `LIKE` fallback when
+  FTS5 isn't compiled into the platform's SQLite). Schema: `conversations`,
+  `turns` (speaker-granular, JSON metadata column reserved for future
+  attachments), `embeddings`, `summaries`, `user_profiles`.
+- `eva/embedding/` subsystem (ADR-020, and an ADR-010 amendment permitting
+  this one capability-on-capability dependency): `EmbeddingProvider` port,
+  `OnnxEmbeddingProvider` running `all-MiniLM-L6-v2` via `onnxruntime` +
+  `tokenizers` (no PyTorch — ADR-012 stays intact). New `kind="embedding"`
+  model-catalog entry, downloaded/verified through the existing
+  `ModelManager` — no new install mechanism.
+- Semantic retrieval: `NumpyMemoryRetriever` — brute-force cosine similarity
+  (no vector-database dependency), blended with recency decay and
+  pinned/favorite importance boosting. Searches across every conversation,
+  not just the active one (recalling *past* sessions is the point of
+  persistent memory). Bounded by a new `retrieval_scan_limit` setting
+  (default 2000 candidates) so latency stays flat regardless of how much
+  history has accumulated — confirmed by real measurement, see Benchmarks.
+- `ContextBuilder` (ADR-021): deterministic prompt composition — persona +
+  language + user-profile preferences → relevant memories → latest
+  conversation summary → recent-turn window → current utterance. Every
+  build returns a `ContextTrace` (what was retrieved, scores, what was
+  trimmed for budget) for inspection without spending a generation on it.
+  Replaces the old in-process `ConversationHistory` entirely.
+- Personas (ADR-022): `eva/conversation/personas.py`, mirroring the existing
+  language-profile registry pattern. Six built-ins (Default, Professional,
+  Friendly, Technical, Minimal, Creative); custom personas persist in
+  `settings.json` (configuration, not conversation data) and register
+  alongside the built-ins at startup.
+- User profiles (ADR-022): nickname, preferred language/voice/model,
+  conversation style, units, timezone — SQLite-backed (not settings-based),
+  designed to extend to multiple users without redesign. Named "user
+  profile" throughout, deliberately distinct from the pre-existing
+  hardware/model "profile" concept (`eva profiles`, `Settings.profile`).
+- Voices (ADR-022): `eva/tts/voices.py` — a registry over each TTS engine's
+  existing `voices()` capability discovery, enriched with best-effort
+  metadata (Kokoro's `{lang}{gender}_{name}` id convention parsed for
+  display name/language/gender; unrecognized ids fall back to the bare id).
+  Preview reuses the already-loaded engine's `synthesize()` — no new
+  synthesis path.
+- `LLMSummarizer` (ADR-019 §9): reuses the existing `LLMEngine` port to
+  summarize a conversation's turn range — no new ML dependency. Summaries
+  are additive; originals are never deleted.
+- Retention policy (`eva/memory/retention.py`): age-based and
+  per-conversation turn-count caps, both settings-driven, both skip pinned
+  turns.
+- `RuntimeSnapshot` gains `memory_enabled`, `memory_turn_count`,
+  `memory_db_size_bytes`, `memory_embedding_count`, `last_retrieval_ms`,
+  `last_retrieval_score_top1` — additive, same pattern as M3's diagnostics
+  fields.
+- Four new FastAPI routers, all ADR-017-compliant and additive to the
+  existing API: `/api/v1/memory` (search/forget/pin/favorite/archive/
+  merge/export/import/summarize/stats/context-preview), `/api/v1/personas`,
+  `/api/v1/users`, `/api/v1/voices`. New `MemoryStoreError`/
+  `MemoryNotFoundError` in the error hierarchy, mapped to HTTP 500/404.
+- New base dependencies: `onnxruntime`, `tokenizers` (both universal
+  wheels, no compiler required — ADR-013's preferred pattern).
+
+**Fixed (found by measurement, not inspection)**
+- An N+1 query pattern in `NumpyMemoryRetriever`: `MemoryStore.get_turn()`
+  was called once per *candidate* embedding, not once per *result* —
+  `MemoryStore.get_turns()` (bulk fetch) replaced it.
+- `ContextBuilder` originally scoped semantic retrieval to the active
+  conversation only, which doesn't actually recall *past* conversations —
+  the stated point of persistent memory (ADR-020 amendment). Now searches
+  globally by default.
+- `MemoryStore.embeddings_for()`'s `limit` parameter originally ordered by
+  `created_at` (unindexed), which forced SQLite to fully sort every
+  candidate before the limit could apply. Reordered to `embeddings.turn_id`
+  (that table's own primary key, already indexed, monotonic with insertion
+  order) — SQLite's planner can now stop early instead of sorting.
+
+**Benchmarks** (`eva.benchmark.memory.run_memory_benchmark`, real
+measurements, many-conversation realistic distribution, RTX 3060 Laptop
+reference machine)
+
+| Total turns | Keyword search (FTS) | Semantic retrieval | Context composition |
+|---|---|---|---|
+| 100 | 0.67 ms | 2.08 ms | 2.54 ms |
+| 1,000 | 2.77 ms | 28.24 ms | 28.95 ms |
+| 5,000 | 10.64 ms | 59.16 ms | 60.83 ms |
+| 20,000 | 39.67 ms | 59.02 ms | 60.91 ms |
+| 50,000 | 101.09 ms | 60.54 ms | 60.84 ms |
+
+Semantic retrieval and context composition plateau once total history
+exceeds the 2000-candidate scan limit — flat latency regardless of years of
+accumulated history. Keyword (FTS) search still scales with total turns;
+acceptable since it's a deliberate, user-initiated search action, not
+something in the live conversation turn's critical path.
+
+**Not implemented (documented, not silently dropped)**
+- CLI parity (`eva memory ...`, `eva user ...`) — the milestone asked for
+  API exposure ("No UI yet"), not CLI commands; `cli.py` is already flagged
+  as oversized technical debt. Candidate for M5 or an early fast-follow.
+- Real encryption-at-rest — `MemorySettings.encrypt_at_rest` exists as a
+  documented, honestly-inert flag; the `MemoryStore` port means a future
+  `SQLCipherMemoryStore` adapter is a drop-in swap when a compiled
+  dependency for it is explicitly wanted.
+
+**Tests**
+- +171 tests (462 total): SQLite schema/migrations/CRUD/search/management-
+  verbs/corruption-recovery/concurrent-access/long-conversation, ONNX
+  embedding provider (mocked tokenizer/session), semantic retrieval
+  accuracy on synthetic vectors with known nearest neighbors, retention
+  policy, context builder composition/trace/budget-trimming, personas,
+  voice-id parsing, summarizer, and all four new API routers via FastAPI's
+  `TestClient`.
+
 ### 2026-07-04 — M3: Natural Voice Conversation
 
 A latency/interruption-quality milestone, not a feature milestone. Pipeline

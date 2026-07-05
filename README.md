@@ -44,10 +44,14 @@ Completed milestones:
 - **M3 – Natural Voice Conversation** (streaming TTS synthesis for lower
   time-to-first-audio and faster interruption, richer runtime diagnostics,
   clean shutdown on Ctrl+C at every stage)
+- **M4 – Memory, Personalization & Intelligence** (persistent SQLite
+  conversation memory, semantic search, deterministic context composition,
+  personas, user profiles, voice metadata — see
+  [docs/adr](docs/adr/ADR-019-memory-subsystem-and-sqlite-storage.md))
 
 Next milestone:
 
-**M4 – Conversation Engine** (persistent memory, personas, multiple voices)
+**M5 – Web UI** (React frontend consuming the existing platform API)
 
 See the project roadmap for implementation progress.
 

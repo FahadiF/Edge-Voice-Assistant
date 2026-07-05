@@ -8,11 +8,12 @@ handful that exist only for the API surface itself.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from eva.conversation.history import ConversationTurn
+from eva.llm.base import ChatMessage
 
 CONVERSATION_EXPORT_VERSION = 1
 
@@ -42,7 +43,7 @@ class SettingsValidationResult(BaseModel):
 class ModelActivateRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["llm", "asr", "tts", "vad"] | None = Field(
+    kind: Literal["llm", "asr", "tts", "vad", "embedding"] | None = Field(
         None, description="Override the catalog kind if a model spans roles; usually omitted"
     )
 
@@ -113,6 +114,91 @@ class HardwareSummary(BaseModel):
     gpu: str | None
     vram_mb: int
     ram_mb: int
+
+
+# ──────────────────────── Memory (M4, ADR-019/ADR-021) ────────────────────────
+
+
+class MemorySearchRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    query: str
+    limit: Annotated[int, Field(ge=1, le=200)] = 20
+    conversation_id: str | None = None
+
+
+class MergeConversationsRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str
+    target_id: str
+
+
+class RetrievedMemoryTraceResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    turn_id: int
+    score: float
+    text_preview: str
+
+
+class ContextTraceResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    persona_id: str
+    profile_id: str | None
+    language_code: str
+    retrieved_memories: list[RetrievedMemoryTraceResponse]
+    summary_included: bool
+    summary_text_preview: str | None
+    recent_turn_count: int
+    trimmed_sections: list[str]
+
+
+class ContextPreviewResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    messages: list[ChatMessage]
+    trace: ContextTraceResponse
+
+
+# ──────────────────────── User profiles (M4, ADR-022) ────────────────────────
+
+
+class CreateUserProfileRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str | None = Field(None, description="Auto-generated (uuid4) if omitted")
+    nickname: str = ""
+    preferred_language: str | None = None
+    preferred_voice: str | None = None
+    preferred_llm_model: str | None = None
+    conversation_style: str = ""
+    units: Literal["metric", "imperial"] = "metric"
+    timezone: str = "UTC"
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateUserProfileRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    nickname: str | None = None
+    preferred_language: str | None = None
+    preferred_voice: str | None = None
+    preferred_llm_model: str | None = None
+    conversation_style: str | None = None
+    units: Literal["metric", "imperial"] | None = None
+    timezone: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+# ──────────────────────── Voices (M4, ADR-022) ────────────────────────
+
+
+class VoicePreviewRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    phrase: str = "Hello, this is a preview of my voice."
 
 
 # Generic passthrough type for PATCH bodies (arbitrary nested JSON merged

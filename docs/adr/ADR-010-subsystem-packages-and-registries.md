@@ -44,3 +44,29 @@ benchmark suite one enumeration mechanism for everything they display.
 - ARCHITECTURE.md §6 layout updated; `ports/`/`adapters/` packages are dropped.
 - The registry primitive lands in M1 (VAD is its first consumer), model/engine
   registries in M2, persona/template/tool registries in M4, plugin registry in M5+.
+
+## Amendment (M4, 2026-07-05): capability-on-capability dependencies
+
+Rule 4 said subsystems "may import `core` and `config` only." M4 needs one
+documented exception: `eva.memory` imports `eva.embedding`'s port and
+registry (never its adapters) to turn text into vectors for semantic search.
+This is not the same relationship the rule was written to prevent — it isn't
+two sibling engines reaching sideways into each other's internals (e.g. TTS
+importing ASR), it's one capability genuinely building on another, the same
+relationship `eva.conversation` already has with ASR/LLM/TTS/VAD, just one
+level lower in the stack.
+
+**Amended rule:** a subsystem may import another subsystem's **port and
+registry** (never its adapters, and never bypassing the registry to name a
+concrete implementation) when the dependency reflects a real building-block
+relationship, not convenience. The dependency graph must stay acyclic and
+each such exception must be named explicitly here rather than discovered by
+reading imports:
+
+- `eva.memory` → `eva.embedding` (port + registry only). No subsystem may
+  import `eva.memory`'s adapters from another subsystem package for the
+  reverse relationship — `eva.embedding` has no dependency on `eva.memory`.
+
+See ADR-019 for why embeddings are their own subsystem rather than folded
+into `eva/memory/` (this ADR's own §2 already anticipated "(future)
+embeddings" as a top-level registered kind, before M4 existed to need it).

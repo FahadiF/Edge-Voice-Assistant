@@ -21,7 +21,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 @router.get("")
 def list_models(
     state: StateDep,
-    kind: Literal["llm", "asr", "tts", "vad"] | None = Query(None),
+    kind: Literal["llm", "asr", "tts", "vad", "embedding"] | None = Query(None),
 ) -> list[dict[str, Any]]:
     manager = state.model_manager
     return [manager.describe(m.id, state.settings) for m in manager.available(kind)]
@@ -69,6 +69,14 @@ def activate_model(
         settings.tts.engine = info.engine
     elif kind == "vad":
         settings.vad.engine = info.engine
+    elif kind == "embedding":
+        # Not part of the hardware-tier preset system (TierModels has no
+        # embedding field) — activating one doesn't flip profile to custom.
+        settings.memory.embedding_model = info.id
+        settings.memory.embedding_engine = info.engine
+        save_settings(settings, state.paths.settings_file)
+        state.settings = settings
+        return state.model_manager.describe(model_id, settings)
     settings.profile = CUSTOM_PROFILE_ID
     save_settings(settings, state.paths.settings_file)
     state.settings = settings

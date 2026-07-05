@@ -54,7 +54,36 @@ current code.
 | POST | `/api/v1/conversation/clear` | Clear history |
 | GET | `/api/v1/conversation/export` | Export history as JSON |
 | POST | `/api/v1/conversation/import` | Replace history from a JSON payload |
+| POST | `/api/v1/memory/search` | Keyword search across all conversations (M4) |
+| GET | `/api/v1/memory/stats` | `MemoryStats`: conversation/turn/embedding counts, db size |
+| GET | `/api/v1/memory/context-preview` | Preview the exact LLM prompt + `ContextTrace` for `?text=` |
+| DELETE | `/api/v1/memory/turns/{id}` | Forget one turn permanently |
+| POST | `/api/v1/memory/turns/{id}/pin` \| `/favorite` | Boost retrieval scoring; `?pinned=false` to undo |
+| POST | `/api/v1/memory/conversations/{id}/archive` | Hide from listings (reversible); `?archived=false` to restore |
+| DELETE | `/api/v1/memory/conversations/{id}` | Delete a conversation and everything in it |
+| POST | `/api/v1/memory/conversations/merge` | Move all turns from one conversation into another |
+| POST | `/api/v1/memory/conversations/{id}/summarize` | LLM-generate and store a summary (originals kept) |
+| GET | `/api/v1/memory/export` | Export conversations as JSON; `?conversation_id=` for one |
+| POST | `/api/v1/memory/import` | Import a previously exported snapshot |
+| DELETE | `/api/v1/memory` | Delete *all* memory (privacy: "delete my data") |
+| GET | `/api/v1/personas` | List built-in + custom personas (no engine required) |
+| GET | `/api/v1/personas/{id}` | One persona |
+| POST | `/api/v1/personas` | Create/replace a custom persona |
+| DELETE | `/api/v1/personas/{id}` | Delete a custom persona (built-ins cannot be deleted) |
+| GET | `/api/v1/users` | List user profiles |
+| POST | `/api/v1/users` | Create a user profile (id auto-generated if omitted) |
+| GET | `/api/v1/users/{id}` | One user profile |
+| PATCH | `/api/v1/users/{id}` | Partially update a user profile |
+| POST | `/api/v1/users/{id}/activate` | Set as the active profile |
+| DELETE | `/api/v1/users/{id}` | Delete a user profile |
+| GET | `/api/v1/voices` | Voices available for the active TTS engine |
+| POST | `/api/v1/voices/{id}/preview` | Synthesize a short phrase; returns raw 16 kHz PCM |
 | WS | `/api/v1/ws` | Live event stream (see below) |
+
+Everything under `/memory`, `/users`, and `/voices` needs a running engine
+(`POST /engine/start` first) — they read/write the assistant's `MemoryStore`.
+`/personas` does not: personas are configuration (ADR-022), served from
+`settings.json` the same way `/settings` is.
 
 ## WebSocket event stream
 
@@ -91,4 +120,8 @@ all observable purely by staying connected.
 - **No duplicated business logic.** Every router calls existing services
   (`ModelManager`, `eva.config.service`, `eva.onboarding`, the `Orchestrator`)
   — the API and the CLI are two thin clients of the same engine.
-- See [ADR-017](adr/ADR-017-platform-api.md) for the full rationale.
+- See [ADR-017](adr/ADR-017-platform-api.md) for the full rationale, and
+  [ADR-019](adr/ADR-019-memory-subsystem-and-sqlite-storage.md)–
+  [ADR-022](adr/ADR-022-personas-user-profiles-voices.md) for the M4 memory/
+  personalization endpoints specifically — they're additive to this API,
+  not a new one.

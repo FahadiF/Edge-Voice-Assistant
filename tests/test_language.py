@@ -92,11 +92,18 @@ class TestOrchestratorIntegration:
         # Rebuild with Finnish configured.
         from eva.conversation.orchestrator import Orchestrator
         from eva.core.events import EventBus
+        from tests.server_fakes import FakeMemoryStore
         from tests.test_orchestrator import FakeASR, FakeAudioOut, FakeLLM, FakeTTS
 
         orch2 = Orchestrator(
-            orch_settings, EventBus(), FakeAudioOut(), FakeASR(), FakeLLM(), FakeTTS()
+            orch_settings,
+            EventBus(),
+            FakeAudioOut(),
+            FakeASR(),
+            FakeLLM(),
+            FakeTTS(),
+            FakeMemoryStore(),
         )
         assert orch2._asr_language == "fi"
-        messages = orch2._history.messages("hei")
-        assert "suomeksi" in messages[0].content
+        built = orch2._context_builder.build(orch2.conversation_id, "hei")
+        assert "suomeksi" in built.messages[0].content

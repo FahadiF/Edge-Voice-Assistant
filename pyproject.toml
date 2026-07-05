@@ -37,6 +37,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
     "websockets>=13",
+    # Semantic memory (M4) — ADR-020. Both publish universal wheels, no compiler
+    # required, keeping the "torch-free" rule (ADR-012) intact for embeddings too.
+    "onnxruntime>=1.18",
+    "tokenizers>=0.19",
 ]
 
 [project.optional-dependencies]
@@ -116,6 +120,8 @@ module = [
     "faster_whisper.*",
     "llama_cpp.*",
     "kokoro_onnx.*",
+    "onnxruntime.*",
+    "tokenizers.*",
 ]
 ignore_missing_imports = true
 

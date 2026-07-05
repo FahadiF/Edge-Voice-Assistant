@@ -1,6 +1,7 @@
 """Conversation API (Part 7): history, current turn, interrupt/cancel,
-clear, export/import. All operations need a running engine — the assistant
-owns the only ConversationHistory instance (ADR-006 turn orchestration).
+clear, export/import. All operations need a running engine — turns persist
+in the assistant's `MemoryStore` (ADR-019); this router presents the same
+paired-turn shape the API contract has always used.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 @router.get("/history", response_model=list[ConversationTurn])
 def get_history(state: StateDep) -> list[ConversationTurn]:
-    return state.require_assistant().orchestrator.history.turns
+    return state.require_assistant().orchestrator.conversation_turns
 
 
 @router.get("/current", response_model=EngineStatusResponse)
@@ -48,7 +49,7 @@ async def cancel(state: StateDep) -> InterruptResponse:
 
 @router.post("/clear")
 def clear_history(state: StateDep) -> dict[str, str]:
-    state.require_assistant().orchestrator.history.clear()
+    state.require_assistant().orchestrator.clear_conversation()
     return {"status": "cleared"}
 
 
@@ -60,11 +61,11 @@ def export_history(state: StateDep) -> ConversationExport:
         exported_at=datetime.now(UTC),
         profile=assistant.settings.profile,
         language=assistant.settings.conversation.language,
-        turns=assistant.orchestrator.history.turns,
+        turns=assistant.orchestrator.conversation_turns,
     )
 
 
 @router.post("/import")
 def import_history(payload: ConversationImportRequest, state: StateDep) -> dict[str, str]:
-    state.require_assistant().orchestrator.history.load_turns(payload.turns)
+    state.require_assistant().orchestrator.load_conversation_turns(payload.turns)
     return {"status": "imported", "turns": str(len(payload.turns))}

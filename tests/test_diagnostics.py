@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from eva.config.settings import Settings
 from eva.core.events import EventBus, TurnStarted
+from eva.memory.models import MemoryStats
 from eva.metrics.diagnostics import DiagnosticsProvider, sample_resources
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 
@@ -37,6 +38,8 @@ def _stub_assistant() -> SimpleNamespace:
         sentence_queue_depth=0,
         barge_in_count=2,
         last_barge_in_latency_ms=85,
+        last_retrieval_ms=12,
+        last_retrieval_score_top1=0.83,
         metrics=metrics,
     )
     audio = SimpleNamespace(
@@ -44,6 +47,14 @@ def _stub_assistant() -> SimpleNamespace:
         pipeline=SimpleNamespace(level_dbfs=-42.0),
         capture_ring=_SizedRing(),
         playback=SimpleNamespace(queued_seconds=lambda: 0.0),
+    )
+    memory_stats = MemoryStats(
+        conversation_count=1,
+        turn_count=4,
+        embedded_turn_count=4,
+        summary_count=0,
+        db_size_bytes=65536,
+        fts_enabled=True,
     )
     return SimpleNamespace(
         settings=settings,
@@ -53,6 +64,8 @@ def _stub_assistant() -> SimpleNamespace:
         llm=SimpleNamespace(device="cuda"),
         asr=SimpleNamespace(device="cuda"),
         tts=SimpleNamespace(device="cpu"),
+        memory=SimpleNamespace(stats=lambda: memory_stats),
+        embedding=SimpleNamespace(),  # non-None: embeddings enabled
         active_models=lambda: {
             "llm": settings.llm.model,
             "asr": settings.asr.model,
@@ -87,6 +100,12 @@ class TestSnapshot:
         assert snap.playback_queued_seconds == 0.0
         assert snap.barge_in_count == 2
         assert snap.last_barge_in_latency_ms == 85
+        assert snap.memory_enabled is True
+        assert snap.memory_turn_count == 4
+        assert snap.memory_db_size_bytes == 65536
+        assert snap.memory_embedding_count == 4
+        assert snap.last_retrieval_ms == 12
+        assert snap.last_retrieval_score_top1 == 0.83
 
     def test_snapshot_serializes_to_json(self) -> None:
         provider = DiagnosticsProvider(_stub_assistant())  # type: ignore[arg-type]

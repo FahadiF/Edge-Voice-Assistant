@@ -109,11 +109,37 @@ not the physical audio latency. Run `eva bench --rounds 3` and the manual
 interruption protocol on the RTX 3060 Laptop / Ryzen 9 5900HX reference machine
 before treating M3's product-facing exit criteria as fully met.
 
-## M4 — Conversation engine
-SQLite conversation memory, history windowing + summarization, personas/system-prompt
-profiles, settings manager surfaces, conversation export/import (JSON), text
-normalization pre-TTS, multiple voices.
-**Exit:** persistent multi-session memory; switchable personalities and voices.
+## M4 — Memory, Personalization & Intelligence ✅ (completed 2026-07-05)
+New `eva/memory/` subsystem (ADR-019): `MemoryStore` + `UserProfileStore`
+ports over one SQLite database (`conversations_dir/memory.db`, WAL mode,
+numbered migrations, FTS5 text search with a LIKE fallback). New
+`eva/embedding/` subsystem (ADR-020, ADR-010 amendment): `all-MiniLM-L6-v2`
+via ONNX Runtime + `tokenizers` (no PyTorch), a new `kind="embedding"`
+catalog entry, brute-force numpy cosine retrieval with recency decay +
+pinned/favorite boosting — no vector database, real-measured and bounded
+independent of history size (`retrieval_scan_limit`, default 2000
+candidates). `ContextBuilder` (ADR-021): deterministic prompt composition
+(persona + language + profile → relevant memories → summary → recent window
+→ current utterance), every build inspectable via a `ContextTrace`.
+Personas (ADR-022): registry-backed, mirroring the language-profile pattern,
+6 built-ins + settings-persisted custom ones. User profiles: SQLite-backed,
+separate from app `Settings` (multi-user-ready). Voices: `eva/tts/voices.py`
+registry over existing TTS capability discovery. `LLMSummarizer` reuses the
+existing `LLMEngine` port — no new ML dependency. Retention policy
+(age + per-conversation cap, pinned-exempt). `RuntimeSnapshot` gains memory
+diagnostics. Four new FastAPI routers (`/memory`, `/personas`, `/users`,
+`/voices`), all ADR-017-compliant, additive to the existing API.
+**Exit met:** 462 tests total (+171 since M3); conversation memory persists
+across restarts via `eva serve`'s `/api/v1/memory/*` and `/conversation/*`
+endpoints; semantic + keyword search, personas, and user profiles all
+verified through both the port layer (SQLite adapter) and the API layer
+(FastAPI `TestClient`); a real measured benchmark
+(`eva.benchmark.memory.run_memory_benchmark`) shows retrieval + context
+composition latency plateauing at ~60 ms regardless of total history size
+once bounded by `retrieval_scan_limit` — not estimated, measured, and one
+real N+1-query performance bug was found and fixed by that measurement
+before it shipped. Deferred to M5+ (documented, not silently dropped):
+`eva memory`/`eva user` CLI commands, real encryption-at-rest.
 
 ## M5 — Web UI
 The platform API and WebSocket protocol are already built (M2.6); this

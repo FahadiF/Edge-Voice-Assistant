@@ -4,31 +4,6 @@ import numpy as np
 import pytest
 
 from eva.audio.resample import resample_int16
-from eva.conversation.history import ConversationHistory
-
-
-class TestHistory:
-    def test_message_composition(self) -> None:
-        h = ConversationHistory("system prompt", max_turns=10)
-        h.add_turn("hi", "hello")
-        messages = h.messages("how are you")
-        assert [m.role for m in messages] == ["system", "user", "assistant", "user"]
-        assert messages[0].content == "system prompt"
-        assert messages[-1].content == "how are you"
-
-    def test_windowing_keeps_recent_turns(self) -> None:
-        h = ConversationHistory("s", max_turns=2)
-        for i in range(5):
-            h.add_turn(f"u{i}", f"a{i}")
-        assert h.turn_count == 2
-        messages = h.messages("next")
-        assert messages[1].content == "u3"
-
-    def test_clear(self) -> None:
-        h = ConversationHistory("s")
-        h.add_turn("u", "a")
-        h.clear()
-        assert h.turn_count == 0
 
 
 class TestResample:

@@ -1,6 +1,7 @@
-"""Conversation engine: history, sentence chunking, turn orchestration."""
+"""Conversation engine: history pairing, sentence chunking, context building,
+personas, turn orchestration."""
 
 from eva.conversation.chunker import SentenceChunker
-from eva.conversation.history import ConversationHistory
+from eva.conversation.history import ConversationTurn, pair_turns
 
-__all__ = ["ConversationHistory", "SentenceChunker"]
+__all__ = ["ConversationTurn", "SentenceChunker", "pair_turns"]

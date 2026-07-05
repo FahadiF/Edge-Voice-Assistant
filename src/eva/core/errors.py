@@ -38,3 +38,16 @@ class PluginError(EvaError):
 
 class RegistryError(EvaError):
     """Unknown id, duplicate registration, or invalid registry operation."""
+
+
+class MemoryStoreError(EvaError):
+    """Memory persistence, search, or management failure.
+
+    Named ``MemoryStoreError`` (not ``MemoryError``) because ``MemoryError``
+    is a Python builtin (``MemoryError``, raised on allocation failure) —
+    reusing it would shadow a standard-library exception.
+    """
+
+
+class MemoryNotFoundError(MemoryStoreError):
+    """A referenced conversation, turn, or user profile does not exist."""

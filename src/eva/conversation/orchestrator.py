@@ -41,13 +41,9 @@ from eva.audio.segmenter import (
 )
 from eva.config.settings import Settings
 from eva.conversation.chunker import SentenceChunker
-from eva.conversation.history import ConversationHistory
-from eva.conversation.language import (
-    effective_asr_language,
-    effective_system_prompt,
-    effective_voice,
-    resolve_language,
-)
+from eva.conversation.context_builder import ContextBuilder
+from eva.conversation.history import ConversationTurn, pair_turns
+from eva.conversation.language import effective_asr_language, effective_voice, resolve_language
 from eva.core.events import (
     BargeInDetected,
     BargeInLatencyMeasured,
@@ -70,6 +66,7 @@ from eva.core.events import (
 )
 from eva.core.turn import TurnController
 from eva.llm.base import GenerationParams, LLMEngine
+from eva.memory.base import MemoryStore
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 from eva.tts.base import TTSEngine
 
@@ -138,6 +135,9 @@ class Orchestrator:
         asr: ASREngine,
         llm: LLMEngine,
         tts: TTSEngine,
+        memory: MemoryStore,
+        *,
+        context_builder: ContextBuilder | None = None,
         metrics: MetricsCollector | None = None,
     ) -> None:
         self._settings = settings
@@ -146,15 +146,15 @@ class Orchestrator:
         self._asr = asr
         self._llm = llm
         self._tts = tts
+        self._memory = memory
         self._metrics = metrics or MetricsCollector()
         self._controller = TurnController()
         language = resolve_language(settings)
         self._asr_language = effective_asr_language(settings, language)
         self._voice = effective_voice(settings, language)
-        self._history = ConversationHistory(
-            effective_system_prompt(settings, language),
-            max_turns=settings.conversation.max_history_turns,
-        )
+        self._language_code = language.code
+        self._context_builder = context_builder or ContextBuilder(settings, memory)
+        self._conversation = memory.start_conversation(language=language.code)
         self._params = GenerationParams(
             temperature=settings.conversation.temperature,
             top_p=settings.conversation.top_p,
@@ -212,9 +212,54 @@ class Orchestrator:
         return self._current_sentences_queue.qsize() if self._current_sentences_queue else 0
 
     @property
-    def history(self) -> ConversationHistory:
-        """Read/write access for the platform API (export/import/clear)."""
-        return self._history
+    def memory(self) -> MemoryStore:
+        """The active MemoryStore (diagnostics, management API)."""
+        return self._memory
+
+    @property
+    def context_builder(self) -> ContextBuilder:
+        """The active ContextBuilder (platform API context-preview endpoint)."""
+        return self._context_builder
+
+    @property
+    def last_retrieval_ms(self) -> int | None:
+        """Most recent semantic-memory retrieval latency (diagnostics)."""
+        return self._context_builder.last_retrieval_ms
+
+    @property
+    def last_retrieval_score_top1(self) -> float | None:
+        """Top result's score from the most recent retrieval (diagnostics)."""
+        return self._context_builder.last_retrieval_top_score
+
+    @property
+    def conversation_id(self) -> str:
+        """The active conversation id (M4) — memories persist under this id
+        across the whole engine run; `clear_conversation()` starts a new one."""
+        return self._conversation.id
+
+    @property
+    def conversation_turns(self) -> list[ConversationTurn]:
+        """Paired (user, assistant) view of the active conversation — the
+        pre-M4 `/conversation/history|export` API contract, unchanged in
+        shape even though storage moved to `MemoryStore` (ADR-019)."""
+        return pair_turns(self._memory.all_turns(self._conversation.id))
+
+    def clear_conversation(self) -> None:
+        """Start a fresh conversation. Does not delete the old one's data —
+        it remains searchable/exportable; this matches the pre-M4 behavior
+        of resetting the *active* session, now that conversations persist."""
+        self._conversation = self._memory.start_conversation(language=self._language_code)
+
+    def load_conversation_turns(self, turns: list[ConversationTurn]) -> None:
+        """Import paired turns into the active conversation (platform API
+        import)."""
+        for turn in turns:
+            self._memory.add_turn(
+                self._conversation.id, "user", turn.user, language=self._language_code
+            )
+            self._memory.add_turn(
+                self._conversation.id, "assistant", turn.assistant, language=self._language_code
+            )
 
     def _set_state(self, state: str) -> None:
         self._state = state
@@ -387,7 +432,12 @@ class Orchestrator:
         loop = asyncio.get_running_loop()
         tokens: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_TOKEN_QUEUE_MAXSIZE)
         self._current_tokens_queue = tokens
-        messages = self._history.messages(user_text)
+        # Context building can embed the query + hit SQLite (ADR-021); run it
+        # off the event loop like every other blocking pipeline stage.
+        built_context = await asyncio.to_thread(
+            self._context_builder.build, self._conversation.id, user_text
+        )
+        messages = built_context.messages
 
         def produce() -> None:
             def push(item: str | None) -> None:
@@ -502,7 +552,20 @@ class Orchestrator:
             )
         )
         if reply:
-            self._history.add_turn(user_text, reply)
+            await asyncio.to_thread(
+                self._memory.add_turn,
+                self._conversation.id,
+                "user",
+                user_text,
+                language=self._language_code,
+            )
+            await asyncio.to_thread(
+                self._memory.add_turn,
+                self._conversation.id,
+                "assistant",
+                reply,
+                language=self._language_code,
+            )
 
         # ── wait for playback to drain (stays interruptible) ──
         while self._audio.is_speaking and self._controller.is_current(epoch):
