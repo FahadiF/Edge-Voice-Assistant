@@ -18,6 +18,7 @@ edge_env/
 .ruff_cache/
 .coverage
 htmlcov/
+.github/
 .cache/
 .claude
 .huggingface/
