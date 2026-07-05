@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from eva.config.settings import Settings
 from eva.core.events import EventBus, TurnStarted
 from eva.memory.models import MemoryStats
-from eva.metrics.diagnostics import DiagnosticsProvider, sample_resources
+from eva.metrics.diagnostics import DiagnosticsProvider, sample_resources, snapshot_idle
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 
 
@@ -65,6 +65,7 @@ def _stub_assistant() -> SimpleNamespace:
         asr=SimpleNamespace(device="cuda"),
         tts=SimpleNamespace(device="cpu"),
         memory=SimpleNamespace(stats=lambda: memory_stats),
+        profiles=SimpleNamespace(active=lambda: None),
         embedding=SimpleNamespace(),  # non-None: embeddings enabled
         active_models=lambda: {
             "llm": settings.llm.model,
@@ -106,8 +107,21 @@ class TestSnapshot:
         assert snap.memory_embedding_count == 4
         assert snap.last_retrieval_ms == 12
         assert snap.last_retrieval_score_top1 == 0.83
+        assert snap.active_persona_id == "default"
+        assert snap.active_profile_id is None
+        assert snap.active_voice == Settings().tts.voice
 
     def test_snapshot_serializes_to_json(self) -> None:
         provider = DiagnosticsProvider(_stub_assistant())  # type: ignore[arg-type]
         payload = provider.snapshot().model_dump_json()
         assert "metrics_summary" in payload
+
+
+class TestSnapshotIdle:
+    def test_idle_snapshot_reports_personalization_defaults(self) -> None:
+        settings = Settings()
+        snap = snapshot_idle(settings)
+        assert snap.state == "idle"
+        assert snap.active_persona_id == "default"
+        assert snap.active_profile_id is None
+        assert snap.active_voice == settings.tts.voice

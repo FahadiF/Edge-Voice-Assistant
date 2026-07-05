@@ -6,6 +6,64 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-05 — Critical fix: multiple system messages crashed real conversations
+
+Real-hardware testing (after the integration pass below) found `eva run`
+failing on the first turn with `ValueError: System message must be at the
+beginning.` from llama.cpp's Qwen chat template. Root cause: `ContextBuilder`
+emitted identity, technical facts, retrieved memories, and the conversation
+summary as up to four separate `system`-role messages — every chat template
+(Qwen, Llama, Mistral) requires exactly one, first. Every M4/integration-pass
+unit test used mocked messages and never caught this because none exercised
+a real chat-template engine.
+
+**Fixed**
+- `ContextBuilder` now merges identity, persona, language, profile
+  preferences, technical facts, retrieved memories, and the summary into
+  **one** system message, always `messages[0]`; no other message may be
+  `system` (ADR-021 Amendment 2).
+- Added `eva.llm.base.validate_chat_messages()` — a model-agnostic guard
+  (no Qwen-specific logic) enforcing "one system message, first, then
+  strict user/assistant alternation," called on every `ContextBuilder.build()`.
+- Added `ContextBuilder._normalize_alternation()` to merge any adjacent
+  same-speaker turns from storage (e.g. a malformed import, a dangling
+  unanswered turn) before validation, so malformed history degrades
+  gracefully instead of crashing the turn.
+- New `tests/test_llm_chat_validation.py`; `tests/test_context_builder.py`
+  gained alternation-normalization and single-system-message tests covering
+  the exact memory+summary+history combination that triggered the failure.
+
+### 2026-07-05 — M4 Integration & Validation Pass
+
+Manual testing after M4 shipped found that its subsystems, while fully
+built and tested, weren't actually reachable through the runtime: the
+assistant introduced itself using the underlying LLM's identity, personas
+and user profiles had no CLI, and the active persona/profile/voice weren't
+visible anywhere at runtime. This pass closes those gaps without changing
+any of M4's underlying design.
+
+**Fixed**
+- Assistant no longer leaks the underlying LLM's identity — a fixed
+  identity preamble in `ContextBuilder` establishes "Edge Voice Assistant"
+  regardless of persona; a separate technical-facts system message lets it
+  answer honestly *only* when explicitly asked a technical question (ADR-021
+  amendment).
+- `settings.conversation.active_profile_id` is now actually written when a
+  profile is activated (API and CLI) — previously dead, always-stale data.
+
+**Added**
+- CLI parity for every M4 capability: `eva personas` (list/show/create/
+  delete/use), `eva users` (list/show/create/edit/activate/delete), `eva
+  voices` (list/preview/use), `eva memory` (stats/list/show/search/forget/
+  pin/favorite/archive/delete-conversation/merge/export/import/delete-all/
+  summarize), `eva profile` (active-user-profile shortcut), and `eva run
+  --persona` for one-session overrides.
+- Startup banner (`eva run`) and `eva serve` now print the active persona,
+  user profile, voice, and memory stats. `RuntimeSnapshot` gained
+  `active_persona_id`, `active_profile_id`, `active_voice`.
+- [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md): step-by-step
+  end-to-end validation guide covering every M4 acceptance item.
+
 ### 2026-07-05 — M4: Memory, Personalization & Intelligence
 
 A large new subsystem: persistent conversation memory, semantic search,

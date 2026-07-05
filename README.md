@@ -88,6 +88,15 @@ The project is under active development.
   - Multiple voices
   - Context management
 
+- **M4 Integration & Validation Pass**
+  - Fixed assistant identity (introduces itself as "Edge Voice Assistant",
+    reveals the underlying model only on an explicit technical question)
+  - Full CLI parity: `eva personas`, `eva users`, `eva voices`, `eva
+    memory`, `eva profile`
+  - Persona/user-profile/voice state visible in the startup banner and
+    diagnostics
+  - [Manual testing guide](docs/MANUAL_TESTING.md) for the whole milestone
+
 ### Next milestone
 
 **M5 – Web UI** (React frontend consuming the existing platform API)

@@ -7,25 +7,48 @@ registry-resolved parts (persona, language, a `MemoryStore`, optionally a
 `MemoryRetriever` + `EmbeddingProvider` + `UserProfileStore`), which
 individually stay swappable.
 
-Composition order, always: system prompt (persona + language + profile) →
-retrieved relevant memories → latest conversation summary → recent-turn
-window → the current utterance. Every build returns a `ContextTrace`
-alongside the message list so the result is inspectable without spending a
-generation on it (the API's context-preview endpoint, Part 12).
+Composition order, always: ONE system message (identity + persona + language
++ profile preferences + technical backend facts + retrieved relevant
+memories + latest conversation summary, all merged into one string) →
+recent-turn window (strictly alternating user/assistant) → the current
+utterance. Every build returns a `ContextTrace` alongside the message list
+so the result is inspectable without spending a generation on it (the API's
+context-preview endpoint, Part 12).
+
+Exactly one system message, first, is a hard requirement — llama.cpp's
+chat-template engine (Qwen, Llama, Mistral, ...) rejects a second system
+message anywhere in the list (ADR-021 amendment). `validate_chat_messages()`
+(`eva.llm.base`) enforces this on every `build()` call.
 """
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from eva.config.settings import Settings
 from eva.conversation.language import resolve_language
 from eva.conversation.personas import resolve_persona
 from eva.embedding.base import EmbeddingProvider
-from eva.llm.base import ChatMessage
+from eva.llm.base import ChatMessage, validate_chat_messages
 from eva.memory.base import MemoryRetriever, MemoryStore, UserProfileStore
 from eva.memory.models import MemorySearchResult, UserProfile
+
+logger = logging.getLogger(__name__)
+
+_IDENTITY_PREAMBLE = (
+    "You are Edge Voice Assistant, a private, fully offline voice assistant "
+    "running locally on this device. Always refer to yourself as \"Edge "
+    "Voice Assistant\" — never by the name of the underlying language model, "
+    "ASR engine, or any other component. Do not volunteer which model or "
+    "backend powers you. Only answer questions about your underlying model, "
+    "LLM, or backend (e.g. \"which model are you?\", \"what LLM powers "
+    "you?\", \"which backend is loaded?\") when the user explicitly asks a "
+    "technical question like that — in that case, answer honestly using the "
+    "technical details provided separately below."
+)
 
 
 @dataclass(frozen=True)
@@ -111,18 +134,33 @@ class ContextBuilder:
             conversation_id, self._settings.conversation.max_history_turns
         )
 
-        messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
+        # Every chat-template-based engine (Qwen, Llama, Mistral, ...) rejects
+        # more than one system message, or one appearing anywhere but first
+        # (ADR-021 amendment) — so identity, persona, language, profile
+        # preferences, technical facts, retrieved memories, and the summary
+        # all fold into ONE system message, never separate ones.
+        system_sections = [system_prompt, self._technical_facts_block()]
         if memory_block:
-            messages.append(ChatMessage(role="system", content=memory_block))
+            system_sections.append(memory_block)
         if summary_text:
-            messages.append(
-                ChatMessage(
-                    role="system", content=f"Earlier conversation summary: {summary_text}"
-                )
+            system_sections.append(f"Earlier conversation summary: {summary_text}")
+        combined_system_prompt = "\n\n".join(system_sections)
+
+        turn_pairs = [(turn.speaker, turn.text) for turn in recent_turns]
+        turn_pairs.append(("user", user_text))
+        messages: list[ChatMessage] = [
+            ChatMessage(role="system", content=combined_system_prompt),
+            *(
+                ChatMessage(role=role, content=content)
+                for role, content in self._normalize_alternation(turn_pairs)
+            ),
+        ]
+        validate_chat_messages(messages)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Composed chat messages: %s",
+                [(m.role, len(m.content)) for m in messages],
             )
-        for turn in recent_turns:
-            messages.append(ChatMessage(role=turn.speaker, content=turn.text))
-        messages.append(ChatMessage(role="user", content=user_text))
 
         trace = ContextTrace(
             persona_id=persona.id,
@@ -136,10 +174,45 @@ class ContextBuilder:
         )
         return BuiltContext(messages=messages, trace=trace)
 
+    def _normalize_alternation(
+        self, turn_pairs: Sequence[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
+        """Merge consecutive same-role turns into one message.
+
+        `MemoryStore.recent_turns()` almost always alternates user/assistant
+        (the orchestrator only ever writes a matched pair together), but
+        nothing in the store enforces that — an imported snapshot, a future
+        plugin, or a dangling unanswered turn could leave two turns from the
+        same speaker adjacent. Rather than let that reach
+        `validate_chat_messages()` and hard-fail the turn, merge same-role
+        neighbors by joining their text — the chat-template contract (one
+        system message, then strict user/assistant alternation) still holds,
+        and no conversation content is dropped."""
+        merged: list[tuple[str, str]] = []
+        for role, content in turn_pairs:
+            if merged and merged[-1][0] == role:
+                merged[-1] = (role, f"{merged[-1][1]}\n{content}")
+            else:
+                merged.append((role, content))
+        return merged
+
     def _compose_system_prompt(self, persona_prompt: str, language_note: str) -> str:
+        prompt = f"{_IDENTITY_PREAMBLE} {persona_prompt}"
         if language_note:
-            return f"{persona_prompt} {language_note}"
-        return persona_prompt
+            return f"{prompt} {language_note}"
+        return prompt
+
+    def _technical_facts_block(self) -> str:
+        """Backend details the model may cite only when explicitly asked a
+        technical question (see `_IDENTITY_PREAMBLE`) — a separate system
+        message so identity/persona text never has to name a concrete
+        model."""
+        s = self._settings
+        return (
+            "Technical backend details (share only if explicitly asked): "
+            f"LLM model = {s.llm.model}; ASR model = {s.asr.model}; "
+            f"TTS model = {s.tts.model}; VAD engine = {s.vad.engine}."
+        )
 
     def _apply_profile_preferences(self, system_prompt: str, profile: UserProfile) -> str:
         preferences: list[str] = []

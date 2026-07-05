@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
+from eva.config.settings import save_settings
 from eva.memory.models import UserProfile
 from eva.server.deps import StateDep
 from eva.server.schemas import CreateUserProfileRequest, UpdateUserProfileRequest
@@ -62,6 +63,12 @@ def update_user(user_id: str, payload: UpdateUserProfileRequest, state: StateDep
 @router.post("/{user_id}/activate")
 def activate_user(user_id: str, state: StateDep) -> dict[str, str]:
     state.require_assistant().profiles.set_active(user_id)
+    # `UserProfileStore.active()` (DB-backed) is the source of truth the
+    # ContextBuilder actually reads; this settings field is a read-only
+    # mirror so `eva config show` / diagnostics / a future banner can show
+    # the active profile without opening the memory database.
+    state.settings.conversation.active_profile_id = user_id
+    save_settings(state.settings, state.paths.settings_file)
     return {"status": "activated"}
 
 

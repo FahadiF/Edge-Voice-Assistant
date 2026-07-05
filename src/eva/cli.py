@@ -2,9 +2,12 @@
 
 Commands: ``version``, ``diagnose``, ``doctor`` (dependency/model readiness),
 ``first-run`` (guided setup wizard), ``setup`` (install the LLM runtime),
-``devices``, ``listen``, ``echo-test``, ``models``, ``profiles``, ``config``,
-``run`` (voice loop; runs the wizard automatically when setup is incomplete),
-``bench``, ``serve`` (platform API server — see ``eva.server``, ADR-017).
+``devices``, ``listen``, ``echo-test``, ``models``, ``profiles`` (hardware/
+model presets), ``config``, ``run`` (voice loop; runs the wizard
+automatically when setup is incomplete), ``bench``, ``serve`` (platform API
+server — see ``eva.server``, ADR-017); M4 personalization/memory commands:
+``personas``, ``users``, ``voices``, ``memory``, ``profile`` (singular —
+active *user* profile, not to be confused with the hardware ``profiles``).
 
 The CLI is one client of the same engine services the platform API exposes
 (``ModelManager``, ``eva.config.service``, ``eva.onboarding``, …) — it does not
@@ -16,12 +19,16 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import eva
 from eva.config import get_app_paths, load_settings
+from eva.config.settings import Settings
 from eva.core.errors import EvaError
 from eva.hardware import detect_hardware, recommend_profile
+from eva.llm.registry import create_llm
 from eva.logging_setup import setup_logging
+from eva.tts.base import TTSEngine
 
 
 def _cmd_version(_: argparse.Namespace) -> int:
@@ -115,6 +122,11 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     """Start the assistant, guiding the user through setup if anything is missing."""
+    from eva.conversation.personas import (
+        register_builtin_personas,
+        register_custom_personas,
+        resolve_persona,
+    )
     from eva.engine import build_assistant
     from eva.onboarding import run_onboarding
     from eva.voice_loop import main_run
@@ -122,6 +134,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
+
+    if args.persona:
+        register_builtin_personas()
+        register_custom_personas(settings)
+        settings.conversation.persona = args.persona
+        resolve_persona(settings)  # raises RegistryError for an unknown id
+        # In-memory only (never saved) — a one-session override for
+        # side-by-side persona comparisons without editing settings.json.
 
     result = run_onboarding(settings, paths, assume_yes=args.yes)
     if not result.ready:
@@ -268,6 +288,426 @@ def _cmd_profiles(args: argparse.Namespace) -> int:
     return 2
 
 
+def _cmd_personas(args: argparse.Namespace) -> int:
+    """Manage personas (M4, ADR-022) — settings-backed, no engine needed."""
+    from eva.config.settings import PersonaSettingsEntry, save_settings
+    from eva.conversation.personas import (
+        persona_registry,
+        register_builtin_personas,
+        register_custom_personas,
+    )
+    from eva.core.errors import RegistryError
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    register_builtin_personas()
+    register_custom_personas(settings)
+    custom_ids = {p.id for p in settings.conversation.custom_personas}
+
+    if args.personas_command == "list":
+        print(f"{'':2}{'id':<16} {'display name':<20} {'verbosity':<10} tone")
+        for persona in persona_registry.snapshot().values():
+            marker = "*" if persona.id == settings.conversation.persona else " "
+            kind = "custom" if persona.id in custom_ids else "builtin"
+            print(
+                f"{marker:2}{persona.id:<16} {persona.display_name:<20} "
+                f"{persona.verbosity:<10} {persona.tone}  ({kind})"
+            )
+        print("\n* = active persona (settings.conversation.persona)")
+        return 0
+
+    if args.personas_command == "show":
+        try:
+            persona = persona_registry.get(args.persona_id)
+        except RegistryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        for key, value in persona.model_dump().items():
+            print(f"{key:<20}{value}")
+        return 0
+
+    if args.personas_command == "create":
+        existing = {p.id for p in persona_registry.snapshot().values()}
+        if args.id in existing - custom_ids:
+            print(
+                f"error: '{args.id}' is a built-in persona id and cannot be overridden",
+                file=sys.stderr,
+            )
+            return 1
+        entry = PersonaSettingsEntry(
+            id=args.id,
+            display_name=args.name,
+            system_prompt=args.prompt,
+            verbosity=args.verbosity,
+            tone=args.tone,
+            reasoning_style=args.reasoning_style,
+            temperature_override=args.temperature,
+        )
+        remaining = [p for p in settings.conversation.custom_personas if p.id != args.id]
+        settings.conversation.custom_personas = [*remaining, entry]
+        save_settings(settings, paths.settings_file)
+        print(f"Persona '{args.id}' saved.")
+        return 0
+
+    if args.personas_command == "delete":
+        if args.persona_id not in custom_ids:
+            print(
+                f"error: '{args.persona_id}' is not a custom persona (built-ins cannot be deleted)",
+                file=sys.stderr,
+            )
+            return 1
+        settings.conversation.custom_personas = [
+            p for p in settings.conversation.custom_personas if p.id != args.persona_id
+        ]
+        save_settings(settings, paths.settings_file)
+        persona_registry.unregister(args.persona_id)
+        print(f"Persona '{args.persona_id}' deleted.")
+        return 0
+
+    if args.personas_command == "use":
+        try:
+            persona_registry.get(args.persona_id)
+        except RegistryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        settings.conversation.persona = args.persona_id
+        save_settings(settings, paths.settings_file)
+        print(f"Active persona set to '{args.persona_id}' and saved.")
+        print("Takes effect on the next `eva run` / `eva serve` start.")
+        return 0
+    return 2
+
+
+def _cmd_users(args: argparse.Namespace) -> int:
+    """Manage user profiles (M4, ADR-022) — opens the memory database
+    directly, the same way `eva models` opens `ModelManager` directly,
+    without needing a running `eva serve` engine."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from eva.config.settings import save_settings
+    from eva.memory.models import UserProfile
+    from eva.memory.registry import create_stores
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    memory, profiles = create_stores(settings, paths)
+    try:
+        if args.users_command == "list":
+            active = profiles.active()
+            active_id = active.id if active else None
+            print(f"{'':2}{'id':<36} {'nickname':<16} language  voice")
+            for profile in profiles.list():
+                marker = "*" if profile.id == active_id else " "
+                print(
+                    f"{marker:2}{profile.id:<36} {profile.nickname:<16} "
+                    f"{profile.preferred_language or '-':<8}  {profile.preferred_voice or '-'}"
+                )
+            print("\n* = active profile")
+            return 0
+
+        if args.users_command == "show":
+            profile = profiles.get(args.user_id)
+            for key, value in profile.model_dump().items():
+                print(f"{key:<22}{value}")
+            return 0
+
+        if args.users_command == "create":
+            now = datetime.now(UTC)
+            kwargs: dict[str, object] = {
+                "id": args.id or str(uuid.uuid4()),
+                "nickname": args.nickname or "",
+                "preferred_language": args.language,
+                "preferred_voice": args.voice,
+                "preferred_llm_model": args.llm_model,
+                "conversation_style": args.style or "",
+                "created_at": now,
+                "updated_at": now,
+            }
+            # units/timezone: only set if the flag was passed — otherwise
+            # let UserProfile's own field defaults ("metric"/"UTC") apply.
+            if args.units is not None:
+                kwargs["units"] = args.units
+            if args.timezone is not None:
+                kwargs["timezone"] = args.timezone
+            created = profiles.create(UserProfile(**kwargs))
+            print(f"User profile '{created.id}' created.")
+            return 0
+
+        if args.users_command == "edit":
+            current = profiles.get(args.user_id)
+            updates: dict[str, object] = {}
+            if args.nickname is not None:
+                updates["nickname"] = args.nickname
+            if args.language is not None:
+                updates["preferred_language"] = args.language
+            if args.voice is not None:
+                updates["preferred_voice"] = args.voice
+            if args.llm_model is not None:
+                updates["preferred_llm_model"] = args.llm_model
+            if args.style is not None:
+                updates["conversation_style"] = args.style
+            if args.units is not None:
+                updates["units"] = args.units
+            if args.timezone is not None:
+                updates["timezone"] = args.timezone
+            updates["updated_at"] = datetime.now(UTC)
+            updated = profiles.update(current.model_copy(update=updates))
+            print(f"User profile '{updated.id}' updated.")
+            return 0
+
+        if args.users_command == "activate":
+            profiles.set_active(args.user_id)
+            # Mirror for visibility only — UserProfileStore.active() (DB) is
+            # the value ContextBuilder actually reads.
+            settings.conversation.active_profile_id = args.user_id
+            save_settings(settings, paths.settings_file)
+            print(f"User profile '{args.user_id}' activated.")
+            return 0
+
+        if args.users_command == "delete":
+            profiles.delete(args.user_id)
+            print(f"User profile '{args.user_id}' deleted.")
+            return 0
+        return 2
+    finally:
+        memory.close()
+
+
+def _load_tts_engine() -> tuple[TTSEngine, Settings]:
+    """Build and load just the TTS engine (no LLM/ASR/audio system) — voice
+    discovery/preview only needs this one, CPU-resident model."""
+    from eva.models.manager import ModelManager
+    from eva.tts.registry import create_tts
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    manager = ModelManager(paths)
+    tts = create_tts(settings, manager.files_for(settings.tts.model))
+    tts.load()
+    return tts, settings
+
+
+def _cmd_voices(args: argparse.Namespace) -> int:
+    """Manage TTS voices (M4, ADR-022)."""
+    from eva.config.settings import save_settings
+    from eva.tts.voices import preview_text, register_voices_for_engine, voices_for_engine
+
+    if args.voices_command == "use":
+        paths = get_app_paths()
+        paths.ensure_exists()
+        settings = load_settings(paths.settings_file)
+        settings.tts.voice = args.voice_id
+        save_settings(settings, paths.settings_file)
+        print(f"Active voice set to '{args.voice_id}' and saved.")
+        print("Takes effect on the next `eva run` / `eva serve` start.")
+        return 0
+
+    tts, settings = _load_tts_engine()
+    try:
+        register_voices_for_engine(settings.tts.engine, tts)
+        if args.voices_command == "list":
+            print(f"{'':2}{'id':<20} {'language':<10} style")
+            for voice in voices_for_engine(settings.tts.engine):
+                marker = "*" if voice.id == settings.tts.voice else " "
+                print(f"{marker:2}{voice.id:<20} {voice.language:<10} {voice.style_tag}")
+            print("\n* = active voice (settings.tts.voice)")
+            return 0
+
+        if args.voices_command == "preview":
+            import tempfile
+            import wave
+
+            from eva.audio.frames import SAMPLE_RATE
+
+            frame = preview_text(tts, args.voice_id, phrase=args.text)
+            out_path = Path(tempfile.gettempdir()) / f"eva-voice-preview-{args.voice_id}.wav"
+            with wave.open(str(out_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(frame.tobytes())
+            print(f"Preview written to {out_path}")
+            return 0
+        return 2
+    finally:
+        tts.unload()
+
+
+def _cmd_memory(args: argparse.Namespace) -> int:
+    """Manage persistent conversation memory (M4, ADR-019) — opens the
+    memory database directly, same pattern as `eva users`/`eva models`."""
+    import json
+
+    from eva.memory.registry import create_stores
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    memory, _profiles = create_stores(settings, paths)
+    try:
+        cmd = args.memory_command
+
+        if cmd == "stats":
+            stats = memory.stats()
+            for key, value in stats.model_dump().items():
+                print(f"{key:<22}{value}")
+            return 0
+
+        if cmd == "list":
+            for conv in memory.all_conversations(include_archived=args.include_archived):
+                flag = " [archived]" if conv.archived else ""
+                print(f"{conv.id}  {conv.started_at}  lang={conv.language}{flag}")
+            return 0
+
+        if cmd == "show":
+            for turn in memory.all_turns(args.conversation_id):
+                flags = "".join(
+                    f" [{f}]" for f in ("pinned", "favorite") if getattr(turn, f)
+                )
+                print(f"#{turn.id} [{turn.speaker}] {turn.created_at}{flags}: {turn.text}")
+            return 0
+
+        if cmd == "search":
+            results = memory.search_text(
+                args.query, limit=args.limit, conversation_id=args.conversation_id
+            )
+            for r in results:
+                print(f"#{r.turn.id} score={r.score:.3f} ({r.match_reason}): {r.turn.text}")
+            return 0
+
+        if cmd == "forget":
+            memory.forget(args.turn_id)
+            print(f"Turn #{args.turn_id} forgotten.")
+            return 0
+
+        if cmd == "pin":
+            memory.pin(args.turn_id, pinned=not args.unset)
+            print(f"Turn #{args.turn_id} {'unpinned' if args.unset else 'pinned'}.")
+            return 0
+
+        if cmd == "favorite":
+            memory.favorite(args.turn_id, favorite=not args.unset)
+            print(f"Turn #{args.turn_id} {'unfavorited' if args.unset else 'favorited'}.")
+            return 0
+
+        if cmd == "archive":
+            memory.archive_conversation(args.conversation_id, archived=not args.unset)
+            print(
+                f"Conversation '{args.conversation_id}' "
+                f"{'restored' if args.unset else 'archived'}."
+            )
+            return 0
+
+        if cmd == "delete-conversation":
+            memory.delete_conversation(args.conversation_id)
+            print(f"Conversation '{args.conversation_id}' deleted.")
+            return 0
+
+        if cmd == "merge":
+            memory.merge_conversations(args.source_id, args.target_id)
+            print(f"Merged '{args.source_id}' into '{args.target_id}'.")
+            return 0
+
+        if cmd == "export":
+            data = memory.export_json(args.conversation_id)
+            text = json.dumps(data, indent=2, default=str)
+            if args.out:
+                Path(args.out).write_text(text, encoding="utf-8")
+                print(f"Exported to {args.out}")
+            else:
+                print(text)
+            return 0
+
+        if cmd == "import":
+            payload = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            imported = memory.import_json(payload)
+            print(f"Imported {imported} turn(s).")
+            return 0
+
+        if cmd == "delete-all":
+            if not args.yes:
+                print(
+                    "This permanently deletes ALL conversations. Re-run with --yes.",
+                    file=sys.stderr,
+                )
+                return 1
+            memory.delete_all()
+            print("All memory deleted.")
+            return 0
+
+        if cmd == "summarize":
+            from eva.memory.models import MemorySummary
+            from eva.memory.summarizer import LLMSummarizer
+            from eva.models.manager import ModelManager
+
+            turns = memory.all_turns(args.conversation_id)
+            if not turns:
+                print("No turns in this conversation.")
+                return 0
+            manager = ModelManager(paths)
+            llm = create_llm(settings, manager.files_for(settings.llm.model)["model"])
+            llm.load()
+            try:
+                text = LLMSummarizer(llm).summarize(turns)
+            finally:
+                llm.unload()
+            first_id, last_id = turns[0].id, turns[-1].id
+            assert first_id is not None and last_id is not None
+            from datetime import UTC, datetime
+
+            saved = memory.add_summary(
+                MemorySummary(
+                    conversation_id=args.conversation_id,
+                    turn_range_start=first_id,
+                    turn_range_end=last_id,
+                    text=text,
+                    created_at=datetime.now(UTC),
+                    model_id=settings.llm.model,
+                )
+            )
+            print(saved.text)
+            return 0
+        return 2
+    finally:
+        memory.close()
+
+
+def _cmd_profile(args: argparse.Namespace) -> int:
+    """Quick access to the *active user profile* (M4, ADR-022) — singular,
+    distinct from the plural `eva profiles` (hardware/model presets). For
+    full user profile CRUD, see `eva users`."""
+    from eva.config.settings import save_settings
+    from eva.memory.registry import create_stores
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    memory, profiles = create_stores(settings, paths)
+    try:
+        if args.profile_command == "show":
+            active = profiles.active()
+            if active is None:
+                print("No active user profile. Create one with `eva users create`.")
+                return 0
+            for key, value in active.model_dump().items():
+                print(f"{key:<22}{value}")
+            return 0
+
+        if args.profile_command == "use":
+            profiles.set_active(args.user_id)
+            settings.conversation.active_profile_id = args.user_id
+            save_settings(settings, paths.settings_file)
+            print(f"User profile '{args.user_id}' activated.")
+            return 0
+        return 2
+    finally:
+        memory.close()
+
+
 def _cmd_bench(args: argparse.Namespace) -> int:
     from eva.benchmark.pipeline import PipelineBenchmark
     from eva.engine import build_assistant
@@ -383,6 +823,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     serve` is for the desktop app, a web UI, or any external integration."""
     import uvicorn
 
+    from eva.conversation.personas import resolve_persona
     from eva.server import create_app
 
     paths = get_app_paths()
@@ -390,9 +831,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     settings = load_settings(paths.settings_file)
     host = args.host or settings.server.host
     port = args.port or settings.server.port
+    persona = resolve_persona(settings)
     print(f"Edge Voice Assistant API on http://{host}:{port}")
     print(f"  Docs:      http://{host}:{port}/docs")
     print(f"  WebSocket: ws://{host}:{port}/api/v1/ws")
+    print(f"  Persona:   {persona.display_name} ({persona.id})")
+    print(f"  Voice:     {settings.tts.voice}")
+    print("  (Memory/user-profile stats become available after POST /api/v1/engine/start)")
     uvicorn.run(create_app(paths), host=host, port=port, log_level="info")
     return 0
 
@@ -476,6 +921,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="Start the voice assistant (guided setup on first run)")
     p_run.add_argument("--yes", "-y", action="store_true", help="Auto-confirm setup prompts")
+    p_run.add_argument(
+        "--persona",
+        default=None,
+        help="Override the active persona for this session only (not saved)",
+    )
     p_run.set_defaults(func=_cmd_run)
 
     p_first = sub.add_parser("first-run", help="Run the guided setup wizard")
@@ -504,6 +954,116 @@ def build_parser() -> argparse.ArgumentParser:
     p_pset = profiles_sub.add_parser("set", help="Apply a preset for the detected hardware tier")
     p_pset.add_argument("preset_id")
     p_profiles.set_defaults(func=_cmd_profiles)
+
+    p_personas = sub.add_parser("personas", help="Manage personas (M4)")
+    personas_sub = p_personas.add_subparsers(dest="personas_command", required=True)
+    personas_sub.add_parser("list", help="List built-in and custom personas")
+    p_pshow = personas_sub.add_parser("show", help="Show one persona's full definition")
+    p_pshow.add_argument("persona_id")
+    p_pcreate = personas_sub.add_parser("create", help="Create or replace a custom persona")
+    p_pcreate.add_argument("--id", required=True)
+    p_pcreate.add_argument("--name", required=True, help="Display name")
+    p_pcreate.add_argument("--prompt", required=True, help="System prompt")
+    p_pcreate.add_argument(
+        "--verbosity", choices=["minimal", "concise", "normal", "detailed"], default="normal"
+    )
+    p_pcreate.add_argument("--tone", default="neutral")
+    p_pcreate.add_argument("--reasoning-style", dest="reasoning_style", default="direct")
+    p_pcreate.add_argument("--temperature", type=float, default=None)
+    p_pdel = personas_sub.add_parser("delete", help="Delete a custom persona")
+    p_pdel.add_argument("persona_id")
+    p_puse = personas_sub.add_parser("use", help="Set the active persona (saved; restart to apply)")
+    p_puse.add_argument("persona_id")
+    p_personas.set_defaults(func=_cmd_personas)
+
+    p_users = sub.add_parser("users", help="Manage user profiles (M4)")
+    users_sub = p_users.add_subparsers(dest="users_command", required=True)
+    users_sub.add_parser("list", help="List user profiles")
+    p_ushow = users_sub.add_parser("show", help="Show one user profile")
+    p_ushow.add_argument("user_id")
+
+    def _add_profile_fields(p: argparse.ArgumentParser, *, id_required: bool) -> None:
+        if not id_required:
+            p.add_argument("--id", default=None, help="Profile id (generated if omitted)")
+        p.add_argument("--nickname", default=None)
+        p.add_argument("--language", default=None, help="Preferred language code")
+        p.add_argument("--voice", default=None, help="Preferred TTS voice id")
+        p.add_argument("--llm-model", dest="llm_model", default=None)
+        p.add_argument("--style", default=None, help="Conversation style")
+        p.add_argument("--units", choices=["metric", "imperial"], default=None)
+        p.add_argument("--timezone", default=None)
+
+    p_ucreate = users_sub.add_parser("create", help="Create a user profile")
+    _add_profile_fields(p_ucreate, id_required=False)
+    p_uedit = users_sub.add_parser("edit", help="Update fields on an existing user profile")
+    p_uedit.add_argument("user_id")
+    _add_profile_fields(p_uedit, id_required=True)
+    p_uactivate = users_sub.add_parser("activate", help="Set the active user profile")
+    p_uactivate.add_argument("user_id")
+    p_udel = users_sub.add_parser("delete", help="Delete a user profile")
+    p_udel.add_argument("user_id")
+    p_users.set_defaults(func=_cmd_users)
+
+    p_voices = sub.add_parser("voices", help="Manage TTS voices (M4)")
+    voices_sub = p_voices.add_subparsers(dest="voices_command", required=True)
+    voices_sub.add_parser("list", help="List voices for the active TTS engine")
+    p_vpreview = voices_sub.add_parser("preview", help="Synthesize a preview phrase to a WAV file")
+    p_vpreview.add_argument("voice_id")
+    p_vpreview.add_argument("--text", default="Hello, this is a preview of my voice.")
+    p_vuse = voices_sub.add_parser("use", help="Set the active voice (saved; restart to apply)")
+    p_vuse.add_argument("voice_id")
+    p_voices.set_defaults(func=_cmd_voices)
+
+    p_memory = sub.add_parser("memory", help="Manage persistent conversation memory (M4)")
+    memory_sub = p_memory.add_subparsers(dest="memory_command", required=True)
+    memory_sub.add_parser("stats", help="Aggregate memory statistics")
+    p_mlist = memory_sub.add_parser("list", help="List conversations")
+    p_mlist.add_argument("--include-archived", action="store_true")
+    p_mshow = memory_sub.add_parser("show", help="Show all turns in a conversation")
+    p_mshow.add_argument("conversation_id")
+    p_msearch = memory_sub.add_parser("search", help="Keyword search across memory")
+    p_msearch.add_argument("query")
+    p_msearch.add_argument("--conversation-id", dest="conversation_id", default=None)
+    p_msearch.add_argument("--limit", type=int, default=20)
+    p_mforget = memory_sub.add_parser("forget", help="Permanently delete one turn")
+    p_mforget.add_argument("turn_id", type=int)
+    p_mpin = memory_sub.add_parser("pin", help="Pin (boost retrieval) a turn")
+    p_mpin.add_argument("turn_id", type=int)
+    p_mpin.add_argument("--unset", action="store_true", help="Unpin instead")
+    p_mfav = memory_sub.add_parser("favorite", help="Favorite (boost retrieval) a turn")
+    p_mfav.add_argument("turn_id", type=int)
+    p_mfav.add_argument("--unset", action="store_true", help="Unfavorite instead")
+    p_march = memory_sub.add_parser("archive", help="Archive (hide) a conversation")
+    p_march.add_argument("conversation_id")
+    p_march.add_argument("--unset", action="store_true", help="Restore instead")
+    p_mdel = memory_sub.add_parser("delete-conversation", help="Permanently delete a conversation")
+    p_mdel.add_argument("conversation_id")
+    p_mmerge = memory_sub.add_parser(
+        "merge", help="Move all turns from one conversation into another"
+    )
+    p_mmerge.add_argument("source_id")
+    p_mmerge.add_argument("target_id")
+    p_mexport = memory_sub.add_parser("export", help="Export memory as JSON")
+    p_mexport.add_argument("--conversation-id", dest="conversation_id", default=None)
+    p_mexport.add_argument("--out", default=None, help="Write to a file instead of stdout")
+    p_mimport = memory_sub.add_parser("import", help="Import a previously exported JSON snapshot")
+    p_mimport.add_argument("file")
+    p_mdelall = memory_sub.add_parser("delete-all", help="Delete ALL memory (privacy)")
+    p_mdelall.add_argument("--yes", action="store_true", help="Confirm the deletion")
+    p_msum = memory_sub.add_parser("summarize", help="LLM-summarize a conversation (loads the LLM)")
+    p_msum.add_argument("conversation_id")
+    p_memory.set_defaults(func=_cmd_memory)
+
+    p_profile = sub.add_parser(
+        "profile",
+        help="Active user profile shortcut (M4; not to be confused with `profiles`, "
+        "the hardware/model presets)",
+    )
+    profile_sub = p_profile.add_subparsers(dest="profile_command", required=True)
+    profile_sub.add_parser("show", help="Show the active user profile")
+    p_profuse = profile_sub.add_parser("use", help="Activate a user profile by id")
+    p_profuse.add_argument("user_id")
+    p_profile.set_defaults(func=_cmd_profile)
 
     p_bench = sub.add_parser("bench", help="Run the end-to-end pipeline benchmark (no mic needed)")
     p_bench.add_argument(

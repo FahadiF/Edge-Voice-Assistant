@@ -85,6 +85,15 @@ Everything under `/memory`, `/users`, and `/voices` needs a running engine
 `/personas` does not: personas are configuration (ADR-022), served from
 `settings.json` the same way `/settings` is.
 
+**CLI equivalents.** Every one of these endpoints also has a direct CLI
+command that works without `eva serve` running at all — `eva personas`,
+`eva users`, `eva voices`, `eva memory`, and `eva profile` (the active user
+profile shortcut; not to be confused with the unrelated, pre-existing `eva
+profiles`, the hardware/model presets). The CLI commands open the memory
+database directly (the same way `eva models` opens `ModelManager` directly)
+rather than going through HTTP — see
+[MANUAL_TESTING.md](MANUAL_TESTING.md) for a full walkthrough of both.
+
 ## WebSocket event stream
 
 Connect to `ws://127.0.0.1:8765/api/v1/ws`. On connect you immediately receive:

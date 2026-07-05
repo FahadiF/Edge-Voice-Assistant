@@ -97,6 +97,10 @@ class RuntimeSnapshot(BaseModel):
     memory_embedding_count: int
     last_retrieval_ms: int | None
     last_retrieval_score_top1: float | None
+    # Personalization (M4, ADR-022)
+    active_persona_id: str
+    active_profile_id: str | None
+    active_voice: str
     # Events
     recent_events: list[str]  # newest last
 
@@ -105,6 +109,8 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
     """Snapshot for when no assistant is built/running yet (e.g. server up,
     engine not started). Configuration and system resources are still real;
     pipeline/device fields report their at-rest values."""
+    from eva.conversation.personas import resolve_persona
+
     return RuntimeSnapshot(
         profile=settings.profile,
         language=settings.conversation.language,
@@ -137,6 +143,9 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
         memory_embedding_count=0,
         last_retrieval_ms=None,
         last_retrieval_score_top1=None,
+        active_persona_id=resolve_persona(settings).id,
+        active_profile_id=settings.conversation.active_profile_id,
+        active_voice=settings.tts.voice,
         recent_events=[],
     )
 
@@ -148,9 +157,12 @@ class DiagnosticsProvider:
         self._assistant = assistant
 
     def snapshot(self) -> RuntimeSnapshot:
+        from eva.conversation.personas import resolve_persona
+
         a = self._assistant
         turns = a.orchestrator.metrics.turns
         memory_stats = a.memory.stats()
+        active_profile = a.profiles.active()
         return RuntimeSnapshot(
             profile=a.settings.profile,
             language=a.settings.conversation.language,
@@ -183,5 +195,8 @@ class DiagnosticsProvider:
             memory_embedding_count=memory_stats.embedded_turn_count,
             last_retrieval_ms=a.orchestrator.last_retrieval_ms,
             last_retrieval_score_top1=a.orchestrator.last_retrieval_score_top1,
+            active_persona_id=resolve_persona(a.settings).id,
+            active_profile_id=active_profile.id if active_profile is not None else None,
+            active_voice=a.settings.tts.voice,
             recent_events=[e.name for e in a.bus.recent_events()],
         )

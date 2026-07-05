@@ -12,6 +12,7 @@ import pytest
 
 from eva.config.settings import Settings
 from eva.core.events import EventBus
+from eva.memory.models import MemoryStats
 from eva.metrics.turn import MetricsCollector
 from eva.voice_loop import main_run
 
@@ -34,12 +35,22 @@ def _make_assistant(**overrides: object) -> SimpleNamespace:
     def stop() -> None:
         stopped["called"] = True
 
+    memory_stats = MemoryStats(
+        conversation_count=0,
+        turn_count=0,
+        embedded_turn_count=0,
+        summary_count=0,
+        db_size_bytes=0,
+        fts_enabled=True,
+    )
     assistant = SimpleNamespace(
         settings=Settings(),
         bus=EventBus(),
         llm=_StubEngine(),
         asr=_StubEngine(),
         tts=_StubEngine(),
+        memory=SimpleNamespace(stats=lambda: memory_stats),
+        profiles=SimpleNamespace(active=lambda: None),
         preload=lambda: None,
         start_audio=lambda: None,
         stop=stop,

@@ -152,7 +152,10 @@ edge-voice-assistant/
 │   ├── benchmark/            # benchmark suite + report generation
 │   ├── metrics/              # per-stage latency, resource sampling, diagnostics
 │   ├── server/               # FastAPI app: REST + WebSocket (the API-first boundary)
-│   └── cli.py                # headless/dev interface
+│   └── cli.py                # headless/dev interface — one file, one subparser group
+│                             #   per concern (models, profiles, config, personas, users,
+│                             #   voices, memory, profile — M4 integration pass), each a
+│                             #   thin client of the same services the API routers call
 ├── web/                      # React + Vite web UI (consumes the API only)
 ├── desktop/                  # desktop shell + tray/launcher (consumes the API only)
 ├── tests/                    # unit + integration (fake adapters, recorded audio)

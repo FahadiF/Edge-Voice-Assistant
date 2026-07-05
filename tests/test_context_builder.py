@@ -112,11 +112,19 @@ class TestDeterministicOrder:
         )
         result = builder.build(conv.id, "new question")
 
+        # Exactly one system message (identity + persona + language +
+        # technical facts + memory + summary, all merged) — a chat-template
+        # requirement (ADR-021 amendment), not just a style choice.
+        assert result.messages[0].role == "system"
+        assert sum(1 for m in result.messages if m.role == "system") == 1
+
+        system_content = result.messages[0].content
+        assert "relevant fact" in system_content
+        assert "weather" in system_content
+
         contents = [m.content for m in result.messages]
-        assert "relevant fact" in contents[1]  # memory block right after system prompt
-        assert "weather" in contents[2]  # summary next
-        assert contents[3] == "earlier question"
-        assert contents[4] == "earlier answer"
+        assert contents[1] == "earlier question"
+        assert contents[2] == "earlier answer"
         assert contents[-1] == "new question"  # current utterance always last
 
     def test_no_memories_or_summary_still_produces_valid_messages(
@@ -127,6 +135,52 @@ class TestDeterministicOrder:
         result = builder.build(conv.id, "hello")
         assert result.messages[0].role == "system"
         assert result.messages[-1] == ChatMessage(role="user", content="hello")
+
+
+class TestIdentity:
+    def test_identity_present_regardless_of_persona(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        settings = Settings()
+        settings.conversation.persona = "creative"
+        builder = ContextBuilder(settings, store)
+        result = builder.build(conv.id, "hi")
+        assert "Edge Voice Assistant" in result.messages[0].content
+
+    def test_technical_facts_block_contains_configured_models(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        settings = Settings()
+        builder = ContextBuilder(settings, store)
+        result = builder.build(conv.id, "hi")
+        facts = result.messages[0].content
+        assert settings.llm.model in facts
+        assert settings.asr.model in facts
+        assert settings.tts.model in facts
+        assert "only if explicitly asked" in facts.lower()
+
+    def test_only_one_system_message_ever_emitted(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        store.add_turn(conv.id, "user", "hi")
+        store.add_turn(conv.id, "assistant", "hello")
+        store.add_summary(
+            MemorySummary(
+                conversation_id=conv.id,
+                turn_range_start=1,
+                turn_range_end=2,
+                text="greeting exchanged",
+                created_at=datetime.now(UTC),
+                model_id="test",
+            )
+        )
+        retriever = _FixedRetriever([_make_result("a fact", 0.9)])
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        result = builder.build(conv.id, "another question")
+        system_messages = [m for m in result.messages if m.role == "system"]
+        assert len(system_messages) == 1
+        assert result.messages[0].role == "system"
 
 
 class TestPersonaAndLanguage:
@@ -241,8 +295,10 @@ class TestBudgetTrimming:
         )
         result = builder.build(conv.id, "hi")
         assert "relevant_memories" in result.trace.trimmed_sections
-        memory_message = result.messages[1]
-        assert len(memory_message.content) <= 100
+        # Trimming still bounds the memory *section* even though it's now
+        # merged into the single system message rather than its own message.
+        system_content = result.messages[0].content
+        assert "x" * 100 not in system_content
 
     def test_summary_trimmed_when_over_budget(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
@@ -272,6 +328,42 @@ class TestBudgetTrimming:
         assert result.trace.trimmed_sections == ()
 
 
+class TestAlternationNormalization:
+    def test_consecutive_same_role_turns_are_merged_not_rejected(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """A malformed import or a dangling unanswered turn could leave two
+        same-speaker turns adjacent in storage — `build()` must still
+        produce a valid, single-system-message, strictly-alternating list
+        rather than raising (ADR-021 amendment)."""
+        conv = store.start_conversation()
+        store.add_turn(conv.id, "user", "first thing")
+        store.add_turn(conv.id, "user", "second thing")  # no assistant reply between
+        store.add_turn(conv.id, "assistant", "a reply")
+
+        builder = ContextBuilder(Settings(), store)
+        result = builder.build(conv.id, "current question")
+
+        roles = [m.role for m in result.messages]
+        assert roles == ["system", "user", "assistant", "user"]
+        assert "first thing" in result.messages[1].content
+        assert "second thing" in result.messages[1].content
+
+    def test_dangling_unanswered_user_turn_merges_with_current_question(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        store.add_turn(conv.id, "user", "unanswered question")
+
+        builder = ContextBuilder(Settings(), store)
+        result = builder.build(conv.id, "follow-up question")
+
+        roles = [m.role for m in result.messages]
+        assert roles == ["system", "user"]
+        assert "unanswered question" in result.messages[1].content
+        assert "follow-up question" in result.messages[1].content
+
+
 class TestTrace:
     def test_trace_reflects_retrieved_memory_scores(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
@@ -286,8 +378,13 @@ class TestTrace:
 
     def test_trace_recent_turn_count(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
-        for i in range(4):
-            store.add_turn(conv.id, "user", f"turn {i}")
+        # Real conversations always alternate speakers (the orchestrator
+        # only ever writes a user+assistant pair together) — strict
+        # alternation is also what the chat-template contract requires
+        # (ADR-021 amendment), so test data must reflect that shape too.
+        for i in range(2):
+            store.add_turn(conv.id, "user", f"user turn {i}")
+            store.add_turn(conv.id, "assistant", f"assistant turn {i}")
         builder = ContextBuilder(Settings(), store)
         result = builder.build(conv.id, "current")
         assert result.trace.recent_turn_count == 4

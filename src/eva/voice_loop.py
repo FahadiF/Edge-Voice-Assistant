@@ -75,7 +75,11 @@ async def run_voice_loop(assistant: Assistant) -> None:
 
 
 def _startup_banner(assistant: Assistant) -> None:
-    """Show exactly which profile, models, and devices are active (ADR-015)."""
+    """Show exactly which profile, models, and devices are active (ADR-015),
+    plus which persona/user profile/voice/memory state is active (M4) —
+    without this, there was no on-screen confirmation the M4 subsystems were
+    doing anything."""
+    from eva.conversation.personas import resolve_persona
     from eva.hardware import detect_hardware, recommend_profile
     from eva.models.manager import ModelManager
 
@@ -96,6 +100,18 @@ def _startup_banner(assistant: Assistant) -> None:
     print(f"  TTS: {display_name(settings.tts.model)}  [{assistant.tts.device}]")
     print(f"  VAD: {settings.vad.engine}  [cpu]")
     print(f"  Language: {settings.conversation.language}")
+
+    persona = resolve_persona(settings)
+    active_profile = assistant.profiles.active()
+    user_line = f"{active_profile.nickname or active_profile.id}" if active_profile else "none"
+    memory_stats = assistant.memory.stats()
+    print(f"  Persona: {persona.display_name} ({persona.id})")
+    print(f"  User profile: {user_line}")
+    print(f"  Voice: {settings.tts.voice}")
+    print(
+        f"  Memory: {memory_stats.conversation_count} conversation(s), "
+        f"{memory_stats.turn_count} turn(s) stored"
+    )
 
 
 def main_run(assistant: Assistant) -> int:
