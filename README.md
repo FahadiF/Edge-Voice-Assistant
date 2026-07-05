@@ -44,6 +44,7 @@ The project is under active development.
 ### Completed milestones
 
 - **M0 – Project Foundation**
+
 - **M1 – Audio Foundation**
   - Full-duplex audio
   - Echo cancellation
@@ -79,15 +80,15 @@ The project is under active development.
   - Faster interruption
   - Rich runtime diagnostics
   - Graceful shutdown
+  
+  **M4 – Conversation Engine**
+
+  - Persistent memory
+  - Personas
+  - Multiple voices
+  - Context management
 
 ### Next milestone
-
-**M4 – Conversation Engine**
-
-- Persistent memory
-- Personas
-- Multiple voices
-- Context management
 
 **M5 – Web UI** (React frontend consuming the existing platform API)
 
