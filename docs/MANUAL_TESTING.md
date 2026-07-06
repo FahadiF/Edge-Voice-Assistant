@@ -422,6 +422,93 @@ and confirm the state-pill pulse animation stops.
 
 ---
 
+## 15. Conversational evaluation (M5.2)
+
+These checks judge *behavior*, not plumbing — run them against the real
+model (`eva run`, or the web UI with the engine started). Small local models
+vary run to run; judge the pattern, not one sample.
+
+### 15.1 Conversational continuity
+
+1. Say: *"Create a markdown table of two planets."* → expect a table.
+2. Then say only: *"with rows and columns."*
+   - [ ] The assistant extends/reproduces the **table** — it must not treat
+         the fragment as a brand-new request.
+3. Then: *"add a third one."*
+   - [ ] A third planet appears; the topic carries.
+
+### 15.2 Pronouns and interrupted thoughts
+
+1. *"Tell me about the Eiffel Tower."* → answer.
+2. *"How tall is it?"*
+   - [ ] "it" resolves to the Eiffel Tower (≈330 m / 1,083 ft).
+3. Start a sentence, pause mid-way so the VAD cuts you off, then continue
+   with the rest in the next turn.
+   - [ ] The reply treats both parts as one thought.
+
+### 15.3 Helpfulness over literalness
+
+- *"Act as a spreadsheet: sum 2, 4 and 6."*
+  - [ ] The answer is **12** — never "I am not a spreadsheet."
+- *"Pretend you're a travel agent and plan my Saturday."*
+  - [ ] It plans the Saturday; no identity disclaimer first.
+
+### 15.4 Capability honesty (image messaging)
+
+- *"Can you look at this image for me?"*
+  - [ ] The answer is **build-scoped** — "not enabled in this current
+        build" / "I can't view images in this build" — and ideally offers an
+        alternative.
+  - [ ] It never claims image understanding is permanently impossible.
+
+### 15.5 Natural identity
+
+- *"What's a good breakfast?"* (any ordinary question)
+  - [ ] The reply does **not** mention "Edge Voice Assistant".
+- *"Who are you?"*
+  - [ ] Now it names itself — once, naturally.
+- *"Which LLM powers you?"*
+  - [ ] Honest technical answer (the M4 contract still holds).
+
+### 15.6 Personas sound different
+
+Ask the SAME question (e.g. *"Explain how photosynthesis works"*) under
+each persona (`eva personas use <id>` or the Personas page + engine
+restart):
+
+- [ ] **default** — warm, natural, a few conversational sentences
+- [ ] **minimal** — one to two terse sentences, no preamble
+- [ ] **teacher** — an everyday analogy + step-by-step build-up
+- [ ] **technical** — precise terminology, no analogies, trade-offs
+- [ ] **professional** — direct answer first, then ordered points
+- [ ] **friendly** — upbeat, encouraging
+- [ ] **creative** — vivid, offers an unexpected angle
+
+The differences must be obvious without knowing which persona is active.
+
+### 15.7 Memory recall feels natural
+
+1. In one session: *"My favorite color is teal."* Restart.
+2. New session: *"What color should I paint my office?"*
+   - [ ] Teal comes up naturally — not "according to my records" or
+         "based on earlier context, your favorite color is teal."
+
+### 15.8 Long conversations
+
+Hold a 15+ turn conversation, then reference something from the first few
+turns.
+
+- [ ] The assistant still has it (20-turn window) or recalls it via memory.
+- [ ] Replies don't degrade into repetition or forget the persona's voice.
+
+### 15.9 Ambiguity handling
+
+- *"Make it shorter."* (with nothing plausible to shorten in view)
+  - [ ] It either makes the most helpful assumption or asks ONE short
+        clarifying question — not a refusal, not an essay about ambiguity.
+
+---
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,

@@ -184,9 +184,7 @@ class SQLiteMemoryStore(MemoryStore):
             raise MemoryNotFoundError(f"No turn with id {turn_id}")
 
     def pin(self, turn_id: int, *, pinned: bool = True) -> None:
-        cur = self._conn.execute(
-            "UPDATE turns SET pinned = ? WHERE id = ?", (int(pinned), turn_id)
-        )
+        cur = self._conn.execute("UPDATE turns SET pinned = ? WHERE id = ?", (int(pinned), turn_id))
         self._conn.commit()
         if cur.rowcount == 0:
             raise MemoryNotFoundError(f"No turn with id {turn_id}")
@@ -531,9 +529,7 @@ class SQLiteUserProfileStore(UserProfileStore):
         self._conn.commit()
 
     def active(self) -> UserProfile | None:
-        row = self._conn.execute(
-            "SELECT * FROM user_profiles WHERE active = 1 LIMIT 1"
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM user_profiles WHERE active = 1 LIMIT 1").fetchone()
         return self._row_to_profile(row) if row is not None else None
 
     def delete(self, profile_id: str) -> None:

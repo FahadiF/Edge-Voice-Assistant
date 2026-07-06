@@ -6,6 +6,48 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-06 — M5.2: Conversational intelligence & prompt engineering
+
+Real-conversation testing showed the pipeline worked but the *conversation*
+didn't: fragments ("with rows and columns.") were treated as new requests,
+the assistant said "I cannot process images" (permanently) and "I am not a
+spreadsheet" (unhelpfully), personas sounded identical, and the name got
+repeated. Root cause was prompt engineering, not context selection — the
+20-turn history window already contained everything needed (ADR-021
+Amendment 3).
+
+**Changed**
+- System-prompt hierarchy rebuilt (`context_builder.py`): one-sentence
+  identity (name used only when asked) → shared conversation guidance
+  (fragments/pronouns continue the topic; user's goal over
+  self-description; anything expressible in text can be produced;
+  ambiguity → helpful assumption or one short question) → capability
+  honesty ("not enabled in this build", never "impossible") → persona
+  style → language/profile. Conversation summary now precedes retrieved
+  memories; technical backend facts moved to the last (least salient)
+  section.
+- Memory block reframed: "You remember these things … use them naturally,
+  don't announce that you are recalling them" (was recital-inducing
+  "Potentially relevant earlier context:").
+- All six built-in persona prompts rewritten from one-liners into
+  substantial, mutually distinct style instructions; new **teacher**
+  persona (analogies, step-by-step, checks understanding).
+
+**Validated live against the real model** — all previously-failing
+scenarios now pass: fragment extends the table; "how tall is it?" resolves
+the pronoun; image question gets a build-scoped answer; "act as a
+spreadsheet" computes the sum; ordinary replies never name-drop; minimal
+vs teacher personas are unmistakably different.
+
+**Tests** — new `tests/test_conversation_quality.py` (16): prompt
+hierarchy/order, identity-appears-once, continuity/helpfulness/capability
+guidance, fragment+pronoun antecedents in the message list, 20-turn
+window, memory-block ordering + phrasing, persona pairwise distinctness.
+
+**Docs** — ADR-021 Amendment 3; MANUAL_TESTING §15 (conversational
+evaluation: continuity, pronouns, helpfulness, capability messaging,
+identity, personas, memory naturalness, long conversations, ambiguity).
+
 ### 2026-07-05 — M5.1: Markdown presentation layer + review fixes
 
 A senior review pass over M5, plus the fix for a UX bug found in manual

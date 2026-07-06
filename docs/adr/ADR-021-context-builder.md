@@ -183,3 +183,54 @@ rationale.
   emitted" assertion covering memory+summary+history all present at once —
   the exact combination real hardware hit and the unit tests previously
   didn't.
+
+## Amendment 3 (M5.2, 2026-07-06): prompt hierarchy and conversational guidance
+
+Real-conversation testing (M5.2 brief) surfaced behavioral failures that were
+prompt-engineering problems, not context-selection problems — the history
+window (20 turns) already contained everything the model needed:
+
+- a fragment follow-up ("with rows and columns.") was treated as a brand-new
+  request;
+- the assistant said "I cannot read or process images directly" (a permanent
+  claim the roadmap contradicts) and "I am not a spreadsheet" (identity
+  defense instead of helping);
+- the default persona sounded generic, and the assistant repeated its own
+  name.
+
+Root cause: the system prompt was one dense identity block plus a one-line
+persona. A 4B model gives disproportionate weight to whatever the prompt
+emphasizes — and the prompt emphasized *what the assistant is* over *how to
+converse*.
+
+**The system message now has an explicit hierarchy** (still one message,
+Amendment 2 unchanged):
+
+1. **Identity** — one sentence; the name is stated once with an instruction
+   to use it only when asked ("natural identity").
+2. **Conversation guidance** (new, shared by every persona) — fragments/
+   pronouns/ellipsis continue the current topic; prioritize the user's goal
+   over self-description; anything expressible in text can be produced
+   (never "I am not that kind of tool"); ambiguity → helpful assumption or
+   one short clarifying question; concise by default.
+3. **Capability honesty** (new) — capabilities not enabled in this build
+   (e.g. image understanding) are described as "not enabled in the current
+   build", never as permanently impossible.
+4. **Persona style** — voice only; rewritten from one-liners into
+   substantial, mutually distinct style instructions (plus a new `teacher`
+   built-in). Placed after the shared guidance so style never overrides
+   behavior.
+5. **Language note, profile preferences** — unchanged.
+6. **Conversation summary** — moved BEFORE retrieved memories: the current
+   conversation's own continuity outranks cross-conversation background.
+7. **Retrieved memories** — reframed from "Potentially relevant earlier
+   context:" (recital-inducing) to "You remember these things … use them
+   naturally, don't announce that you are recalling them".
+8. **Technical backend facts** — moved to the very LAST section: position
+   is salience for small models, and these are the least-wanted tokens in
+   an ordinary reply.
+
+`tests/test_conversation_quality.py` pins all of this: section order,
+name-appears-once, guidance presence, fragment/pronoun antecedents in the
+message list, persona pairwise distinctness, and memory-block ordering.
+Behavioral validation against the real LLM is in MANUAL_TESTING §15.

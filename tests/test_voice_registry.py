@@ -98,9 +98,7 @@ class TestPreview:
         engine = _FakeTTS(["af_heart"])
         frame = preview_text(engine, "af_heart")
         assert frame is not None
-        assert engine.synthesize_calls == [
-            ("Hello, this is a preview of my voice.", "af_heart")
-        ]
+        assert engine.synthesize_calls == [("Hello, this is a preview of my voice.", "af_heart")]
 
     def test_preview_accepts_custom_phrase(self) -> None:
         engine = _FakeTTS(["af_heart"])

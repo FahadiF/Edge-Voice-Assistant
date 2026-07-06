@@ -71,9 +71,7 @@ class NumpyMemoryRetriever(MemoryRetriever):
             if turn is None:
                 continue  # forgotten between embeddings_for() and here
             age_days = max((now - turn.created_at).total_seconds() / 86400.0, 0.0)
-            recency = (
-                0.5 ** (age_days / self._half_life_days) if self._half_life_days > 0 else 1.0
-            )
+            recency = 0.5 ** (age_days / self._half_life_days) if self._half_life_days > 0 else 1.0
             boost = (self._pinned_boost if turn.pinned else 0.0) + (
                 self._favorite_boost if turn.favorite else 0.0
             )

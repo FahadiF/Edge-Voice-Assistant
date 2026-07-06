@@ -102,9 +102,7 @@ class TestConversationsAndTurns:
         fetched = store.get_turns(ids)
         assert {t.id for t in fetched} == set(ids)
 
-    def test_get_turns_silently_skips_missing_and_deleted(
-        self, store: SQLiteMemoryStore
-    ) -> None:
+    def test_get_turns_silently_skips_missing_and_deleted(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
         keep = store.add_turn(conv.id, "user", "keep")
         gone = store.add_turn(conv.id, "user", "forgotten")
