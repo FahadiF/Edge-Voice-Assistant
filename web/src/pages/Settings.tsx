@@ -35,6 +35,7 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [confirmReset, setConfirmReset] = useState(false);
+  const [pendingSection, setPendingSection] = useState<string | null>(null);
 
   const schema = schemaQuery.data as
     | { properties?: Record<string, JsonSchema>; $defs?: Record<string, JsonSchema> }
@@ -121,7 +122,10 @@ export function SettingsPage() {
                 key={name}
                 className={name === section ? "active" : ""}
                 onClick={() => {
-                  if (dirty && !window.confirm("Discard unsaved changes?")) return;
+                  if (dirty) {
+                    setPendingSection(name);
+                    return;
+                  }
                   setDraft(null);
                   setFieldErrors({});
                   setSection(name);
@@ -172,6 +176,20 @@ export function SettingsPage() {
         danger
         onConfirm={() => reset.mutate()}
         onCancel={() => setConfirmReset(false)}
+      />
+      <ConfirmDialog
+        open={pendingSection !== null}
+        title="Discard unsaved changes?"
+        body={`You have unsaved changes in ${SECTION_LABELS[section] ?? section}.`}
+        confirmLabel="Discard changes"
+        danger
+        onConfirm={() => {
+          setDraft(null);
+          setFieldErrors({});
+          if (pendingSection) setSection(pendingSection);
+          setPendingSection(null);
+        }}
+        onCancel={() => setPendingSection(null)}
       />
     </div>
   );

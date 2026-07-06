@@ -8,7 +8,14 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { engine, memory } from "../api/endpoints";
 import type { MemoryTurn } from "../api/types";
-import { Card, ConfirmDialog, EmptyState, formatBytes, toast } from "../components/common";
+import {
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  downloadJson,
+  formatBytes,
+  toast,
+} from "../components/common";
 import "./memory.css";
 
 function TurnActions({ turn, onChanged }: { turn: MemoryTurn; onChanged: () => void }) {
@@ -211,15 +218,7 @@ export function Memory() {
           )}
           <div className="model-actions" style={{ marginTop: 10 }}>
             <button
-              onClick={async () => {
-                const data = await memory.exportJson();
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-                const a = document.createElement("a");
-                a.href = URL.createObjectURL(blob);
-                a.download = "eva-memory-export.json";
-                a.click();
-                URL.revokeObjectURL(a.href);
-              }}
+              onClick={async () => downloadJson(await memory.exportJson(), "eva-memory-export.json")}
             >
               Export all
             </button>

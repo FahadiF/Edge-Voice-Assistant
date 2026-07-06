@@ -6,6 +6,46 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-05 — M5.1: Markdown presentation layer + review fixes
+
+A senior review pass over M5, plus the fix for a UX bug found in manual
+testing: the UI showed raw Markdown and the TTS spoke formatting characters.
+
+**Added — Markdown presentation layer (ADR-024)**
+- `eva/conversation/markdown.py`: `MarkdownSpeechFilter` converts Markdown
+  to speakable text at the *only* LLM→TTS boundary (orchestrator speak
+  worker). Stateful: code-fence suppression carries across sentence
+  segments (a fence's ``` markers arrive in different segments under
+  streaming). Formatting markers removed, links→text, tables→comma-joined
+  cells, fenced code content skipped. Storage, events, API, export, memory,
+  and summaries keep raw Markdown canonical — verified by a new orchestrator
+  test asserting the stored/emitted reply keeps `**`/`` ` `` while the
+  spoken text does not.
+- Web UI renders assistant messages with `react-markdown` + `remark-gfm`
+  (bold/italic/headings/inline+fenced code/blockquotes/lists/tables/links);
+  raw HTML disabled; fenced blocks get a Copy button. User messages stay
+  plain text.
+- Tests: `tests/test_markdown_speech.py` (32 cases incl. malformed input),
+  `web/src/components/Markdown.test.tsx` (12 cases incl. HTML-injection
+  guard).
+
+**Fixed (review findings)**
+- WebSocket resilience: `EngineStarted`/`EngineStopped` and post-reconnect
+  snapshots now invalidate REST caches (were only picked up on a 5 s poll);
+  `stopWebSocket()` detaches handlers before closing so a deliberate stop
+  can't schedule a zombie reconnect (StrictMode-safe).
+- Conversation import no longer races the history refetch (refetch → reseed,
+  in order); transcript keys can't collide.
+- User-profile import validates the file shape and reports per-item
+  failures instead of silently continuing.
+- `postBinary` parses the standard `{detail, error_type}` error shape like
+  every other call (shared `throwApiError`).
+- Settings section-switch with unsaved changes uses `ConfirmDialog`, not
+  `window.confirm`.
+- Shared `downloadJson()` replaces three copies of blob-download code.
+- Accessibility: `aria-busy` on voice-preview buttons, `aria-readonly` +
+  explanation on the disabled persona-id field.
+
 ### 2026-07-05 — M5: Web UI & Desktop Shell
 
 The first full consumer of the platform API (ADR-017): a production-quality

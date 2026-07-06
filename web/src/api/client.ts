@@ -22,22 +22,26 @@ export class ApiError extends Error {
   }
 }
 
+async function throwApiError(response: Response): Promise<never> {
+  let errorType = "unknown";
+  let detail: unknown = response.statusText;
+  try {
+    const body = await response.json();
+    errorType = body.error_type ?? "unknown";
+    detail = body.detail ?? body;
+  } catch {
+    // non-JSON error body; keep statusText
+  }
+  throw new ApiError(response.status, errorType, detail);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
   });
   if (!response.ok) {
-    let errorType = "unknown";
-    let detail: unknown = response.statusText;
-    try {
-      const body = await response.json();
-      errorType = body.error_type ?? "unknown";
-      detail = body.detail ?? body;
-    } catch {
-      // non-JSON error body; keep statusText
-    }
-    throw new ApiError(response.status, errorType, detail);
+    await throwApiError(response);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -52,7 +56,8 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-  /** POST that returns raw bytes (voice preview PCM). */
+  /** POST that returns raw bytes (voice preview PCM). Errors still come
+   * back as JSON `{detail, error_type}` — parsed like every other call. */
   postBinary: async (path: string, body?: unknown): Promise<ArrayBuffer> => {
     const response = await fetch(`${API_BASE}${path}`, {
       method: "POST",
@@ -60,7 +65,7 @@ export const api = {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new ApiError(response.status, "unknown", response.statusText);
+      await throwApiError(response);
     }
     return response.arrayBuffer();
   },

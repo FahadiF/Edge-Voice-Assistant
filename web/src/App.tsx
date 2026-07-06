@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ThemeProvider, applyUiSettings } from "./theme/ThemeProvider";
-import { startWebSocket } from "./ws/socket";
+import { startWebSocket, stopWebSocket } from "./ws/socket";
+import { registerServerStateListener } from "./ws/store";
 import { settings } from "./api/endpoints";
 import { Dashboard } from "./pages/Dashboard";
 import { Conversation } from "./pages/Conversation";
@@ -34,6 +35,16 @@ function UiSettingsSync() {
 export function App() {
   useEffect(() => {
     startWebSocket();
+    // Engine start/stop and socket reconnects mean REST caches may be
+    // stale — invalidate everything; active queries refetch, idle ones
+    // refetch on next mount. Cheap against a localhost backend.
+    registerServerStateListener(() => {
+      void queryClient.invalidateQueries();
+    });
+    return () => {
+      registerServerStateListener(null);
+      stopWebSocket(); // StrictMode double-mount: stop resets state; the remount restarts
+    };
   }, []);
 
   return (

@@ -51,6 +51,15 @@ export interface EventLogEntry {
 
 const EVENT_LOG_LIMIT = 200;
 
+/** Called when server-side state may have changed out from under the REST
+ * cache: engine start/stop and WebSocket reconnect. App.tsx registers a
+ * TanStack Query invalidator here — the store stays UI-library-agnostic. */
+let onServerStateChanged: (() => void) | null = null;
+
+export function registerServerStateListener(listener: (() => void) | null): void {
+  onServerStateChanged = listener;
+}
+
 export interface WsState {
   connected: boolean;
   snapshot: RuntimeSnapshot | null;
@@ -140,7 +149,11 @@ export const useWsStore = create<WsState>((set, get) => ({
     switch (type) {
       case "snapshot": {
         const snapshot = data as unknown as RuntimeSnapshot;
+        const isReconnect = get().snapshot !== null;
         set({ snapshot, pipelineState: snapshot.state });
+        // A snapshot after the first one means the socket reconnected —
+        // anything cached from before the gap may be stale.
+        if (isReconnect) onServerStateChanged?.();
         return;
       }
       case "StateChanged":
@@ -277,7 +290,9 @@ export const useWsStore = create<WsState>((set, get) => ({
 
       case "EngineStarted":
       case "EngineStopped":
-        // Status pages re-query via TanStack Query invalidation on these.
+        // Engine lifecycle changes invalidate REST caches (engine status,
+        // models, voices, memory stats, ...) — pushed, not polled.
+        onServerStateChanged?.();
         return;
     }
   },

@@ -42,6 +42,7 @@ function connect(): void {
 
   socket.onclose = () => {
     useWsStore.getState().setConnected(false);
+    if (!started) return; // stopped deliberately — no reconnect
     reconnectTimer = setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
   };
@@ -58,10 +59,20 @@ export function startWebSocket(): void {
   connect();
 }
 
-/** For tests. */
+/** Tear down fully (unmount/tests): detach handlers BEFORE closing so the
+ * close event can't schedule a zombie reconnect. */
 export function stopWebSocket(): void {
   started = false;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  socket?.close();
-  socket = null;
+  backoff = INITIAL_BACKOFF_MS;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (socket) {
+    socket.onclose = null;
+    socket.onerror = null;
+    socket.onmessage = null;
+    socket.close();
+    socket = null;
+  }
 }

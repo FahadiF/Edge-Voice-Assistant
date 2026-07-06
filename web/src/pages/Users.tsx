@@ -10,7 +10,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { engine, models, users, voices } from "../api/endpoints";
 import type { UserProfile } from "../api/types";
-import { Card, ConfirmDialog, EmptyState, toast } from "../components/common";
+import { Card, ConfirmDialog, EmptyState, downloadJson, toast } from "../components/common";
 import "./personas.css";
 
 interface UserFormState {
@@ -187,33 +187,48 @@ export function Users() {
   });
 
   const doExport = async () => {
-    const data = await users.list();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "eva-user-profiles.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadJson(await users.list(), "eva-user-profiles.json");
   };
 
   const doImport = async (file: File) => {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(await file.text()) as UserProfile[];
-      for (const profile of parsed) {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      toast("error", "Import failed: not a valid JSON file");
+      return;
+    }
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every((p) => p && typeof p === "object" && typeof p.nickname === "string")
+    ) {
+      toast("error", "Import failed: expected an array of user profiles (with a nickname field)");
+      return;
+    }
+    const profiles = parsed as UserProfile[];
+    let imported = 0;
+    const failures: string[] = [];
+    for (const profile of profiles) {
+      try {
         await users.create({
           nickname: profile.nickname,
-          preferred_language: profile.preferred_language,
-          preferred_voice: profile.preferred_voice,
-          preferred_llm_model: profile.preferred_llm_model,
-          conversation_style: profile.conversation_style,
-          units: profile.units,
-          timezone: profile.timezone,
+          preferred_language: profile.preferred_language ?? null,
+          preferred_voice: profile.preferred_voice ?? null,
+          preferred_llm_model: profile.preferred_llm_model ?? null,
+          conversation_style: profile.conversation_style ?? "",
+          units: profile.units === "imperial" ? "imperial" : "metric",
+          timezone: profile.timezone ?? "UTC",
         });
+        imported += 1;
+      } catch (e) {
+        failures.push(`${profile.nickname || "unnamed"}: ${(e as Error).message}`);
       }
-      invalidate();
-      toast("success", `Imported ${parsed.length} profile(s)`);
-    } catch (e) {
-      toast("error", `Import failed: ${(e as Error).message}`);
+    }
+    invalidate();
+    if (failures.length === 0) {
+      toast("success", `Imported ${imported} profile(s)`);
+    } else {
+      toast("error", `Imported ${imported}, failed ${failures.length}: ${failures[0]}`);
     }
   };
 
