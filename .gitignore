@@ -1,53 +1,69 @@
+# -----------------------------
 # Python
+# -----------------------------
 __pycache__/
 **/__pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *.egg-info/
 .eggs/
 build/
 dist/
+
+# Virtual environments
 .venv/
 venv/
 env/
 ENV/
 edge_env/
 
-# Tooling caches
+# -----------------------------
+# Tool caches
+# -----------------------------
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-.github/
 .cache/
-.claude
+.claude/
 .huggingface/
 .ipynb_checkpoints/
 
+# -----------------------------
 # IDE
+# -----------------------------
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.tmp
 *.bak
 
-# Runtime artifacts (never commit user data or models).
-# Anchored to the repo root: an unanchored "models/" would also match
-# src/eva/models/ and silently exclude source code from commits.
+# -----------------------------
+# Runtime data
+# -----------------------------
 *.log
 /models/
 /data/
 /conversations/
 
-# Private / internal engineering documents
+# -----------------------------
+# Private documentation
+# -----------------------------
 docs/HANDOFF/
 docs/DEVELOPMENT.md
 docs/THESIS_ANALYSIS.md
 
-# Frontend (added in M5)
+# -----------------------------
+# Frontend
+# -----------------------------
 node_modules/
 web/dist/
 
-# OS
+# -----------------------------
+# Operating System
+# -----------------------------
 Thumbs.db
 .DS_Store
