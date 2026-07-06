@@ -1,0 +1,115 @@
+/* Markdown rendering inside assistant bubbles (ADR-024). */
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0.5em 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 0.8em 0 0.4em;
+  line-height: 1.25;
+}
+
+.markdown h1 { font-size: 1.2rem; }
+.markdown h2 { font-size: 1.1rem; }
+.markdown h3 { font-size: 1rem; }
+.markdown h4 { font-size: 0.95rem; }
+
+.markdown ul,
+.markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.markdown li {
+  margin: 0.15em 0;
+}
+
+.markdown blockquote {
+  margin: 0.5em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid var(--accent);
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.markdown table {
+  margin: 0.5em 0;
+  width: auto;
+  display: block;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+}
+
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.md-codeblock {
+  position: relative;
+  margin: 0.5em 0;
+}
+
+.md-codeblock pre {
+  margin: 0;
+  padding: 12px;
+  padding-right: 64px; /* room for the copy button */
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.md-codeblock pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.md-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.md-copy:hover {
+  opacity: 1;
+}
+
+/* Inside the user (accent-colored) bubble nothing renders as markdown —
+   user bubbles stay plain text (ADR-024) — but keep a guard anyway. */
+.bubble-user .markdown code {
+  background: rgb(255 255 255 / 0.2);
+  border-color: transparent;
+}

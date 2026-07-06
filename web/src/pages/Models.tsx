@@ -24,15 +24,16 @@ function ModelRow({ model }: { model: ModelCard }) {
 
   // Refresh the catalog when a download for this model finishes.
   useEffect(() => {
-    if (download?.status === "completed") {
+    if (!download) return;
+    if (download.status === "completed") {
       toast("success", `${model.name} installed`);
       clearDownload(model.id);
       queryClient.invalidateQueries({ queryKey: ["models"] });
-    } else if (download?.status === "failed") {
+    } else if (download.status === "failed") {
       toast("error", `${model.name} download failed: ${download.error}`);
       clearDownload(model.id);
     }
-  }, [download?.status, model.id, model.name, clearDownload, queryClient, download?.error]);
+  }, [download, model.id, model.name, clearDownload, queryClient]);
 
   const startDownload = useMutation({
     mutationFn: () => models.download(model.id),

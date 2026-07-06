@@ -110,3 +110,17 @@ default browser) is the zero-extra-dependency alternative.
   rather than a user.
 - The M6 desktop milestone shrinks to: tray, global PTT hotkey, engine
   process supervision, first-run wizard window, installers.
+
+## Amendment (M5.1, 2026-07-05): react-markdown is not a "component framework"
+
+The "no component framework" decision (§1) rejected broad UI kits (Tailwind,
+MUI) whose value is a large surface of pre-styled widgets. ADR-024 adds
+`react-markdown` + `remark-gfm` for assistant-message rendering. That does
+not reverse this decision: they are focused libraries for one bounded
+problem (parsing + rendering a documented text format), bundle into the same
+offline build, ship no styling of their own (all CSS is ours, themed by our
+tokens), and have no lighter in-house alternative — a hand-rolled Markdown
+parser would be strictly worse. The bar this ADR set was "don't take a
+dependency whose job we could do with tokens + native elements"; a
+CommonMark+GFM parser clears it. Bundle cost: ~160 KB min (~50 KB gzip),
+accepted for an offline-first app where the download is one-time.

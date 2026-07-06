@@ -51,8 +51,12 @@ function PersonaForm({
         <input
           value={form.id}
           disabled={initial.id !== ""}
+          aria-readonly={initial.id !== ""}
           onChange={(e) => setForm({ ...form, id: e.target.value })}
         />
+        {initial.id !== "" && (
+          <span className="field-help">An existing persona's id cannot change.</span>
+        )}
       </label>
       <label>
         Display name

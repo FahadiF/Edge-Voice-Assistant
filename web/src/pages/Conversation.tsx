@@ -1,13 +1,21 @@
-/** Conversation (Part 4): streaming transcript + history management. */
+/** Conversation (Part 4): streaming transcript + history management.
+ *
+ * Assistant text renders as Markdown (ADR-024); user text stays plain.
+ * Auto-scroll sticks to the bottom only while the user is already there —
+ * scrolling up to re-read pauses following until they return to the bottom.
+ */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { conversation } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import type { TranscriptEntry } from "../ws/store";
-import { Card, EmptyState, toast } from "../components/common";
+import { Card, EmptyState, downloadJson, toast } from "../components/common";
+import { Markdown } from "../components/Markdown";
 import "./conversation.css";
+
+const NEAR_BOTTOM_PX = 80;
 
 function timestamp(at: number): string {
   if (!at) return "";
@@ -30,7 +38,7 @@ function TurnBlock({ entry }: { entry: TranscriptEntry }) {
           <div className="bubble-meta">
             Assistant {entry.at ? `· ${timestamp(entry.at)}` : ""}
           </div>
-          {entry.assistant}
+          <Markdown>{entry.assistant}</Markdown>
           {entry.cancelled && (
             <div className="interrupted-marker">— interrupted ({entry.cancelReason}) —</div>
           )}
@@ -47,6 +55,7 @@ export function Conversation() {
   const clearTranscriptLocal = useWsStore((s) => s.clearTranscript);
   const [search, setSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const history = useQuery({ queryKey: ["conversation-history"], queryFn: conversation.history });
@@ -60,14 +69,23 @@ export function Conversation() {
     }
   }, [history.data, transcript.length, seedTranscript]);
 
-  // Keep the newest turn in view.
+  // Follow the stream only while the user is at (or near) the bottom.
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  }, []);
+
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    if (stickToBottom.current) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    }
   }, [transcript.length, liveTurn?.assistantText, liveTurn?.partialTranscript]);
 
   const interrupt = useMutation({
     mutationFn: conversation.interrupt,
-    onSuccess: (r) => toast(r.interrupted ? "success" : "info", r.interrupted ? "Turn interrupted" : "Nothing to interrupt"),
+    onSuccess: (r) =>
+      toast(r.interrupted ? "success" : "info", r.interrupted ? "Turn interrupted" : "Nothing to interrupt"),
     onError: (e) => toast("error", e.message),
   });
 
@@ -83,12 +101,10 @@ export function Conversation() {
   const doExport = async () => {
     try {
       const data = await conversation.exportJson();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `eva-conversation-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadJson(
+        data,
+        `eva-conversation-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.json`,
+      );
     } catch (e) {
       toast("error", `Export failed: ${(e as Error).message}`);
     }
@@ -100,9 +116,12 @@ export function Conversation() {
       const turns = Array.isArray(parsed) ? parsed : parsed.turns;
       if (!Array.isArray(turns)) throw new Error("File has no 'turns' array");
       await conversation.importJson(turns);
-      seeded.current = false;
+      // Refetch fully BEFORE reseeding — resetting the seeded flag first
+      // raced the refetch and could seed from stale data.
+      const fresh = await history.refetch();
       clearTranscriptLocal();
-      await history.refetch();
+      if (fresh.data) seedTranscript(fresh.data);
+      seeded.current = true;
       toast("success", `Imported ${turns.length} turn(s)`);
     } catch (e) {
       toast("error", `Import failed: ${(e as Error).message}`);
@@ -149,15 +168,15 @@ export function Conversation() {
           </>
         }
       >
-        <div className="transcript" ref={scrollRef}>
+        <div className="transcript" ref={scrollRef} onScroll={onScroll}>
           {visible.length === 0 && !liveTurn && (
             <EmptyState>
               No conversation yet. Start the engine and speak — the live transcript appears
               here. Past sessions live in <Link to="/memory">Memory</Link>.
             </EmptyState>
           )}
-          {visible.map((entry) => (
-            <TurnBlock key={`${entry.epoch}-${entry.at}`} entry={entry} />
+          {visible.map((entry, i) => (
+            <TurnBlock key={`${entry.epoch}-${entry.at}-${i}`} entry={entry} />
           ))}
           {liveTurn && !query && (
             <div className="turn turn-live">
@@ -172,7 +191,7 @@ export function Conversation() {
               {liveTurn.assistantText && (
                 <div className="bubble bubble-assistant">
                   <div className="bubble-meta">Assistant · now</div>
-                  {liveTurn.assistantText}
+                  <Markdown>{liveTurn.assistantText}</Markdown>
                   <span className="cursor" aria-hidden="true">
                     ▌
                   </span>

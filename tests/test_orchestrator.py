@@ -214,6 +214,40 @@ class TestNormalTurn:
 
         asyncio.run(scenario())
 
+    def test_markdown_stripped_for_tts_but_canonical_in_storage_and_events(self) -> None:
+        """ADR-024: the TTS engine must never receive Markdown formatting,
+        while memory and events keep the raw Markdown untouched."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["My name is ", "**Edge Voice Assistant**. ", "Use `eva run`."])
+            orch, bus, _audio, tts = make_orchestrator(llm=llm)
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                for _ in range(200):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            events = await drive(orch, bus, script)
+
+            # Spoken text: formatting characters gone, content intact.
+            assert tts.synthesized == ["My name is Edge Voice Assistant.", "Use eva run."]
+
+            # Event stream: raw Markdown (the web UI renders it).
+            finished = next(e for e in events if isinstance(e, LlmFinished))
+            assert finished.text == "My name is **Edge Voice Assistant**. Use `eva run`."
+
+            # Storage: raw Markdown is canonical (ADR-024).
+            stored = orch.memory.recent_turns(orch.conversation_id, 10)
+            assistant_turns = [t for t in stored if t.speaker == "assistant"]
+            assert assistant_turns
+            assert assistant_turns[-1].text == (
+                "My name is **Edge Voice Assistant**. Use `eva run`."
+            )
+
+        asyncio.run(scenario())
+
     def test_empty_transcript_skips_llm(self) -> None:
         async def scenario() -> None:
             orch, bus, audio, _ = make_orchestrator(asr=FakeASR(text=""))

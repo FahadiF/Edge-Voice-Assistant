@@ -158,7 +158,16 @@ export function Voices() {
                 {voice.style_tag && <span className="chip">{voice.style_tag}</span>}
               </div>
               <div className="model-actions">
-                <button onClick={() => void preview(voice.id)} disabled={previewing !== null}>
+                <button
+                  onClick={() => void preview(voice.id)}
+                  disabled={previewing !== null}
+                  aria-busy={previewing === voice.id}
+                  aria-label={
+                    previewing === voice.id
+                      ? `Playing preview of ${voice.display_name}`
+                      : `Preview ${voice.display_name}`
+                  }
+                >
                   {previewing === voice.id ? "Playing…" : "Preview"}
                 </button>
                 {voice.id !== activeVoice && (

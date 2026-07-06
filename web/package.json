@@ -15,7 +15,9 @@
     "@tanstack/react-query": "^5.59.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.26.0",
+    "remark-gfm": "^4.0.1",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

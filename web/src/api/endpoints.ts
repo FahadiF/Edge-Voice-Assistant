@@ -72,12 +72,11 @@ export const memory = {
       conversation_id: conversationId ?? null,
     }),
   stats: () => api.get<MemoryStats>("/memory/stats"),
-  contextPreview: (text: string, conversationId?: string) =>
-    api.get<ContextPreviewResponse>(
-      `/memory/context-preview?text=${encodeURIComponent(text)}${
-        conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ""
-      }`,
-    ),
+  contextPreview: (text: string, conversationId?: string) => {
+    const params = new URLSearchParams({ text });
+    if (conversationId) params.set("conversation_id", conversationId);
+    return api.get<ContextPreviewResponse>(`/memory/context-preview?${params}`);
+  },
   forget: (turnId: number) => api.delete<{ status: string }>(`/memory/turns/${turnId}`),
   pin: (turnId: number, pinned = true) =>
     api.post<{ status: string }>(`/memory/turns/${turnId}/pin?pinned=${pinned}`),

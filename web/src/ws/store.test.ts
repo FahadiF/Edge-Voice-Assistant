@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { useWsStore } from "./store";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerServerStateListener, useWsStore } from "./store";
 
 function reset() {
   useWsStore.setState({
@@ -18,7 +18,9 @@ describe("WebSocket store reducers", () => {
   beforeEach(reset);
 
   it("applies the snapshot and pipeline state on connect", () => {
-    const snapshot = { state: "listening", epoch: 3 } as never;
+    // A partial snapshot: only the fields the reducer reads. The cast is
+    // through Record (honest about being partial), not `as never`.
+    const snapshot: Record<string, unknown> = { state: "listening", epoch: 3 };
     useWsStore.getState().handleMessage({ type: "snapshot", data: snapshot });
     expect(useWsStore.getState().snapshot).toEqual(snapshot);
     expect(useWsStore.getState().pipelineState).toBe("listening");
@@ -122,6 +124,27 @@ describe("WebSocket store reducers", () => {
     const transcript = useWsStore.getState().transcript;
     expect(transcript).toHaveLength(2);
     expect(new Set(transcript.map((t) => t.epoch)).size).toBe(2);
+  });
+
+  describe("server-state invalidation listener", () => {
+    afterEach(() => registerServerStateListener(null));
+
+    it("fires on EngineStarted and EngineStopped", () => {
+      const listener = vi.fn();
+      registerServerStateListener(listener);
+      useWsStore.getState().handleMessage({ type: "EngineStarted", data: {} });
+      useWsStore.getState().handleMessage({ type: "EngineStopped", data: {} });
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it("fires on a re-connect snapshot but not the first snapshot", () => {
+      const listener = vi.fn();
+      registerServerStateListener(listener);
+      useWsStore.getState().handleMessage({ type: "snapshot", data: { state: "idle", epoch: 0 } });
+      expect(listener).not.toHaveBeenCalled(); // first connect: caches are fresh
+      useWsStore.getState().handleMessage({ type: "snapshot", data: { state: "idle", epoch: 0 } });
+      expect(listener).toHaveBeenCalledTimes(1); // reconnect: invalidate
+    });
   });
 
   it("bounds the event log and excludes LlmToken spam", () => {

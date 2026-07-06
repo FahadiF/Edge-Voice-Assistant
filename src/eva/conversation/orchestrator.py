@@ -44,6 +44,7 @@ from eva.conversation.chunker import SentenceChunker
 from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.history import ConversationTurn, pair_turns
 from eva.conversation.language import effective_asr_language, effective_voice, resolve_language
+from eva.conversation.markdown import MarkdownSpeechFilter
 from eva.core.events import (
     BargeInDetected,
     BargeInLatencyMeasured,
@@ -473,19 +474,27 @@ class Orchestrator:
         async def speak_worker() -> None:
             nonlocal first_audio_ms, tts_first_ms
             started = False
+            # One filter per turn: fence state must survive across sentence
+            # segments (a code block's ``` markers arrive in different
+            # segments — ADR-024). Storage/events keep the raw Markdown;
+            # only what reaches the TTS engine is converted.
+            speech_filter = MarkdownSpeechFilter()
             while True:
                 sentence = await sentences.get()
                 if sentence is None:
                     break
                 if self._controller.is_stale(epoch):
                     continue  # drain without speaking
+                spoken_text = speech_filter.convert(sentence)
+                if not spoken_text:
+                    continue  # e.g. a segment entirely inside a code fence
                 if not started:
                     started = True
                     self._bus.publish(TtsStarted(epoch=epoch))
                     self._set_state("speaking")
                 synth_start = time.perf_counter()
                 sync_gen = self._tts.synthesize_stream(
-                    sentence, voice=self._voice, speed=self._settings.tts.speed
+                    spoken_text, voice=self._voice, speed=self._settings.tts.speed
                 )
                 try:
                     async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:

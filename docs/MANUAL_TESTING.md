@@ -304,6 +304,40 @@ token-by-token, an interrupted turn shows an "— interrupted —" marker,
 data, **Import** re-loads it, **Clear** empties the view, and the search box
 filters the visible transcript.
 
+**Auto-scroll behavior:** while a reply streams, the view stays pinned to
+the bottom. Scroll up mid-stream to re-read — the view must *stop*
+following (it should not yank you back down on every token). Scroll back to
+the bottom and following resumes.
+
+### 14.2a Markdown rendering & speech (ADR-024)
+
+Ask the assistant something that elicits formatting (e.g. "show me a Python
+hello-world and a two-row table of two models"). Verify **rendering** in the
+assistant bubble:
+
+- [ ] `**bold**` shows as **bold**, not literal asterisks
+- [ ] `*italic*` / `_italic_` shows as italic
+- [ ] `# Heading` shows as a heading, not a literal `#`
+- [ ] `` `inline code` `` shows in a monospace pill
+- [ ] a fenced ` ``` ` block shows as a code box **with a working Copy button**
+- [ ] `> quote` shows as an indented blockquote
+- [ ] numbered and bulleted lists show as real lists
+- [ ] a GFM table shows as a bordered table (scrolls horizontally if wide)
+- [ ] links are clickable and open in a new tab
+- [ ] raw HTML in a reply (e.g. an `<img onerror=…>`) is shown/escaped, never
+      executed — no injected element appears in the DOM
+
+Verify **speech**: listen to the same reply (or check what reaches TTS). The
+assistant must say "Edge Voice Assistant", **not** "asterisk asterisk Edge
+Voice Assistant"; it must not read backticks, table pipes, heading hashes,
+or link URLs; and it must **skip** fenced code block contents entirely
+(the code is on screen, not spoken).
+
+Verify **canonical storage** (Markdown preserved everywhere but the two
+presentation layers): after such a reply, `eva memory search` / the Memory
+page / `GET /api/v1/conversation/export` all still contain the raw Markdown
+(`**`, fences, etc.). Only the rendered bubble and the audio are transformed.
+
 ### 14.3 Memory
 
 With the engine running: search returns results with score/match-reason
