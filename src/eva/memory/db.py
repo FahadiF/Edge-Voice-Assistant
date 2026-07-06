@@ -125,9 +125,7 @@ def schema_version(conn: sqlite3.Connection) -> int:
 
 
 def fts5_enabled(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "SELECT value FROM schema_meta WHERE key = 'fts5_enabled'"
-    ).fetchone()
+    row = conn.execute("SELECT value FROM schema_meta WHERE key = 'fts5_enabled'").fetchone()
     return bool(row and row["value"] == "1")
 
 
@@ -155,8 +153,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         try:
             conn.executescript(sql)
             conn.execute(
-                "INSERT INTO schema_migrations (version, applied_at) "
-                "VALUES (?, datetime('now'))",
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
                 (version,),
             )
             conn.commit()

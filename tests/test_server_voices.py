@@ -59,7 +59,5 @@ class TestPreview:
         assert r.headers["content-type"] == "application/octet-stream"
 
     def test_preview_accepts_custom_phrase(self, running_client: TestClient) -> None:
-        r = running_client.post(
-            "/api/v1/voices/test-voice/preview", json={"phrase": "Testing 123"}
-        )
+        r = running_client.post("/api/v1/voices/test-voice/preview", json={"phrase": "Testing 123"})
         assert r.status_code == 200

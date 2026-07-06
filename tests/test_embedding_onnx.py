@@ -113,9 +113,7 @@ class TestEmbed:
     def test_padding_tokens_excluded_from_mean_pool(self, tmp_path: Path) -> None:
         # Token 0 and 1 are "real"; token 2 is padding (attention_mask=0) with an
         # extreme value that must NOT influence the pooled result.
-        hidden = np.array(
-            [[1.0] * 4, [3.0] * 4, [1000.0] * 4, [1000.0] * 4], dtype=np.float32
-        )
+        hidden = np.array([[1.0] * 4, [3.0] * 4, [1000.0] * 4, [1000.0] * 4], dtype=np.float32)
 
         class _PaddedTokenizer(_FakeTokenizer):
             def encode(self, text: str) -> _FakeEncoding:
@@ -139,9 +137,7 @@ class TestEmbed:
         assert "token_type_ids" in session.last_feed
         assert np.all(session.last_feed["token_type_ids"] == 0)
 
-    def test_token_type_ids_omitted_when_model_does_not_expect_them(
-        self, tmp_path: Path
-    ) -> None:
+    def test_token_type_ids_omitted_when_model_does_not_expect_them(self, tmp_path: Path) -> None:
         hidden = np.ones((4, 384), dtype=np.float32)
         session = _FakeSession(hidden, input_names=("input_ids", "attention_mask"))
         provider = _make_provider(tmp_path, _FakeTokenizer(), session)

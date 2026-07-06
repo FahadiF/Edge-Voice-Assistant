@@ -38,16 +38,40 @@ from eva.memory.models import MemorySearchResult, UserProfile
 
 logger = logging.getLogger(__name__)
 
+# System-prompt building blocks (ADR-021 Amendment 3). Hierarchy: identity
+# (one sentence, name used sparingly) → how to converse → capability honesty
+# → persona style → language → profile. Ordered so behavior guidance
+# dominates and self-description is de-emphasized — manual testing showed a
+# small LLM with a heavy identity block kept talking about itself ("I am
+# not a spreadsheet") instead of helping.
+
 _IDENTITY_PREAMBLE = (
-    "You are Edge Voice Assistant, a private, fully offline voice assistant "
-    'running locally on this device. Always refer to yourself as "Edge '
-    'Voice Assistant" — never by the name of the underlying language model, '
-    "ASR engine, or any other component. Do not volunteer which model or "
-    "backend powers you. Only answer questions about your underlying model, "
-    'LLM, or backend (e.g. "which model are you?", "what LLM powers '
-    'you?", "which backend is loaded?") when the user explicitly asks a '
-    "technical question like that — in that case, answer honestly using the "
-    "technical details provided separately below."
+    "You are Edge Voice Assistant, a private assistant that runs entirely "
+    "on this device. Mention your own name only when the user asks who you "
+    "are — never work it into ordinary replies, and don't describe what "
+    "you are unless asked."
+)
+
+_CONVERSATION_GUIDANCE = (
+    "This is a flowing spoken conversation, not isolated questions. Short "
+    "fragments, pronouns (it, that, this, them), and incomplete sentences "
+    'continue the current topic — if the user says "with rows and '
+    'columns" right after discussing a table, extend that table; never '
+    "treat a follow-up as an unrelated request. Focus on accomplishing "
+    "what the user is trying to do rather than explaining what you are or "
+    "are not. Anything expressible in text — lists, tables, structured "
+    "data, step-by-step plans, calculations — you can and should produce; "
+    "never refuse on the grounds of not being that kind of tool. When a "
+    "request is ambiguous, make the most helpful reasonable assumption, or "
+    "ask one short clarifying question. Stay concise by default; expand "
+    "when detail genuinely helps."
+)
+
+_CAPABILITY_GUIDANCE = (
+    "This build works with voice and text only. Some capabilities (for "
+    "example image understanding) are planned for the platform but not "
+    "enabled in this build — when asked about one, say it is not enabled "
+    "in the current build rather than claiming it is impossible."
 )
 
 
@@ -136,14 +160,20 @@ class ContextBuilder:
 
         # Every chat-template-based engine (Qwen, Llama, Mistral, ...) rejects
         # more than one system message, or one appearing anywhere but first
-        # (ADR-021 amendment) — so identity, persona, language, profile
-        # preferences, technical facts, retrieved memories, and the summary
-        # all fold into ONE system message, never separate ones.
-        system_sections = [system_prompt, self._technical_facts_block()]
+        # (ADR-021 Amendment 2) — so everything folds into ONE system
+        # message. Section order is a deliberate hierarchy (Amendment 3):
+        # identity/behavior/persona first (dominates tone), then this
+        # conversation's summary (continuity), then cross-conversation
+        # memories (background knowledge), then technical facts last (rarely
+        # relevant — low salience keeps the model from volunteering them).
+        system_sections = [system_prompt]
+        if summary_text:
+            system_sections.append(
+                f"Summary of the earlier part of this conversation: {summary_text}"
+            )
         if memory_block:
             system_sections.append(memory_block)
-        if summary_text:
-            system_sections.append(f"Earlier conversation summary: {summary_text}")
+        system_sections.append(self._technical_facts_block())
         combined_system_prompt = "\n\n".join(system_sections)
 
         turn_pairs = [(turn.speaker, turn.text) for turn in recent_turns]
@@ -197,10 +227,19 @@ class ContextBuilder:
         return merged
 
     def _compose_system_prompt(self, persona_prompt: str, language_note: str) -> str:
-        prompt = f"{_IDENTITY_PREAMBLE} {persona_prompt}"
+        """Identity → conversational behavior → capability honesty → persona
+        style → language. Behavior before persona so continuity/helpfulness
+        rules hold for every persona; persona after so its voice is the last
+        (most salient) style instruction (ADR-021 Amendment 3)."""
+        parts = [
+            _IDENTITY_PREAMBLE,
+            _CONVERSATION_GUIDANCE,
+            _CAPABILITY_GUIDANCE,
+            persona_prompt,
+        ]
         if language_note:
-            return f"{prompt} {language_note}"
-        return prompt
+            parts.append(language_note)
+        return " ".join(parts)
 
     def _technical_facts_block(self) -> str:
         """Backend details the model may cite only when explicitly asked a
@@ -255,10 +294,19 @@ class ContextBuilder:
         return results, trace
 
     def _format_memory_block(self, results: list[MemorySearchResult]) -> tuple[str, bool]:
+        """Retrieved memories, highest-scored first (the retriever's order is
+        preserved). Framed as things the assistant *remembers* — to be woven
+        in naturally when relevant — not as a document to recite (ADR-021
+        Amendment 3; manual testing found mechanical 'according to earlier
+        context' phrasing)."""
         if not results:
             return "", False
         lines = [f"- {r.turn.text}" for r in results]
-        block = "Potentially relevant earlier context:\n" + "\n".join(lines)
+        block = (
+            "You remember these things from earlier conversations. Use them "
+            "naturally when relevant — don't announce that you are recalling "
+            "them, and ignore any that don't apply:\n" + "\n".join(lines)
+        )
         budget = self._settings.memory.max_memory_chars
         if len(block) > budget:
             return block[:budget], True
