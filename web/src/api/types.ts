@@ -106,6 +106,24 @@ export interface MemorySettings {
   summarize_after_turns: number;
 }
 
+export interface PermissionsSettings {
+  date_time: boolean;
+  timezone: boolean;
+  locale: boolean;
+  cpu: boolean;
+  gpu: boolean;
+  ram: boolean;
+  os: boolean;
+  internet: boolean;
+  local_files: boolean;
+  camera: boolean;
+  clipboard: boolean;
+  browser: boolean;
+  shell: boolean;
+  python: boolean;
+  plugins: boolean;
+}
+
 export interface ServerSettings {
   host: string;
   port: number;
@@ -134,6 +152,7 @@ export interface Settings {
   tts: TTSSettings;
   conversation: ConversationSettings;
   memory: MemorySettings;
+  permissions: PermissionsSettings;
   server: ServerSettings;
   ui: UISettings;
   developer: DeveloperSettings;

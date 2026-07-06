@@ -276,6 +276,43 @@ class MemorySettings(_Section):
     )
 
 
+# ──────────────────────── Permissions ────────────────────────
+
+
+class PermissionsSettings(_Section):
+    """What the assistant is allowed to know about / do on this machine
+    (M5.3, ADR-025). Read-only local facts default ON (they power questions
+    like "what time is it?"); anything that *acts* on the system or leaves
+    the device defaults OFF and, in this build, is also not implemented —
+    the toggle is the contract future capability providers must respect."""
+
+    date_time: bool = Field(True, description="Share the current local date and time")
+    timezone: bool = Field(True, description="Share the system timezone")
+    locale: bool = Field(True, description="Share the system language/locale")
+    cpu: bool = Field(True, description="Share CPU model and core count")
+    gpu: bool = Field(True, description="Share GPU model and VRAM")
+    ram: bool = Field(True, description="Share installed memory size")
+    os: bool = Field(True, description="Share operating system name and version")
+    internet: bool = Field(False, description="Allow internet access (not available in this build)")
+    local_files: bool = Field(
+        False, description="Allow reading local files (not available in this build)"
+    )
+    camera: bool = Field(False, description="Allow camera access (not available in this build)")
+    clipboard: bool = Field(
+        False, description="Allow clipboard access (not available in this build)"
+    )
+    browser: bool = Field(
+        False, description="Allow controlling a browser (not available in this build)"
+    )
+    shell: bool = Field(
+        False, description="Allow running shell commands (not available in this build)"
+    )
+    python: bool = Field(
+        False, description="Allow executing Python code (not available in this build)"
+    )
+    plugins: bool = Field(True, description="Allow enabled plugins to contribute capabilities")
+
+
 # ──────────────────────── Server / UI / Developer ────────────────────────
 
 
@@ -320,6 +357,7 @@ class Settings(_Section):
     tts: TTSSettings = Field(default_factory=TTSSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    permissions: PermissionsSettings = Field(default_factory=PermissionsSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     ui: UISettings = Field(default_factory=UISettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)

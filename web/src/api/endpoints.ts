@@ -57,6 +57,7 @@ export const engine = {
 
 export const conversation = {
   history: () => api.get<ConversationTurn[]>("/conversation/history"),
+  say: (text: string) => api.post<{ status: string }>("/conversation/say", { text }),
   interrupt: () => api.post<{ interrupted: boolean }>("/conversation/interrupt"),
   clear: () => api.post<{ status: string }>("/conversation/clear"),
   exportJson: () => api.get<ConversationExport>("/conversation/export"),

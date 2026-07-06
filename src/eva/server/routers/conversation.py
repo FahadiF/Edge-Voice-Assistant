@@ -18,6 +18,7 @@ from eva.server.schemas import (
     ConversationImportRequest,
     EngineStatusResponse,
     InterruptResponse,
+    SayRequest,
 )
 
 router = APIRouter(prefix="/conversation", tags=["conversation"])
@@ -32,6 +33,15 @@ def get_history(state: StateDep) -> list[ConversationTurn]:
 def get_current_turn(state: StateDep) -> EngineStatusResponse:
     orchestrator = state.require_assistant().orchestrator
     return EngineStatusResponse(running=True, state=orchestrator.state)
+
+
+@router.post("/say")
+def say(payload: SayRequest, state: StateDep) -> dict[str, str]:
+    """Start a turn from typed text (the web UI composer, M5.3) — same
+    pipeline as a spoken utterance minus ASR; the reply streams over the
+    WebSocket and is spoken aloud like any other turn."""
+    accepted = state.require_assistant().orchestrator.submit_text(payload.text)
+    return {"status": "accepted" if accepted else "rejected"}
 
 
 @router.post("/interrupt", response_model=InterruptResponse)

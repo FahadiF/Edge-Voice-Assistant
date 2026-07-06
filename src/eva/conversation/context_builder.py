@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from eva.config.settings import Settings
 from eva.conversation.language import resolve_language
 from eva.conversation.personas import resolve_persona
+from eva.conversation.system_info import system_facts_block
 from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, validate_chat_messages
 from eva.memory.base import MemoryRetriever, MemoryStore, UserProfileStore
@@ -69,9 +70,13 @@ _CONVERSATION_GUIDANCE = (
 
 _CAPABILITY_GUIDANCE = (
     "This build works with voice and text only. Some capabilities (for "
-    "example image understanding) are planned for the platform but not "
-    "enabled in this build — when asked about one, say it is not enabled "
-    "in the current build rather than claiming it is impossible."
+    "example image understanding, internet access, or reading local files) "
+    "are planned for the platform but not enabled in this build — when "
+    "asked about one, say it is not enabled in the current build rather "
+    "than claiming it is impossible. The user also controls permissions in "
+    "Settings: if a local fact (like the time or hardware details) is not "
+    "listed in your system information below, the user has not granted "
+    "that permission — say so, rather than saying you can never know it."
 )
 
 
@@ -173,6 +178,11 @@ class ContextBuilder:
             )
         if memory_block:
             system_sections.append(memory_block)
+        # Permission-gated local facts (M5.3, ADR-025) — fresh every turn so
+        # the date/time is current; omitted entirely when nothing is allowed.
+        facts = system_facts_block(self._settings.permissions)
+        if facts:
+            system_sections.append(facts)
         system_sections.append(self._technical_facts_block())
         combined_system_prompt = "\n\n".join(system_sections)
 

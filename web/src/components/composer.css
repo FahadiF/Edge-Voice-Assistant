@@ -1,0 +1,110 @@
+.composer {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.composer-dragover {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 38px;
+  max-height: 160px;
+  border: none;
+  background: transparent;
+  padding: 8px 4px;
+}
+
+.composer textarea:focus-visible {
+  outline: none;
+}
+
+.composer:focus-within {
+  border-color: var(--accent);
+}
+
+.composer-plus {
+  position: relative;
+}
+
+.composer-plus > button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.composer-menu {
+  position: absolute;
+  bottom: 42px;
+  left: 0;
+  min-width: 200px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+
+.composer-menu button {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.composer-menu button:hover {
+  background: var(--bg-sunken);
+}
+
+.composer-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px 8px;
+}
+
+.composer-mic {
+  font-size: 1.15rem;
+  padding: 4px;
+  opacity: 0.45;
+}
+
+.mic-listening { opacity: 1; }
+.mic-thinking { opacity: 0.8; }
+.mic-speaking { opacity: 0.8; }
+
+.composer-send {
+  min-width: 64px;
+  height: 36px;
+}
+
+.mode-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.mode-selector select {
+  padding: 4px 8px;
+}

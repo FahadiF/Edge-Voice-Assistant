@@ -58,6 +58,7 @@ matching update.
 | POST | `/api/v1/engine/stop` | Stop and release everything |
 | GET | `/api/v1/conversation/history` | Turns in the active session (needs a running engine) |
 | GET | `/api/v1/conversation/current` | Current turn/pipeline state |
+| POST | `/api/v1/conversation/say` | Start a turn from typed text (composer, M5.3) — same pipeline minus ASR |
 | POST | `/api/v1/conversation/interrupt` \| `/cancel` | Stop the current turn now (aliases) |
 | POST | `/api/v1/conversation/clear` | Clear history |
 | GET | `/api/v1/conversation/export` | Export history as JSON |

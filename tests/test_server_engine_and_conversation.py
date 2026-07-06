@@ -72,6 +72,10 @@ class TestConversationWithoutEngine:
         r = client.get("/api/v1/conversation/export")
         assert r.status_code == 409
 
+    def test_say_requires_engine(self, client: TestClient) -> None:
+        r = client.post("/api/v1/conversation/say", json={"text": "hello"})
+        assert r.status_code == 409
+
 
 @pytest.fixture
 def running_client(client: TestClient, monkeypatch: pytest.MonkeyPatch):
@@ -96,6 +100,29 @@ class TestConversationWithEngine:
         r = running_client.post("/api/v1/conversation/cancel")
         assert r.status_code == 200
         assert "interrupted" in r.json()
+
+    def test_say_accepts_typed_text(
+        self, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M5.3 composer endpoint: text enters the orchestrator's event
+        queue like an utterance. Needs the context-manager TestClient so all
+        requests share one event loop — the orchestrator's run() task must
+        still be alive when /say arrives (in production uvicorn has a single
+        long-lived loop, so this is purely a test-harness concern)."""
+        from tests.server_fakes import build_fake_assistant
+
+        monkeypatch.setattr("eva.engine.build_assistant", build_fake_assistant)
+        monkeypatch.setattr("eva.onboarding.check_readiness", lambda settings, paths: [])
+        with TestClient(create_app(app_paths)) as shared_loop_client:
+            assert shared_loop_client.post("/api/v1/engine/start").status_code == 200
+            r = shared_loop_client.post("/api/v1/conversation/say", json={"text": "hello there"})
+            assert r.status_code == 200
+            assert r.json() == {"status": "accepted"}
+            shared_loop_client.post("/api/v1/engine/stop")
+
+    def test_say_rejects_empty_text(self, running_client: TestClient) -> None:
+        r = running_client.post("/api/v1/conversation/say", json={"text": ""})
+        assert r.status_code == 422  # SayRequest min_length=1
 
     def test_clear_history(self, running_client: TestClient) -> None:
         r = running_client.post("/api/v1/conversation/clear")

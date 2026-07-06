@@ -78,6 +78,10 @@ class ServerState:
         await asyncio.to_thread(assistant.start_audio)
         self.assistant = assistant
         self._engine_task = asyncio.create_task(assistant.orchestrator.run())
+        # Yield once so run() binds its event loop before we report the
+        # engine as started — otherwise an immediate submit_text/interrupt
+        # (e.g. the composer sending right after start) races the binding.
+        await asyncio.sleep(0)
         self.bus.publish(EngineStarted())
         logger.info("Engine started")
         return assistant

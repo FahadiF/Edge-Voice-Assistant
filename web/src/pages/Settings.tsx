@@ -21,6 +21,7 @@ const SECTION_LABELS: Record<string, string> = {
   tts: "Speech Synthesis",
   conversation: "Conversation",
   memory: "Memory & Privacy",
+  permissions: "Permissions",
   server: "Server",
   ui: "Appearance",
   developer: "Developer",

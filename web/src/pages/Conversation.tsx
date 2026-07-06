@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { conversation } from "../api/endpoints";
+import { conversation, engine } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import type { TranscriptEntry } from "../ws/store";
 import { Card, EmptyState, downloadJson, toast } from "../components/common";
+import { Composer } from "../components/Composer";
 import { Markdown } from "../components/Markdown";
 import "./conversation.css";
 
@@ -59,6 +60,8 @@ export function Conversation() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const history = useQuery({ queryKey: ["conversation-history"], queryFn: conversation.history });
+  const engineStatus = useQuery({ queryKey: ["engine-status"], queryFn: engine.status });
+  const engineRunning = engineStatus.data?.running ?? false;
 
   // Seed the local transcript from server history once (live turns append after).
   const seeded = useRef(false);
@@ -171,8 +174,18 @@ export function Conversation() {
         <div className="transcript" ref={scrollRef} onScroll={onScroll}>
           {visible.length === 0 && !liveTurn && (
             <EmptyState>
-              No conversation yet. Start the engine and speak — the live transcript appears
-              here. Past sessions live in <Link to="/memory">Memory</Link>.
+              {engineRunning ? (
+                <>
+                  No conversation yet — just start talking, or type a message below. The
+                  live transcript appears here; past sessions live in{" "}
+                  <Link to="/memory">Memory</Link>.
+                </>
+              ) : (
+                <>
+                  Start the engine (button in the header) to talk or type. Past sessions
+                  live in <Link to="/memory">Memory</Link>.
+                </>
+              )}
             </EmptyState>
           )}
           {visible.map((entry, i) => (
@@ -205,6 +218,7 @@ export function Conversation() {
             </div>
           )}
         </div>
+        <Composer engineRunning={engineRunning} />
       </Card>
     </div>
   );

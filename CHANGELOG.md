@@ -6,6 +6,47 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-06 — M5.3: Final UX & capability polish
+
+**Fixed**
+- Markdown-to-TTS hardened (the "asterisk asterisk Generate" leak): the
+  speech filter now decodes HTML entities, unwraps nested emphasis to a
+  fixpoint, handles intraword underscores per CommonMark
+  (`file_name_here` survives), and — the actual bug — scrubs *unpaired*
+  markers left when the sentence chunker splits inside an emphasis span.
+  Contract: formatting characters are never spoken, paired or not.
+  (+16 adversarial tests.)
+
+**Added**
+- `PermissionsSettings` (ADR-025): 15 toggles (date/time, timezone, locale,
+  CPU, GPU, RAM, OS, internet, local files, camera, clipboard, browser,
+  shell, Python, plugins). Read-only facts default on; acting capabilities
+  default off and are the consent contract for future providers. Renders
+  automatically in the Settings UI (schema-driven, ADR-009).
+- System Information provider (`eva.conversation.system_info`): permission-
+  gated local facts (fresh date/time each turn; cached hardware detection)
+  injected into the prompt — "what time is it?" / "what GPU do I have?"
+  now get real answers; a denied permission is attributed to the user's
+  settings, never to permanent inability.
+- Typed conversation: `POST /conversation/say` → `Orchestrator.submit_text()`
+  — same event queue and turn pipeline as speech, minus ASR; replies stream
+  and speak normally. `engine/start` now yields once so the orchestrator
+  loop is bound before "started" is reported.
+- ChatGPT-style composer on the Conversation page: Enter/Shift+Enter,
+  + menu (image/document/screenshot placeholders — "not available in this
+  build"), drag-and-drop and paste producing removable placeholder chips,
+  live mic-state indicator, disabled-with-guidance when the engine is
+  stopped.
+- Offline/Online mode selector beside the engine controls (Online is a
+  disabled placeholder for future providers).
+- Empty-state guidance: Memory page explains how conversations get there;
+  export/delete-all disabled (with tooltip) when there is nothing to act on;
+  Conversation empty state adapts to engine state.
+
+**Tests** — orchestrator text-turn (full pipeline, no ASR, supersede
+semantics), `/conversation/say` (accept/409/422), system-info gating +
+prompt integration (11), Composer (8), markdown hardening (16).
+
 ### 2026-07-06 — M5.2: Conversational intelligence & prompt engineering
 
 Real-conversation testing showed the pipeline worked but the *conversation*

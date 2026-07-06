@@ -23,6 +23,7 @@ from eva.core.events import (
     BargeInLatencyMeasured,
     Event,
     EventBus,
+    FinalTranscript,
     LlmFinished,
     LlmStarted,
     PartialTranscript,
@@ -247,6 +248,38 @@ class TestNormalTurn:
             )
 
         asyncio.run(scenario())
+
+    def test_text_turn_runs_full_pipeline_without_asr(self) -> None:
+        """M5.3 composer: submit_text() must produce a complete turn — LLM
+        reply, TTS audio, memory write — with the typed text as the final
+        transcript and no ASR involvement."""
+
+        async def scenario() -> None:
+            asr = FakeASR()
+            orch, bus, audio, tts = make_orchestrator(asr=asr)
+
+            async def script() -> None:
+                assert orch.submit_text("Hello from the composer") is True
+                for _ in range(200):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            events = await drive(orch, bus, script)
+            final = next(e for e in events if isinstance(e, FinalTranscript))
+            assert final.text == "Hello from the composer"
+            assert final.asr_ms == 0  # ASR stage skipped
+            assert asr.calls == 0  # and never invoked
+            assert audio.spoken  # reply was synthesized and played
+            stored = orch.memory.recent_turns(orch.conversation_id, 10)
+            assert any(t.text == "Hello from the composer" for t in stored)
+
+        asyncio.run(scenario())
+
+    def test_submit_text_rejects_blank_and_before_run(self) -> None:
+        orch, _bus, _audio, _tts = make_orchestrator()
+        assert orch.submit_text("   ") is False  # blank
+        assert orch.submit_text("hi") is False  # loop not bound yet (run() not started)
 
     def test_empty_transcript_skips_llm(self) -> None:
         async def scenario() -> None:

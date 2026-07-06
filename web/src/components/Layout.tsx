@@ -7,6 +7,7 @@ import { ApiError } from "../api/client";
 import { useWsStore } from "../ws/store";
 import { StatusPill, ToastHost, toast } from "./common";
 import "./layout.css";
+import "./composer.css"; // .mode-selector lives with the composer styles
 
 const NAV = [
   { to: "/", label: "Dashboard" },
@@ -57,6 +58,21 @@ function EngineControls() {
   const running = status.data?.running ?? false;
   return (
     <div className="engine-controls">
+      <label className="mode-selector" title="Online providers are a future capability">
+        Mode
+        <select
+          value="offline"
+          aria-label="Conversation mode"
+          onChange={() => {
+            /* only Offline exists in this build */
+          }}
+        >
+          <option value="offline">Offline (local)</option>
+          <option value="online" disabled>
+            Online — not available in this build
+          </option>
+        </select>
+      </label>
       {running ? (
         <button onClick={() => stop.mutate()} disabled={stop.isPending}>
           {stop.isPending ? "Stopping…" : "Stop engine"}

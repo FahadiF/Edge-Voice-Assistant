@@ -501,7 +501,47 @@ turns.
 - [ ] The assistant still has it (20-turn window) or recalls it via memory.
 - [ ] Replies don't degrade into repetition or forget the persona's voice.
 
-### 15.9 Ambiguity handling
+### 15.9 System information & permissions (M5.3)
+
+With default permissions (Settings → Permissions):
+
+- *"What time is it?"* → [ ] the actual current local time.
+- *"What day is it today?"* → [ ] correct date.
+- *"How much RAM does this machine have?"* / *"What GPU do I have?"* →
+  [ ] real values matching `eva diagnose`.
+- Turn OFF **Date/Time** in Settings → Permissions, save, restart the
+  engine, ask the time again → [ ] the assistant says the *permission is
+  not granted* — not that it can never know the time.
+
+### 15.10 Typed conversation (composer, M5.3)
+
+On the Conversation page with the engine running:
+
+- [ ] Type a message, press **Enter** → it appears as your turn, the reply
+      streams in AND is spoken aloud (same pipeline as voice).
+- [ ] **Shift+Enter** inserts a newline instead of sending.
+- [ ] With the engine stopped, the composer is disabled with an explanatory
+      placeholder.
+- [ ] The **+** menu offers attach image/document/screenshot; each explains
+      it is not available in this build.
+- [ ] Drag a file onto the composer (or paste an image) → a placeholder
+      chip appears, removable, labeled as not processed in this build;
+      sending still delivers the text.
+- [ ] The **Mode** selector next to the engine controls shows *Offline
+      (local)* selected; *Online* is visibly disabled.
+
+### 15.11 Markdown-to-speech hardening (M5.3)
+
+Elicit a reply with heavy formatting (bold mid-sentence, a code block, a
+table). Listen:
+
+- [ ] No "asterisk", "underscore", "backtick", or "pipe" is ever spoken —
+      including when a bold phrase spans a sentence boundary
+      (previously "**Generate**" could leak as "asterisk asterisk Generate").
+- [ ] HTML entities (`&amp;` etc.) are spoken as their characters ("and"
+      context), not as "ampersand a-m-p semicolon".
+
+### 15.12 Ambiguity handling
 
 - *"Make it shorter."* (with nothing plausible to shorten in view)
   - [ ] It either makes the most helpful assumption or asks ONE short

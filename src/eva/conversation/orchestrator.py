@@ -27,6 +27,7 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncGenerator, Iterator
+from dataclasses import dataclass
 from typing import Protocol
 
 from eva.asr.base import ASREngine
@@ -79,6 +80,14 @@ _BARGE_IN_LATENCY_TIMEOUT_S = 1.0  # safety cap; a hit means "unmeasured", not "
 _TOKEN_QUEUE_MAXSIZE = 256  # bounds memory on a pathological long reply
 _SENTENCE_QUEUE_MAXSIZE = 32
 _QUEUE_BACKPRESSURE_TIMEOUT_S = 5.0  # cross-thread put() safety cap; never hit in practice
+
+
+@dataclass(frozen=True)
+class _TextInput:
+    """A typed message from the composer (M5.3) — enters through the same
+    event queue as audio events so turn sequencing has exactly one path."""
+
+    text: str
 
 
 class AudioOutput(Protocol):
@@ -164,7 +173,7 @@ class Orchestrator:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._state: str = "idle"
-        self._events: asyncio.Queue[SegmenterEvent | None] = asyncio.Queue()
+        self._events: asyncio.Queue[SegmenterEvent | _TextInput | None] = asyncio.Queue()
         self._turn_task: asyncio.Task[None] | None = None
         self._partial_task: asyncio.Task[None] | None = None
         self._partial_busy = False
@@ -289,6 +298,19 @@ class Orchestrator:
         with contextlib.suppress(RuntimeError):
             self._loop.call_soon_threadsafe(self._events.put_nowait, event)
 
+    def submit_text(self, text: str) -> bool:
+        """Start a turn from typed text (the web UI composer, M5.3) —
+        identical to a spoken utterance except the ASR stage is skipped.
+        Thread-safe like `feed_audio_event`. Returns False if the
+        orchestrator isn't running (no loop bound yet) or `text` is blank."""
+        text = text.strip()
+        if not text or self._loop is None or self._loop.is_closed():
+            return False
+        with contextlib.suppress(RuntimeError):
+            self._loop.call_soon_threadsafe(self._events.put_nowait, _TextInput(text=text))
+            return True
+        return False
+
     def request_shutdown(self) -> None:
         if self._loop is not None and not self._loop.is_closed():
             with contextlib.suppress(RuntimeError):
@@ -321,8 +343,13 @@ class Orchestrator:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    async def _dispatch(self, event: SegmenterEvent) -> None:
+    async def _dispatch(self, event: SegmenterEvent | _TextInput) -> None:
         match event:
+            case _TextInput(text=text):
+                # Same supersede semantics as a spoken utterance.
+                if self._turn_task is not None and not self._turn_task.done():
+                    await self._cancel_turn("superseded")
+                self._turn_task = asyncio.create_task(self._run_turn(None, text=text))
             case SpeechStart():
                 self._bus.publish(SpeechStarted(epoch=self._controller.epoch))
             case BargeIn():
@@ -391,7 +418,7 @@ class Orchestrator:
 
     # ── the turn pipeline ──
 
-    async def _run_turn(self, audio: Frame) -> None:
+    async def _run_turn(self, audio: Frame | None, text: str | None = None) -> None:
         epoch = self._controller.advance()
         t0 = time.perf_counter()
         self._bus.publish(TurnStarted(epoch=epoch))
@@ -399,7 +426,7 @@ class Orchestrator:
         error: str | None = None
         metrics = TurnMetrics(epoch=epoch)
         try:
-            metrics = await self._pipeline(epoch, audio, t0)
+            metrics = await self._pipeline(epoch, audio, t0, text=text)
         except asyncio.CancelledError:
             self._metrics.record(metrics.model_copy(update={"cancelled": True}))
             raise
@@ -411,17 +438,24 @@ class Orchestrator:
         if self._controller.is_current(epoch):
             self._set_state("listening")
 
-    async def _pipeline(self, epoch: int, audio: Frame, t0: float) -> TurnMetrics:
+    async def _pipeline(
+        self, epoch: int, audio: Frame | None, t0: float, *, text: str | None = None
+    ) -> TurnMetrics:
         def elapsed_ms() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
         self._current_tokens_queue = None
         self._current_sentences_queue = None
 
-        # ── ASR ──
-        result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
-        asr_ms = elapsed_ms()
-        user_text = result.text.strip()
+        # ── ASR (skipped for typed input from the composer, M5.3) ──
+        if text is not None:
+            user_text = text
+            asr_ms = 0
+        else:
+            assert audio is not None  # exactly one of audio/text is set
+            result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
+            asr_ms = elapsed_ms()
+            user_text = result.text.strip()
         if self._controller.is_stale(epoch):
             return TurnMetrics(epoch=epoch, asr_ms=asr_ms, cancelled=True)
         self._bus.publish(FinalTranscript(epoch=epoch, text=user_text, asr_ms=asr_ms))

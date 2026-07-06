@@ -218,11 +218,21 @@ export function Memory() {
           )}
           <div className="model-actions" style={{ marginTop: 10 }}>
             <button
+              disabled={(stats.data?.turn_count ?? 0) === 0}
+              title={
+                (stats.data?.turn_count ?? 0) === 0
+                  ? "Nothing to export yet — have a conversation first"
+                  : undefined
+              }
               onClick={async () => downloadJson(await memory.exportJson(), "eva-memory-export.json")}
             >
               Export all
             </button>
-            <button className="danger" onClick={() => setConfirmDeleteAll(true)}>
+            <button
+              className="danger"
+              disabled={(stats.data?.turn_count ?? 0) === 0}
+              onClick={() => setConfirmDeleteAll(true)}
+            >
               Delete all memory
             </button>
           </div>
@@ -263,7 +273,12 @@ export function Memory() {
 
       <Card title="Conversations">
         {conversations.length === 0 ? (
-          <EmptyState>No stored conversations yet.</EmptyState>
+          <EmptyState>
+            No stored conversations yet. Every conversation is saved here
+            automatically — have one on the Conversation page (voice or typed) and it
+            appears in this list, searchable and manageable. Each restart starts a
+            fresh conversation; old ones stay until you delete them.
+          </EmptyState>
         ) : (
           <table>
             <thead>

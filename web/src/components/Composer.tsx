@@ -1,0 +1,191 @@
+/**
+ * ChatGPT-style message composer (M5.3).
+ *
+ * Typed messages go through POST /conversation/say — the same turn pipeline
+ * as speech, minus ASR. The attachment surface (+ menu, drag-and-drop,
+ * paste) is architecture-first: files become visible placeholder chips, but
+ * uploads are not available in this build (image/document understanding is
+ * a planned platform capability, ADR-025) — the chips say so instead of
+ * silently dropping the file.
+ */
+
+import { useRef, useState } from "react";
+import type { DragEvent, ClipboardEvent, KeyboardEvent } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { conversation } from "../api/endpoints";
+import { useWsStore } from "../ws/store";
+import { toast } from "./common";
+import "./composer.css";
+
+interface AttachmentChip {
+  id: number;
+  name: string;
+  kind: "image" | "document";
+}
+
+let chipId = 0;
+
+function chipFromFile(file: File): AttachmentChip {
+  return {
+    id: ++chipId,
+    name: file.name || "pasted file",
+    kind: file.type.startsWith("image/") ? "image" : "document",
+  };
+}
+
+export function Composer({ engineRunning }: { engineRunning: boolean }) {
+  const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentChip[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pipelineState = useWsStore((s) => s.pipelineState);
+
+  const send = useMutation({
+    mutationFn: (message: string) => conversation.say(message),
+    onSuccess: (r) => {
+      if (r.status !== "accepted") {
+        toast("error", "The engine did not accept the message — is it still starting?");
+        return;
+      }
+      setText("");
+      if (attachments.length > 0) {
+        toast("info", "Attachments are not available in this build — sent the text only.");
+        setAttachments([]);
+      }
+      textareaRef.current?.focus();
+    },
+    onError: (e) => toast("error", `Send failed: ${e.message}`),
+  });
+
+  const canSend = engineRunning && text.trim().length > 0 && !send.isPending;
+
+  const submit = () => {
+    if (canSend) send.mutate(text.trim());
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const addFiles = (files: FileList | File[]) => {
+    const chips = Array.from(files).map(chipFromFile);
+    if (chips.length > 0) setAttachments((prev) => [...prev, ...chips]);
+  };
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+  };
+
+  const onPaste = (e: ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  };
+
+  const placeholderAction = (label: string) => {
+    setMenuOpen(false);
+    toast("info", `${label} is not available in this build.`);
+  };
+
+  return (
+    <div
+      className={`composer ${dragOver ? "composer-dragover" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
+      {attachments.length > 0 && (
+        <div className="composer-chips">
+          {attachments.map((chip) => (
+            <span key={chip.id} className="chip" title="Not available in this build">
+              {chip.kind === "image" ? "🖼" : "📄"} {chip.name}
+              <button
+                className="tag-remove"
+                aria-label={`Remove ${chip.name}`}
+                onClick={() => setAttachments((prev) => prev.filter((c) => c.id !== chip.id))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <span className="field-help">attachments aren't processed in this build</span>
+        </div>
+      )}
+      <div className="composer-row">
+        <div className="composer-plus">
+          <button
+            aria-label="Add attachment"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            +
+          </button>
+          {menuOpen && (
+            <div className="composer-menu" role="menu">
+              <button role="menuitem" onClick={() => placeholderAction("Image upload")}>
+                🖼 Attach image
+              </button>
+              <button role="menuitem" onClick={() => placeholderAction("Document upload")}>
+                📄 Attach document
+              </button>
+              <button role="menuitem" onClick={() => placeholderAction("Screenshot capture")}>
+                📷 Capture screenshot
+              </button>
+            </div>
+          )}
+        </div>
+        <textarea
+          ref={textareaRef}
+          rows={1}
+          value={text}
+          placeholder={
+            engineRunning
+              ? "Type a message — or just speak. Enter to send, Shift+Enter for a new line."
+              : "Start the engine to send messages."
+          }
+          aria-label="Message"
+          disabled={!engineRunning}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+        />
+        <span
+          className={`composer-mic mic-${pipelineState}`}
+          role="img"
+          aria-label={
+            engineRunning
+              ? `Microphone active — assistant is ${pipelineState}`
+              : "Microphone off — engine stopped"
+          }
+          title={
+            engineRunning
+              ? `Always listening (${pipelineState}) — just talk, or use barge-in to interrupt`
+              : "Start the engine to enable the microphone"
+          }
+        >
+          🎙
+        </span>
+        <button
+          className="primary composer-send"
+          disabled={!canSend}
+          aria-label="Send message"
+          onClick={submit}
+        >
+          {send.isPending ? "…" : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}

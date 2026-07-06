@@ -75,6 +75,14 @@ class InterruptResponse(BaseModel):
     interrupted: bool
 
 
+class SayRequest(BaseModel):
+    """Typed message from the web UI composer (M5.3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str = Field(min_length=1, max_length=8000, description="Message to send as a turn")
+
+
 class PluginStatusResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 

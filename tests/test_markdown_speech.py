@@ -109,6 +109,75 @@ class TestCodeFences:
         assert markdown_to_speech("~~~\nhidden\n~~~\nspoken") == "spoken"
 
 
+class TestUnpairedMarkers:
+    """The M5.3 reported bug: emphasis spanning chunker segments leaves
+    unpaired `**` in a fragment — CommonMark renders those literally, but
+    the speech contract is stronger: formatting characters are NEVER
+    spoken."""
+
+    def test_unpaired_bold_at_segment_start_is_scrubbed(self) -> None:
+        # Chunker split inside a bold span: this fragment has an opening
+        # ** with no closing pair.
+        assert markdown_to_speech("**Generate a summary of this.") == (
+            "Generate a summary of this."
+        )
+
+    def test_unpaired_bold_at_segment_end_is_scrubbed(self) -> None:
+        assert markdown_to_speech("and that concludes it.**") == "and that concludes it."
+
+    def test_bold_spanning_two_segments(self) -> None:
+        f = MarkdownSpeechFilter()
+        assert f.convert("**Generate a summary.") == "Generate a summary."
+        assert f.convert("Then continue normally.**") == "Then continue normally."
+
+    def test_unpaired_single_asterisk_hugging_word(self) -> None:
+        assert markdown_to_speech("*Generate a report") == "Generate a report"
+        assert markdown_to_speech("something odd* happened") == "something odd happened"
+
+    def test_stray_backticks_scrubbed(self) -> None:
+        assert markdown_to_speech("run `eva doctor now") == "run eva doctor now"
+
+    def test_multiplication_and_snake_case_survive_the_scrub(self) -> None:
+        assert markdown_to_speech("3 * 4 equals 12") == "3 * 4 equals 12"
+        assert markdown_to_speech("open file_name_here please") == "open file_name_here please"
+
+
+class TestNestedFormatting:
+    def test_bold_containing_italic(self) -> None:
+        assert markdown_to_speech("**bold with *nested* inside**") == "bold with nested inside"
+
+    def test_italic_containing_code(self) -> None:
+        assert markdown_to_speech("*emphasis with `code` inside*") == "emphasis with code inside"
+
+    def test_bold_inside_list_item(self) -> None:
+        assert markdown_to_speech("1. **First** item") == "1. First item"
+
+    def test_link_text_with_emphasis(self) -> None:
+        assert markdown_to_speech("[**bold link**](https://x.dev)") == "bold link"
+
+
+class TestHtmlEntities:
+    def test_common_entities_decoded(self) -> None:
+        assert markdown_to_speech("Tom &amp; Jerry") == "Tom & Jerry"
+        assert markdown_to_speech("5 &lt; 10 &gt; 2") == "5 < 10 > 2"
+
+    def test_nbsp_becomes_space(self) -> None:
+        # &nbsp; decodes to U+00A0; it must not be spoken as words.
+        spoken = markdown_to_speech("a&nbsp;b")
+        assert "nbsp" not in spoken
+
+    def test_numeric_entities(self) -> None:
+        assert markdown_to_speech("caf&#233;") == "café"
+
+
+class TestAutolinksAndUrls:
+    def test_autolink_keeps_url_text(self) -> None:
+        assert markdown_to_speech("<https://example.com>") == "https://example.com"
+
+    def test_link_with_title_attribute(self) -> None:
+        assert markdown_to_speech('[docs](https://example.com "the title")') == "docs"
+
+
 class TestRobustness:
     @pytest.mark.parametrize(
         "weird",
