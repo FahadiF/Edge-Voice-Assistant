@@ -67,7 +67,8 @@ from eva.core.events import (
     TurnStarted,
 )
 from eva.core.turn import TurnController
-from eva.llm.base import GenerationParams, LLMEngine
+from eva.embedding.base import EmbeddingProvider
+from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.memory.base import MemoryStore
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 from eva.tts.base import TTSEngine
@@ -148,6 +149,7 @@ class Orchestrator:
         memory: MemoryStore,
         *,
         context_builder: ContextBuilder | None = None,
+        embedding: EmbeddingProvider | None = None,
         metrics: MetricsCollector | None = None,
     ) -> None:
         self._settings = settings
@@ -157,6 +159,7 @@ class Orchestrator:
         self._llm = llm
         self._tts = tts
         self._memory = memory
+        self._embedding = embedding
         self._metrics = metrics or MetricsCollector()
         self._controller = TurnController()
         language = resolve_language(settings)
@@ -165,6 +168,7 @@ class Orchestrator:
         self._language_code = language.code
         self._context_builder = context_builder or ContextBuilder(settings, memory)
         self._conversation = memory.start_conversation(language=language.code)
+        self._conversation_titled = False
         self._params = GenerationParams(
             temperature=settings.conversation.temperature,
             top_p=settings.conversation.top_p,
@@ -259,6 +263,7 @@ class Orchestrator:
         it remains searchable/exportable; this matches the pre-M4 behavior
         of resetting the *active* session, now that conversations persist."""
         self._conversation = self._memory.start_conversation(language=self._language_code)
+        self._conversation_titled = False  # the new conversation gets its own title
 
     def load_conversation_turns(self, turns: list[ConversationTurn]) -> None:
         """Import paired turns into the active conversation (platform API
@@ -401,6 +406,69 @@ class Orchestrator:
         self._barge_in_count += 1
         self._last_barge_in_latency_ms = latency_ms
         self._bus.publish(BargeInLatencyMeasured(epoch=epoch, detected_to_silent_ms=latency_ms))
+
+    def _generate_title(self, user_text: str, reply: str) -> None:
+        """LLM-generate a 2-5 word topic title for the active conversation
+        (M5.4 §2: "Buying RTX 5070", "Learning Finnish"). Best-effort — a
+        failure leaves the conversation untitled, never breaks the turn.
+        Runs at most once per conversation."""
+        self._conversation_titled = True  # only one attempt, even on failure
+        try:
+            from eva.conversation.markdown import markdown_to_speech
+
+            excerpt = f"User: {user_text[:300]}\nAssistant: {reply[:300]}"
+            messages = [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Write a title for this conversation: two to five "
+                        "plain words naming the topic, like 'Buying RTX 5070' "
+                        "or 'Learning Finnish'. No quotes, no punctuation, no "
+                        "explanations — output the title only."
+                    ),
+                ),
+                ChatMessage(role="user", content=excerpt),
+            ]
+            params = GenerationParams(temperature=0.2, max_tokens=16)
+            raw = "".join(self._llm.stream(messages, params, should_abort=lambda: False)).strip()
+            title = markdown_to_speech(raw).strip().strip("\"'").splitlines()[0][:60].strip()
+            if title:
+                self._memory.set_title(self._conversation.id, title)
+        except Exception:
+            logger.exception("Auto-titling conversation failed (left untitled)")
+
+    def _store_turns(self, user_text: str, reply: str) -> None:
+        """Persist the completed exchange and — when an embedding provider is
+        wired — embed both turns immediately so semantic retrieval can find
+        them in later conversations (M5.4: nothing embedded new turns before,
+        which is why long-term recall never worked in practice). Embedding
+        failures are logged, never fatal — the text is already stored and
+        keyword search still finds it."""
+        if not self._settings.permissions.privacy.remember_conversations:
+            return  # privacy: the user asked not to store conversations
+        turns = [
+            self._memory.add_turn(
+                self._conversation.id, "user", user_text, language=self._language_code
+            ),
+            self._memory.add_turn(
+                self._conversation.id, "assistant", reply, language=self._language_code
+            ),
+        ]
+        if self._embedding is None:
+            return
+        for turn in turns:
+            if turn.id is None:
+                continue
+            try:
+                vector = self._embedding.embed(turn.text)
+                self._memory.store_embedding(
+                    turn.id,
+                    self._settings.memory.embedding_model,
+                    vector.tobytes(),
+                    int(vector.shape[0]),
+                )
+            except Exception:
+                logger.exception("Embedding turn %s failed (text is still stored)", turn.id)
 
     # ── partial transcription (best-effort, never blocks the pipeline) ──
 
@@ -595,20 +663,13 @@ class Orchestrator:
             )
         )
         if reply:
-            await asyncio.to_thread(
-                self._memory.add_turn,
-                self._conversation.id,
-                "user",
-                user_text,
-                language=self._language_code,
-            )
-            await asyncio.to_thread(
-                self._memory.add_turn,
-                self._conversation.id,
-                "assistant",
-                reply,
-                language=self._language_code,
-            )
+            await asyncio.to_thread(self._store_turns, user_text, reply)
+            if not self._conversation_titled:
+                # First completed exchange: auto-title the conversation
+                # (M5.4 §2). Runs while TTS playback is still draining, so
+                # the ~10-token generation costs no perceived latency; the
+                # LLM is idle again because the reply just finished.
+                await asyncio.to_thread(self._generate_title, user_text, reply)
 
         # ── wait for playback to drain (stays interruptible) ──
         while self._audio.is_speaking and self._controller.is_current(epoch):

@@ -4,6 +4,18 @@
   margin-bottom: 12px;
 }
 
+.link-button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.link-button:hover {
+  color: var(--accent);
+}
+
 .context-input input {
   flex: 1;
 }

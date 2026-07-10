@@ -69,7 +69,7 @@ function EngineControls() {
         >
           <option value="offline">Offline (local)</option>
           <option value="online" disabled>
-            Online — not available in this build
+            Online (coming soon)
           </option>
         </select>
       </label>

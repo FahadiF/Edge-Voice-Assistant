@@ -67,6 +67,15 @@ class SQLiteMemoryStore(MemoryStore):
             ).fetchall()
         return [self._row_to_conversation(r) for r in rows]
 
+    def set_title(self, conversation_id: str, title: str) -> None:
+        cur = self._conn.execute(
+            "UPDATE conversations SET title = ? WHERE id = ?",
+            (title.strip(), conversation_id),
+        )
+        self._conn.commit()
+        if cur.rowcount == 0:
+            raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
+
     def archive_conversation(self, conversation_id: str, *, archived: bool = True) -> None:
         cur = self._conn.execute(
             "UPDATE conversations SET archived = ? WHERE id = ?",

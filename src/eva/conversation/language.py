@@ -106,14 +106,6 @@ def resolve_language(settings: Settings) -> LanguageProfile:
     return language_registry.get(settings.conversation.language)
 
 
-def effective_system_prompt(settings: Settings, language: LanguageProfile) -> str:
-    """Base system prompt plus the language instruction, when one applies."""
-    prompt = settings.conversation.system_prompt
-    if language.prompt_note:
-        prompt = f"{prompt} {language.prompt_note}"
-    return prompt
-
-
 def effective_asr_language(settings: Settings, language: LanguageProfile) -> str:
     """Explicit ASR override wins; otherwise follow the conversation language."""
     return settings.asr.language or language.asr_language

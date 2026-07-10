@@ -83,6 +83,10 @@ export const memory = {
     api.post<{ status: string }>(`/memory/turns/${turnId}/pin?pinned=${pinned}`),
   favorite: (turnId: number, favorite = true) =>
     api.post<{ status: string }>(`/memory/turns/${turnId}/favorite?favorite=${favorite}`),
+  rename: (conversationId: string, title: string) =>
+    api.patch<{ status: string; title: string }>(`/memory/conversations/${conversationId}`, {
+      title,
+    }),
   archive: (conversationId: string, archived = true) =>
     api.post<{ status: string }>(
       `/memory/conversations/${conversationId}/archive?archived=${archived}`,

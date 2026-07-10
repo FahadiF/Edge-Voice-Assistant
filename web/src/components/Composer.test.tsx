@@ -72,14 +72,14 @@ describe("Composer", () => {
     expect(screen.getByLabelText("Send message")).toBeDisabled();
   });
 
-  it("the + menu offers build-scoped placeholder actions", () => {
+  it("the + menu offers Vision-coming-soon placeholder actions", () => {
     renderComposer();
     fireEvent.click(screen.getByLabelText("Add attachment"));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     fireEvent.click(screen.getByText(/Attach image/));
     // Action is a placeholder: a toast explains, no crash, menu closes.
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(screen.getByText(/not available in this build/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vision support \(coming soon\)/i)).toBeInTheDocument();
   });
 
   it("dropped files become removable placeholder chips", () => {
@@ -92,8 +92,16 @@ describe("Composer", () => {
     expect(screen.queryByText(/photo\.png/)).toBeNull();
   });
 
-  it("mic indicator reflects engine state for screen readers", () => {
+  it("mic button offers to start the engine when stopped", () => {
     renderComposer(false);
-    expect(screen.getByLabelText(/Microphone off/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Start the engine")).toBeInTheDocument();
+  });
+
+  it("mic button starts the engine on click when stopped", async () => {
+    const fetchMock = mockSayOk(); // any ok JSON response works for /engine/start
+    renderComposer(false);
+    fireEvent.click(screen.getByLabelText("Start the engine"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/engine/start");
   });
 });

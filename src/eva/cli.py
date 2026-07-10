@@ -560,7 +560,13 @@ def _cmd_memory(args: argparse.Namespace) -> int:
         if cmd == "list":
             for conv in memory.all_conversations(include_archived=args.include_archived):
                 flag = " [archived]" if conv.archived else ""
-                print(f"{conv.id}  {conv.started_at}  lang={conv.language}{flag}")
+                title = conv.title or "(untitled)"
+                print(f"{conv.id}  {title:<32}  {conv.started_at}  lang={conv.language}{flag}")
+            return 0
+
+        if cmd == "rename":
+            memory.set_title(args.conversation_id, args.title)
+            print(f"Conversation '{args.conversation_id}' renamed to '{args.title}'.")
             return 0
 
         if cmd == "show":
@@ -1028,6 +1034,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_mlist.add_argument("--include-archived", action="store_true")
     p_mshow = memory_sub.add_parser("show", help="Show all turns in a conversation")
     p_mshow.add_argument("conversation_id")
+    p_mrename = memory_sub.add_parser("rename", help="Set a conversation's title")
+    p_mrename.add_argument("conversation_id")
+    p_mrename.add_argument("title")
     p_msearch = memory_sub.add_parser("search", help="Keyword search across memory")
     p_msearch.add_argument("query")
     p_msearch.add_argument("--conversation-id", dest="conversation_id", default=None)

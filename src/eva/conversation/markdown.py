@@ -30,9 +30,12 @@ _LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
 _BARE_URL = re.compile(r"https?://\S+")
 # Asterisk emphasis can be intraword (CommonMark); underscore emphasis
-# cannot — `file_name_here` is literal, `_word_` is italic.
-_ASTERISK_EMPHASIS = re.compile(r"(\*{1,3})(?=\S)(.+?)(?<=\S)\1")
-_UNDERSCORE_EMPHASIS = re.compile(r"(?<!\w)(_{1,3})(?=\S)(.+?)(?<=\S)\1(?!\w)")
+# cannot — `file_name_here` is literal, `_word_` is italic. The content's
+# first/last characters must not themselves be the marker: a bare "***" run
+# is never emphasis (it previously matched as *-wrapped-*, leaving a lone
+# asterisk to be spoken — M5.4 §9 regression).
+_ASTERISK_EMPHASIS = re.compile(r"(\*{1,3})(?=[^\s*])(.+?)(?<=[^\s*])\1")
+_UNDERSCORE_EMPHASIS = re.compile(r"(?<!\w)(_{1,3})(?=[^\s_])(.+?)(?<=[^\s_])\1(?!\w)")
 _STRIKETHROUGH = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
 _INLINE_CODE = re.compile(r"`+([^`]*)`+")
 _HTML_TAG = re.compile(r"</?[a-zA-Z][^>]*>")

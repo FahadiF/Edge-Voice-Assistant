@@ -83,6 +83,15 @@ class SayRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000, description="Message to send as a turn")
 
 
+class RenameConversationRequest(BaseModel):
+    """Edit a conversation's title (M5.4 — titles are auto-generated after
+    the first exchange and editable afterwards)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str = Field(min_length=1, max_length=120, description="New conversation title")
+
+
 class PluginStatusResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 

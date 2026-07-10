@@ -9,6 +9,23 @@
   max-width: 560px;
 }
 
+.schema-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px 16px;
+  margin: 0;
+  max-width: 620px;
+}
+
+.schema-group > legend {
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.schema-group .schema-section {
+  gap: 12px;
+}
+
 .field-label {
   font-weight: 600;
 }

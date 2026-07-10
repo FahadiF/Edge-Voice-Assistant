@@ -71,7 +71,9 @@ class FakeLLM(LLMEngine):
         params: GenerationParams,
         should_abort: Callable[[], bool],
     ) -> Iterator[str]:
-        for token in self.tokens:
+        # Honor max_tokens like the real engine does — the auto-title
+        # generation (M5.4) relies on its 16-token cap being respected.
+        for token in self.tokens[: params.max_tokens]:
             if should_abort():
                 self.aborted = True
                 return
@@ -273,6 +275,81 @@ class TestNormalTurn:
             assert audio.spoken  # reply was synthesized and played
             stored = orch.memory.recent_turns(orch.conversation_id, 10)
             assert any(t.text == "Hello from the composer" for t in stored)
+
+        asyncio.run(scenario())
+
+    def test_turns_are_embedded_at_write_time(self) -> None:
+        """M5.4 §1 root cause: nothing embedded new turns, so semantic
+        retrieval had nothing to find in later conversations. Both sides of
+        an exchange must now be embedded when a provider is wired."""
+        import numpy as np
+
+        from eva.embedding.base import EmbeddingProvider
+
+        class FakeEmbedding(EmbeddingProvider):
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+            def embed(self, text: str) -> np.ndarray:
+                return np.full(4, float(len(text)), dtype=np.float32)
+
+        async def scenario() -> None:
+            settings = Settings()
+            settings.conversation.system_prompt = "test"
+            bus = EventBus()
+            memory = FakeMemoryStore()
+            orch = Orchestrator(
+                settings,
+                bus,
+                FakeAudioOut(),
+                FakeASR(),
+                FakeLLM(),
+                FakeTTS(),
+                memory,
+                embedding=FakeEmbedding(),
+            )
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                for _ in range(200):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            await drive(orch, bus, script)
+            rows = memory.embeddings_for(None)
+            assert len(rows) == 2  # user turn + assistant turn
+            for _turn_id, vector, dim in rows:
+                assert dim == 4
+                assert len(vector) == 4 * 4  # float32 bytes
+
+        asyncio.run(scenario())
+
+    def test_first_exchange_auto_titles_the_conversation(self) -> None:
+        """M5.4 §2: the conversation gets an LLM-generated topic title after
+        the first completed exchange — exactly one generation, even across
+        later turns."""
+
+        async def scenario() -> None:
+            llm = FakeLLM()
+            orch, bus, _audio, _tts = make_orchestrator(llm=llm)
+
+            async def script() -> None:
+                for _ in range(2):  # two turns; title generated once
+                    orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                    for _ in range(200):
+                        if orch._turn_task is not None and orch._turn_task.done():
+                            break
+                        await asyncio.sleep(0.01)
+
+            await drive(orch, bus, script)
+            conversations = orch.memory.all_conversations()
+            active = next(c for c in conversations if c.id == orch.conversation_id)
+            # FakeLLM answers "Hello there. All good." to everything —
+            # including the title prompt; what matters is that a non-empty,
+            # markdown-free title was stored.
+            assert active.title
+            assert "*" not in active.title
 
         asyncio.run(scenario())
 

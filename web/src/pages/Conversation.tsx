@@ -201,6 +201,15 @@ export function Conversation() {
                   )}
                 </div>
               )}
+              {!liveTurn.assistantText && liveTurn.finalTranscript && !liveTurn.cancelled && (
+                <div className="bubble bubble-assistant bubble-thinking" aria-label="Assistant is thinking">
+                  <span className="thinking-dots" aria-hidden="true">
+                    <span>●</span>
+                    <span>●</span>
+                    <span>●</span>
+                  </span>
+                </div>
+              )}
               {liveTurn.assistantText && (
                 <div className="bubble bubble-assistant">
                   <div className="bubble-meta">Assistant · now</div>

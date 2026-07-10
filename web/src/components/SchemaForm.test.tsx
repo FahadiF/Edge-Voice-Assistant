@@ -157,6 +157,42 @@ describe("SchemaForm renders every field type the real settings schema uses", ()
     expect(screen.getByText("STOP")).toBeInTheDocument();
   });
 
+  it("renders nested $ref groups as fieldsets and bubbles nested changes", () => {
+    // Shape captured from the real /settings/schema after the ADR-025
+    // regroup: the permissions section's properties are $refs to sub-groups.
+    const defs = {
+      GeneralPermissions: {
+        title: "GeneralPermissions",
+        type: "object",
+        properties: {
+          internet: { type: "boolean", title: "Internet", default: false },
+          date_time: { type: "boolean", title: "Date Time", default: true },
+        },
+      },
+    };
+    const permissionsSchema: JsonSchema = {
+      type: "object",
+      properties: { general: { $ref: "#/$defs/GeneralPermissions" } },
+    };
+    const onFieldChange = vi.fn();
+    render(
+      <SchemaSection
+        sectionSchema={permissionsSchema}
+        values={{ general: { internet: false, date_time: true } }}
+        onFieldChange={onFieldChange}
+        errors={{}}
+        defs={defs}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "General" })).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Internet"));
+    // The change bubbles up as the whole updated sub-object.
+    expect(onFieldChange).toHaveBeenCalledWith("general", {
+      internet: true,
+      date_time: true,
+    });
+  });
+
   it("adds a tag on Enter", () => {
     const onFieldChange = vi.fn();
     render(

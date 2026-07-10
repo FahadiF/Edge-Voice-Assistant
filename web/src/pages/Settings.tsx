@@ -143,6 +143,7 @@ export function SettingsPage() {
                 sectionSchema={sectionSchema}
                 values={sectionValues}
                 errors={fieldErrors}
+                defs={schema.$defs}
                 onFieldChange={(field, value) =>
                   setDraft({ ...(sectionValues as Record<string, unknown>), [field]: value })
                 }

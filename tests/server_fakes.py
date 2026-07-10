@@ -137,6 +137,7 @@ class FakeMemoryStore(MemoryStore):
         self._conversations: dict[str, MemoryConversation] = {}
         self._turns: dict[int, MemoryTurn] = {}
         self._summaries: dict[str, MemorySummary] = {}
+        self._embeddings: dict[int, tuple[bytes, int]] = {}
         self._next_id = 1
 
     def start_conversation(self, *, language: str = "en", title: str = "") -> MemoryConversation:
@@ -246,13 +247,30 @@ class FakeMemoryStore(MemoryStore):
             MemorySearchResult(turn=t, score=1.0, match_reason="keyword") for t in matches[:limit]
         ]
 
+    def set_title(self, conversation_id: str, title: str) -> None:
+        conv = self._conversations.get(conversation_id)
+        if conv is None:
+            from eva.core.errors import MemoryNotFoundError
+
+            raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
+        self._conversations[conversation_id] = conv.model_copy(update={"title": title.strip()})
+
     def store_embedding(self, turn_id: int, model_id: str, vector: bytes, dim: int) -> None:
-        pass  # not exercised by orchestrator/server tests
+        self._embeddings[turn_id] = (vector, dim)
 
     def embeddings_for(
         self, conversation_id: str | None = None, *, limit: int | None = None
     ) -> list[tuple[int, bytes, int]]:
-        return []
+        rows = [
+            (turn_id, vector, dim)
+            for turn_id, (vector, dim) in self._embeddings.items()
+            if conversation_id is None
+            or (
+                self._turns.get(turn_id, None) is not None
+                and self._turns[turn_id].conversation_id == conversation_id
+            )
+        ]
+        return rows[-limit:] if limit is not None else rows
 
     def add_summary(self, summary: MemorySummary) -> MemorySummary:
         saved = summary.model_copy(update={"id": len(self._summaries) + 1})

@@ -85,8 +85,16 @@
 
 .composer-mic {
   font-size: 1.15rem;
-  padding: 4px;
+  padding: 4px 8px;
   opacity: 0.45;
+  border: none;
+  background: none;
+  border-radius: 50%;
+}
+
+.composer-mic:hover:not(:disabled) {
+  background: var(--bg-sunken);
+  border: none;
 }
 
 .mic-listening { opacity: 1; }

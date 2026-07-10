@@ -137,6 +137,13 @@ class TestUnpairedMarkers:
     def test_stray_backticks_scrubbed(self) -> None:
         assert markdown_to_speech("run `eva doctor now") == "run eva doctor now"
 
+    def test_bare_marker_runs_never_spoken(self) -> None:
+        """M5.4 §9 explicit regression cases: `***` and `__` alone."""
+        assert markdown_to_speech("before *** after") == "before after"
+        assert markdown_to_speech("before __ after") == "before after"
+        assert "*" not in markdown_to_speech("***")
+        assert "_" not in markdown_to_speech("__")
+
     def test_multiplication_and_snake_case_survive_the_scrub(self) -> None:
         assert markdown_to_speech("3 * 4 equals 12") == "3 * 4 equals 12"
         assert markdown_to_speech("open file_name_here please") == "open file_name_here please"

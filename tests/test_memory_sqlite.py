@@ -156,6 +156,27 @@ class TestConversationsAndTurns:
         with pytest.raises(MemoryNotFoundError):
             store.archive_conversation("nope")
 
+    def test_set_title_persists_and_strips(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        store.set_title(conv.id, "  Learning Finnish  ")
+        stored = next(c for c in store.all_conversations() if c.id == conv.id)
+        assert stored.title == "Learning Finnish"
+
+    def test_set_title_unknown_conversation_raises(self, store: SQLiteMemoryStore) -> None:
+        with pytest.raises(MemoryNotFoundError):
+            store.set_title("nope", "Title")
+
+    def test_title_round_trips_through_export_import(self, store: SQLiteMemoryStore) -> None:
+        """M5.4 §2: titles are part of the permanent record."""
+        conv = store.start_conversation()
+        store.add_turn(conv.id, "user", "hi")
+        store.set_title(conv.id, "Vacation Planning")
+        snapshot = store.export_json(conv.id)
+        store.delete_conversation(conv.id)
+        store.import_json(snapshot)
+        restored = next(c for c in store.all_conversations() if c.id == conv.id)
+        assert restored.title == "Vacation Planning"
+
     def test_merge_conversations_moves_turns(self, store: SQLiteMemoryStore) -> None:
         source = store.start_conversation()
         target = store.start_conversation()

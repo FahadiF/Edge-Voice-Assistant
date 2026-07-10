@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eva.core.errors import ConfigError
 
-SETTINGS_SCHEMA_VERSION = 1
+SETTINGS_SCHEMA_VERSION = 2
 
 
 class _Section(BaseModel):
@@ -166,7 +166,6 @@ class ConversationSettings(_Section):
     language: str = Field(
         "en", description="Conversation language (BCP-47 code from the language registry)"
     )
-    memory_enabled: bool = Field(True, description="Keep conversation history across turns")
     max_history_turns: Annotated[int, Field(ge=1, le=200)] = Field(
         20, description="Turns kept verbatim before summarization kicks in"
     )
@@ -279,38 +278,75 @@ class MemorySettings(_Section):
 # ──────────────────────── Permissions ────────────────────────
 
 
-class PermissionsSettings(_Section):
-    """What the assistant is allowed to know about / do on this machine
-    (M5.3, ADR-025). Read-only local facts default ON (they power questions
-    like "what time is it?"); anything that *acts* on the system or leaves
-    the device defaults OFF and, in this build, is also not implemented —
-    the toggle is the contract future capability providers must respect."""
+class GeneralPermissions(_Section):
+    internet: bool = Field(
+        False, description="Allow internet access (coming soon — not available in this build)"
+    )
+    date_time: bool = Field(True, description="Share the current local date, time, and timezone")
+    system_information: bool = Field(
+        True, description="Share OS, CPU, GPU, RAM, and locale details"
+    )
 
-    date_time: bool = Field(True, description="Share the current local date and time")
-    timezone: bool = Field(True, description="Share the system timezone")
-    locale: bool = Field(True, description="Share the system language/locale")
-    cpu: bool = Field(True, description="Share CPU model and core count")
-    gpu: bool = Field(True, description="Share GPU model and VRAM")
-    ram: bool = Field(True, description="Share installed memory size")
-    os: bool = Field(True, description="Share operating system name and version")
-    internet: bool = Field(False, description="Allow internet access (not available in this build)")
-    local_files: bool = Field(
-        False, description="Allow reading local files (not available in this build)"
+
+class FilesPermissions(_Section):
+    read_files: bool = Field(
+        False, description="Allow reading local files (coming soon — not available in this build)"
     )
-    camera: bool = Field(False, description="Allow camera access (not available in this build)")
-    clipboard: bool = Field(
-        False, description="Allow clipboard access (not available in this build)"
+    write_files: bool = Field(
+        False, description="Allow writing local files (coming soon — not available in this build)"
     )
+
+
+class DevicesPermissions(_Section):
+    camera: bool = Field(
+        False, description="Allow camera access (coming soon — not available in this build)"
+    )
+    microphone: bool = Field(
+        True,
+        description="Allow microphone capture — off makes this a typed-chat-only assistant",
+    )
+
+
+class ToolsPermissions(_Section):
     browser: bool = Field(
-        False, description="Allow controlling a browser (not available in this build)"
-    )
-    shell: bool = Field(
-        False, description="Allow running shell commands (not available in this build)"
+        False, description="Allow controlling a browser (coming soon — not available in this build)"
     )
     python: bool = Field(
-        False, description="Allow executing Python code (not available in this build)"
+        False, description="Allow executing Python code (coming soon — not available in this build)"
+    )
+    shell: bool = Field(
+        False,
+        description="Allow running shell commands (coming soon — not available in this build)",
     )
     plugins: bool = Field(True, description="Allow enabled plugins to contribute capabilities")
+
+
+class PrivacyPermissions(_Section):
+    remember_conversations: bool = Field(
+        True,
+        description="Store conversations in memory — off means nothing is saved after a turn",
+    )
+    learn_preferences: bool = Field(
+        True,
+        description="Reserved for automatic preference learning (not used in this build)",
+    )
+
+
+class PermissionsSettings(_Section):
+    """What the assistant is allowed to know about / do on this machine
+    (ADR-025, regrouped in M5.4). Read-only local facts default ON (they
+    power questions like "what time is it?"); anything that *acts* on the
+    system or leaves the device defaults OFF and, in this build, is also
+    not implemented — the toggle is the contract future capability
+    providers must respect. Enforced today: `general.*` (system-info
+    prompt), `devices.microphone` (audio capture), and
+    `privacy.remember_conversations` (turn storage)."""
+
+    general: GeneralPermissions = Field(default_factory=GeneralPermissions)
+    files: FilesPermissions = Field(default_factory=FilesPermissions)
+    devices: DevicesPermissions = Field(default_factory=DevicesPermissions)
+    tools: ToolsPermissions = Field(default_factory=ToolsPermissions)
+    privacy: PrivacyPermissions = Field(default_factory=PrivacyPermissions)
 
 
 # ──────────────────────── Server / UI / Developer ────────────────────────
@@ -363,11 +399,52 @@ class Settings(_Section):
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
 
 
+def _migrate_raw(raw: Any) -> Any:
+    """Upgrade an older settings document, dict-level, before validation —
+    mirrors the memory database's numbered-migration pattern (ADR-019).
+
+    v1 → v2 (M5.4): flat `permissions` keys become grouped sections
+    (ADR-025 regroup); the dead `conversation.memory_enabled` flag moves to
+    `permissions.privacy.remember_conversations` (now actually enforced).
+    """
+    if not isinstance(raw, dict) or raw.get("schema_version", 1) >= SETTINGS_SCHEMA_VERSION:
+        return raw
+    perms = raw.get("permissions")
+    if isinstance(perms, dict) and "general" not in perms:
+        raw["permissions"] = {
+            "general": {
+                "internet": perms.get("internet", False),
+                "date_time": perms.get("date_time", True) or perms.get("timezone", True),
+                "system_information": any(
+                    perms.get(key, True) for key in ("cpu", "gpu", "ram", "os", "locale")
+                ),
+            },
+            "files": {"read_files": perms.get("local_files", False), "write_files": False},
+            "devices": {"camera": perms.get("camera", False), "microphone": True},
+            "tools": {
+                "browser": perms.get("browser", False),
+                "python": perms.get("python", False),
+                "shell": perms.get("shell", False),
+                "plugins": perms.get("plugins", True),
+            },
+            "privacy": {"remember_conversations": True, "learn_preferences": True},
+        }
+    conversation = raw.get("conversation")
+    if isinstance(conversation, dict) and "memory_enabled" in conversation:
+        remember = conversation.pop("memory_enabled")
+        raw.setdefault("permissions", {}).setdefault("privacy", {})["remember_conversations"] = (
+            remember
+        )
+    raw["schema_version"] = SETTINGS_SCHEMA_VERSION
+    return raw
+
+
 def load_settings(path: Path) -> Settings:
     """Load settings from JSON, falling back to defaults if the file is absent.
 
     A malformed file raises :class:`ConfigError` rather than silently resetting —
-    losing a user's configuration is worse than failing loudly.
+    losing a user's configuration is worse than failing loudly. Older schema
+    versions are migrated in memory (persisted on the next save).
     """
     if not path.exists():
         return Settings()
@@ -376,7 +453,7 @@ def load_settings(path: Path) -> Settings:
     except (OSError, json.JSONDecodeError) as exc:
         raise ConfigError(f"Cannot read settings file {path}: {exc}") from exc
     try:
-        return Settings.model_validate(raw)
+        return Settings.model_validate(_migrate_raw(raw))
     except ValueError as exc:
         raise ConfigError(f"Invalid settings in {path}: {exc}") from exc
 

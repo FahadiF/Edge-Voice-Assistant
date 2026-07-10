@@ -277,23 +277,28 @@ class ContextBuilder:
     def _retrieve_memories(
         self, user_text: str
     ) -> tuple[list[MemorySearchResult], list[RetrievedMemoryTrace]]:
+        start = time.perf_counter()
         if (
             self._retriever is None
             or self._embedding_provider is None
             or not self._settings.memory.embedding_enabled
         ):
-            return [], []
-        start = time.perf_counter()
-        query_vector = self._embedding_provider.embed(user_text).tobytes()
-        # Searches every conversation, not just the active one — semantic
-        # memory is meant to recall *past* conversations (Part 3: "related
-        # conversations", "similar memories"), not just the current session's
-        # recent-turn window (which `recent_turns` below already covers).
-        results = self._retriever.retrieve(
-            query_vector,
-            top_k=self._settings.memory.retrieval_top_k,
-            conversation_id=None,
-        )
+            # No embedding model installed (or disabled): degrade to keyword
+            # recall instead of NO recall (M5.4 — previously the memory block
+            # was simply empty here, so long-term memory silently did nothing
+            # on machines without the embedding model).
+            results = self._keyword_fallback(user_text)
+        else:
+            query_vector = self._embedding_provider.embed(user_text).tobytes()
+            # Searches every conversation, not just the active one — semantic
+            # memory is meant to recall *past* conversations (Part 3: "related
+            # conversations", "similar memories"), not just the current
+            # session's recent-turn window (which `recent_turns` covers).
+            results = self._retriever.retrieve(
+                query_vector,
+                top_k=self._settings.memory.retrieval_top_k,
+                conversation_id=None,
+            )
         self._last_retrieval_ms = int((time.perf_counter() - start) * 1000)
         self._last_retrieval_top_score = results[0].score if results else None
         trace = [
@@ -302,6 +307,24 @@ class ContextBuilder:
             if r.turn.id is not None
         ]
         return results, trace
+
+    def _keyword_fallback(self, user_text: str) -> list[MemorySearchResult]:
+        """Recall by keyword when semantic search isn't available: run the
+        store's text search once per salient word (a whole-utterance phrase
+        match would almost never hit) and merge, preserving first-seen order.
+        Failures degrade to no results — recall must never break a turn."""
+        words = [w.strip(".,!?;:'\"()") for w in user_text.split()]
+        salient = [w for w in words if len(w) >= 4][:4]
+        merged: dict[int, MemorySearchResult] = {}
+        top_k = self._settings.memory.retrieval_top_k
+        for word in salient:
+            try:
+                for result in self._memory.search_text(word, limit=top_k):
+                    if result.turn.id is not None and result.turn.id not in merged:
+                        merged[result.turn.id] = result
+            except Exception:
+                logger.debug("Keyword fallback search failed for %r", word, exc_info=True)
+        return list(merged.values())[:top_k]
 
     def _format_memory_block(self, results: list[MemorySearchResult]) -> tuple[str, bool]:
         """Retrieved memories, highest-scored first (the retriever's order is

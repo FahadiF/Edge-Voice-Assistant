@@ -9,7 +9,6 @@ import pytest
 from eva.config.settings import Settings
 from eva.conversation.language import (
     effective_asr_language,
-    effective_system_prompt,
     effective_voice,
     language_registry,
     register_builtin_languages,
@@ -40,18 +39,21 @@ class TestResolution:
         settings = Settings()
         lang = resolve_language(settings)
         assert lang.code == "en"
-        prompt = effective_system_prompt(settings, lang)
-        assert prompt == settings.conversation.system_prompt
+        assert lang.prompt_note == ""  # English adds no language instruction
 
     @pytest.mark.parametrize(
         ("code", "expected_fragment"),
         [("fi", "suomeksi"), ("sv", "svenska"), ("bn", "বাংলায়")],
     )
-    def test_language_note_appended_to_prompt(self, code: str, expected_fragment: str) -> None:
+    def test_language_note_defined_for_non_english(self, code: str, expected_fragment: str) -> None:
+        # The note itself reaches the prompt via ContextBuilder
+        # (test_context_builder.py::test_language_note_appended) — the old
+        # `effective_system_prompt` helper it used to flow through was dead
+        # production code and was removed in M5.4.
         settings = Settings()
         settings.conversation.language = code
         lang = resolve_language(settings)
-        assert expected_fragment in effective_system_prompt(settings, lang)
+        assert expected_fragment in lang.prompt_note
 
     @pytest.mark.parametrize("code", ["fi", "sv", "bn"])
     def test_asr_hint_follows_conversation_language(self, code: str) -> None:

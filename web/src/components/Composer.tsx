@@ -11,8 +11,8 @@
 
 import { useRef, useState } from "react";
 import type { DragEvent, ClipboardEvent, KeyboardEvent } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { conversation } from "../api/endpoints";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { conversation, engine } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import { toast } from "./common";
 import "./composer.css";
@@ -50,7 +50,7 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
       }
       setText("");
       if (attachments.length > 0) {
-        toast("info", "Attachments are not available in this build — sent the text only.");
+        toast("info", "Attachments are waiting for Vision support — sent the text only.");
         setAttachments([]);
       }
       textareaRef.current?.focus();
@@ -92,7 +92,30 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
 
   const placeholderAction = (label: string) => {
     setMenuOpen(false);
-    toast("info", `${label} is not available in this build.`);
+    toast("info", `${label} — waiting for Vision support (coming soon).`);
+  };
+
+  const queryClient = useQueryClient();
+  const startEngine = useMutation({
+    mutationFn: engine.start,
+    onSuccess: () => {
+      toast("success", "Engine started — you can talk now");
+      queryClient.invalidateQueries({ queryKey: ["engine-status"] });
+    },
+    onError: (e) => toast("error", `Engine start failed: ${e.message}`),
+  });
+  const interrupt = useMutation({
+    mutationFn: conversation.interrupt,
+    onError: (e) => toast("error", e.message),
+  });
+
+  const onMicClick = () => {
+    if (!engineRunning) {
+      startEngine.mutate();
+    } else if (pipelineState === "speaking" || pipelineState === "thinking") {
+      interrupt.mutate(); // tap the mic to cut the assistant off
+    }
+    // listening/idle while running: nothing to do — it's always listening
   };
 
   return (
@@ -108,7 +131,7 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
       {attachments.length > 0 && (
         <div className="composer-chips">
           {attachments.map((chip) => (
-            <span key={chip.id} className="chip" title="Not available in this build">
+            <span key={chip.id} className="chip" title="Waiting for Vision support">
               {chip.kind === "image" ? "🖼" : "📄"} {chip.name}
               <button
                 className="tag-remove"
@@ -119,7 +142,7 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
               </button>
             </span>
           ))}
-          <span className="field-help">attachments aren't processed in this build</span>
+          <span className="field-help">waiting for Vision support (coming soon)</span>
         </div>
       )}
       <div className="composer-row">
@@ -161,22 +184,27 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           onKeyDown={onKeyDown}
           onPaste={onPaste}
         />
-        <span
+        <button
           className={`composer-mic mic-${pipelineState}`}
-          role="img"
           aria-label={
             engineRunning
-              ? `Microphone active — assistant is ${pipelineState}`
-              : "Microphone off — engine stopped"
+              ? pipelineState === "speaking" || pipelineState === "thinking"
+                ? "Interrupt the assistant"
+                : `Microphone active — assistant is ${pipelineState}`
+              : "Start the engine"
           }
           title={
             engineRunning
-              ? `Always listening (${pipelineState}) — just talk, or use barge-in to interrupt`
-              : "Start the engine to enable the microphone"
+              ? pipelineState === "speaking" || pipelineState === "thinking"
+                ? "Tap to interrupt the assistant"
+                : `Always listening (${pipelineState}) — just talk`
+              : "Tap to start the engine and enable the microphone"
           }
+          disabled={startEngine.isPending}
+          onClick={onMicClick}
         >
           🎙
-        </span>
+        </button>
         <button
           className="primary composer-send"
           disabled={!canSend}

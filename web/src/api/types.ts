@@ -74,7 +74,6 @@ export interface ConversationSettings {
   system_prompt: string;
   persona: string;
   language: string;
-  memory_enabled: boolean;
   max_history_turns: number;
   temperature: number;
   top_p: number;
@@ -107,21 +106,11 @@ export interface MemorySettings {
 }
 
 export interface PermissionsSettings {
-  date_time: boolean;
-  timezone: boolean;
-  locale: boolean;
-  cpu: boolean;
-  gpu: boolean;
-  ram: boolean;
-  os: boolean;
-  internet: boolean;
-  local_files: boolean;
-  camera: boolean;
-  clipboard: boolean;
-  browser: boolean;
-  shell: boolean;
-  python: boolean;
-  plugins: boolean;
+  general: { internet: boolean; date_time: boolean; system_information: boolean };
+  files: { read_files: boolean; write_files: boolean };
+  devices: { camera: boolean; microphone: boolean };
+  tools: { browser: boolean; python: boolean; shell: boolean; plugins: boolean };
+  privacy: { remember_conversations: boolean; learn_preferences: boolean };
 }
 
 export interface ServerSettings {

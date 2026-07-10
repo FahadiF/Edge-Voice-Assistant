@@ -4,7 +4,7 @@
  * store lives on the assistant — ADR-019).
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { engine, memory } from "../api/endpoints";
 import type { MemoryTurn } from "../api/types";
@@ -74,8 +74,12 @@ function ContextPreview() {
   return (
     <Card title="Context inspector">
       <p className="field-help">
-        See exactly what the language model would receive for an utterance — retrieved
-        memories, summary, persona — without generating a reply (ADR-021).
+        The developer's view into the assistant's "mind": type anything the user might
+        say and see the exact prompt the language model would receive for it — which
+        memories were retrieved (with relevance scores), whether a summary was
+        included, the active persona and profile, and the final composed message
+        list — all without spending a generation. If a remembered fact isn't being
+        recalled in conversation, this is where you find out why.
       </p>
       <div className="context-input">
         <input
@@ -155,6 +159,9 @@ export function Memory() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Awaited<ReturnType<typeof memory.search>> | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const importFileRef = useRef<HTMLInputElement>(null);
   const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
 
@@ -169,6 +176,30 @@ export function Memory() {
       setResults(await memory.search(query, 50));
     } catch (e) {
       toast("error", (e as Error).message);
+    }
+  };
+
+  const commitRename = async (conversationId: string) => {
+    const title = renameDraft.trim();
+    setRenaming(null);
+    if (!title) return;
+    try {
+      await memory.rename(conversationId, title);
+      refresh();
+      toast("success", "Conversation renamed");
+    } catch (e) {
+      toast("error", `Rename failed: ${(e as Error).message}`);
+    }
+  };
+
+  const doImportConversation = async (file: File) => {
+    try {
+      const payload = JSON.parse(await file.text());
+      const r = await memory.importJson(payload);
+      refresh();
+      toast("success", `Imported ${r.turns} turn(s)`);
+    } catch (e) {
+      toast("error", `Import failed: ${(e as Error).message}`);
     }
   };
 
@@ -238,14 +269,14 @@ export function Memory() {
           </div>
         </Card>
 
-        <Card title="Search">
+        <Card title="Search memories">
           <div className="context-input">
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search everything the assistant remembers…"
-              aria-label="Search memory"
+              placeholder="Search everything I remember..."
+              aria-label="Search memories"
               onKeyDown={(e) => e.key === "Enter" && void runSearch()}
             />
             <button className="primary" onClick={() => void runSearch()}>
@@ -271,18 +302,40 @@ export function Memory() {
         </Card>
       </div>
 
-      <Card title="Conversations">
+      <ContextPreview />
+
+      <Card
+        title="Conversations"
+        actions={
+          <>
+            <button onClick={() => importFileRef.current?.click()}>Import conversation</button>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept="application/json"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void doImportConversation(f);
+                e.target.value = "";
+              }}
+            />
+          </>
+        }
+      >
         {conversations.length === 0 ? (
           <EmptyState>
             No stored conversations yet. Every conversation is saved here
             automatically — have one on the Conversation page (voice or typed) and it
-            appears in this list, searchable and manageable. Each restart starts a
-            fresh conversation; old ones stay until you delete them.
+            appears in this list with an auto-generated title, searchable and
+            manageable. Each restart starts a fresh conversation; old ones stay
+            until you delete them.
           </EmptyState>
         ) : (
           <table>
             <thead>
               <tr>
+                <th>Title</th>
                 <th>Started</th>
                 <th>ID</th>
                 <th>Turns</th>
@@ -292,6 +345,36 @@ export function Memory() {
             <tbody>
               {conversations.map((entry) => (
                 <tr key={entry.conversation.id}>
+                  <td>
+                    {renaming === entry.conversation.id ? (
+                      <input
+                        autoFocus
+                        value={renameDraft}
+                        aria-label="Conversation title"
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onBlur={() => void commitRename(entry.conversation.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void commitRename(entry.conversation.id);
+                          if (e.key === "Escape") setRenaming(null);
+                        }}
+                      />
+                    ) : (
+                      <>
+                        {entry.conversation.title || <em>Untitled</em>}{" "}
+                        <button
+                          className="link-button"
+                          aria-label={`Rename ${entry.conversation.title || "untitled conversation"}`}
+                          title="Rename"
+                          onClick={() => {
+                            setRenaming(entry.conversation.id);
+                            setRenameDraft(entry.conversation.title);
+                          }}
+                        >
+                          ✎
+                        </button>
+                      </>
+                    )}
+                  </td>
                   <td>{new Date(entry.conversation.started_at).toLocaleString()}</td>
                   <td>
                     <code>{entry.conversation.id.slice(0, 8)}…</code>
@@ -299,6 +382,17 @@ export function Memory() {
                   </td>
                   <td>{entry.turns.length}</td>
                   <td className="turn-actions">
+                    <button
+                      title="Download this conversation as JSON"
+                      onClick={async () =>
+                        downloadJson(
+                          await memory.exportJson(entry.conversation.id),
+                          `eva-conversation-${(entry.conversation.title || entry.conversation.id.slice(0, 8)).replaceAll(/[^\w-]+/g, "-")}.json`,
+                        )
+                      }
+                    >
+                      Export
+                    </button>
                     <button
                       onClick={async () => {
                         try {
@@ -346,7 +440,7 @@ export function Memory() {
               <option value="">source…</option>
               {conversations.map((c) => (
                 <option key={c.conversation.id} value={c.conversation.id}>
-                  {c.conversation.id.slice(0, 8)}… ({c.turns.length} turns)
+                  {c.conversation.title || c.conversation.id.slice(0, 8)} ({c.turns.length} turns)
                 </option>
               ))}
             </select>
@@ -357,7 +451,7 @@ export function Memory() {
                 .filter((c) => c.conversation.id !== mergeSource)
                 .map((c) => (
                   <option key={c.conversation.id} value={c.conversation.id}>
-                    {c.conversation.id.slice(0, 8)}… ({c.turns.length} turns)
+                    {c.conversation.title || c.conversation.id.slice(0, 8)} ({c.turns.length} turns)
                   </option>
                 ))}
             </select>
@@ -380,8 +474,6 @@ export function Memory() {
           </div>
         )}
       </Card>
-
-      <ContextPreview />
 
       <ConfirmDialog
         open={confirmDeleteAll}

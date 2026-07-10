@@ -20,7 +20,9 @@ class TestGetAndSchema:
         assert r.status_code == 200
         body = r.json()
         assert body["llm"]["model"]
-        assert body["schema_version"] == 1
+        from eva.config.settings import SETTINGS_SCHEMA_VERSION
+
+        assert body["schema_version"] == SETTINGS_SCHEMA_VERSION
 
     def test_schema_is_json_schema_with_bounds(self, client: TestClient) -> None:
         r = client.get("/api/v1/settings/schema")

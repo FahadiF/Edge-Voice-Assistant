@@ -541,7 +541,59 @@ table). Listen:
 - [ ] HTML entities (`&amp;` etc.) are spoken as their characters ("and"
       context), not as "ampersand a-m-p semicolon".
 
-### 15.12 Ambiguity handling
+### 15.12 Long-term memory recall (M5.4 acceptance)
+
+1. Say (or type): *"My nickname is Fahad."* Let the reply finish.
+2. **Clear** the conversation (or restart the engine) so a NEW conversation
+   starts.
+3. Ask: *"What's my nickname?"*
+   - [ ] The answer is **Fahad** — recalled naturally, no "according to my
+         records".
+4. In the Memory page's **Context inspector**, type *"what's my nickname?"*
+   - [ ] "My nickname is Fahad." appears under retrieved memories with a
+         score (semantic if the embedding model is installed; keyword
+         fallback otherwise — both must work).
+
+### 15.13 Conversation titles (M5.4)
+
+1. Have a short conversation about a specific topic (e.g. buying a GPU),
+   then open the Memory page.
+   - [ ] The conversation has an auto-generated topic title ("Buying RTX
+         5070"-style), not just an id.
+2. Click the ✎ next to the title, type a new one, press Enter.
+   - [ ] The new title sticks (refresh to confirm).
+3. Export that conversation, delete it, import the file.
+   - [ ] The title survived the round-trip.
+
+### 15.14 Permissions behavior (M5.4 acceptance)
+
+Settings → Permissions (now grouped: General / Files / Devices / Tools /
+Privacy):
+
+- With **General → Date & Time** ON: *"What time is it?"* → correct time.
+- Turn it OFF, save, restart the engine, ask again:
+  - [ ] The assistant says the permission isn't granted — a polite
+        refusal, not "I can never know the time."
+- Same for **System Information** with *"How much RAM do I have?"*.
+- Turn **Privacy → Remember conversations** OFF, restart, talk, then check
+  the Memory page:
+  - [ ] Nothing new was stored.
+- Turn **Devices → Microphone** OFF, restart the engine:
+  - [ ] Voice input is dead but the composer still works and replies are
+        still spoken.
+
+### 15.15 Conversation layout (M5.4)
+
+- [ ] The composer is fully visible at the bottom without scrolling the
+      page, on both a tall and a small window; only the transcript scrolls.
+- [ ] While waiting for the first token, an animated "thinking" bubble
+      shows; tokens then stream into the reply progressively (not one blob
+      at the end), and TTS starts speaking after the first sentence, while
+      later text is still streaming.
+- [ ] The mic button starts the engine when stopped, and interrupts the
+      assistant when it is speaking.
+
+### 15.16 Ambiguity handling
 
 - *"Make it shorter."* (with nothing plausible to shorten in view)
   - [ ] It either makes the most helpful assumption or asks ONE short

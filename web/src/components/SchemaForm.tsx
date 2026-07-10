@@ -206,30 +206,67 @@ export function SchemaField({
   );
 }
 
+function resolveRef(schema: JsonSchema, defs?: Record<string, JsonSchema>): JsonSchema | null {
+  if (!schema.$ref || !defs) return null;
+  const name = schema.$ref.split("/").pop();
+  return (name && defs[name]) || null;
+}
+
+/** Human label for a nested group without a schema title. */
+function titleCase(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1).replaceAll("_", " ");
+}
+
 export function SchemaSection({
   sectionSchema,
   values,
   onFieldChange,
   errors,
+  defs,
 }: {
   sectionSchema: JsonSchema;
   values: Record<string, unknown>;
   onFieldChange: (field: string, value: unknown) => void;
   errors: Record<string, string>;
+  /** Root schema $defs — needed to resolve nested sub-sections (e.g. the
+   * grouped Permissions section, ADR-025 regroup). */
+  defs?: Record<string, JsonSchema>;
 }) {
   const properties = sectionSchema.properties ?? {};
   return (
     <div className="schema-section">
-      {Object.entries(properties).map(([field, fieldSchema]) => (
-        <SchemaField
-          key={field}
-          name={field}
-          schema={fieldSchema}
-          value={values[field]}
-          onChange={(v) => onFieldChange(field, v)}
-          error={errors[field]}
-        />
-      ))}
+      {Object.entries(properties).map(([field, fieldSchema]) => {
+        const nested = resolveRef(fieldSchema, defs);
+        if (nested) {
+          // One level of grouping: render as a fieldset whose changes bubble
+          // up as an updated sub-object under this field name.
+          const groupValues = (values[field] ?? {}) as Record<string, unknown>;
+          return (
+            <fieldset key={field} className="schema-group">
+              <legend>{nested.title ? nested.title.replace(/Permissions$/, "") : titleCase(field)}</legend>
+              <SchemaSection
+                sectionSchema={nested}
+                values={groupValues}
+                errors={errors}
+                defs={defs}
+                onFieldChange={(subField, value) =>
+                  onFieldChange(field, { ...groupValues, [subField]: value })
+                }
+              />
+            </fieldset>
+          );
+        }
+        return (
+          <SchemaField
+            key={field}
+            name={field}
+            schema={fieldSchema}
+            value={values[field]}
+            onChange={(v) => onFieldChange(field, v)}
+            error={errors[field]}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -100,6 +100,24 @@ def _active_conversation_id(client: TestClient) -> str:
 
 
 class TestConversationOperations:
+    def test_rename_conversation(self, running_client: TestClient) -> None:
+        """M5.4 §2: auto-generated titles stay editable via PATCH."""
+        conv_id = _active_conversation_id(running_client)
+        r = running_client.patch(
+            f"/api/v1/memory/conversations/{conv_id}", json={"title": "Buying RTX 5070"}
+        )
+        assert r.status_code == 200
+        assert r.json() == {"status": "renamed", "title": "Buying RTX 5070"}
+
+    def test_rename_rejects_empty_title(self, running_client: TestClient) -> None:
+        conv_id = _active_conversation_id(running_client)
+        r = running_client.patch(f"/api/v1/memory/conversations/{conv_id}", json={"title": ""})
+        assert r.status_code == 422
+
+    def test_rename_unknown_conversation_404(self, running_client: TestClient) -> None:
+        r = running_client.patch("/api/v1/memory/conversations/nope", json={"title": "x"})
+        assert r.status_code == 404
+
     def test_archive_and_restore_conversation(self, running_client: TestClient) -> None:
         _import_pair(running_client)
         conv_id = _active_conversation_id(running_client)

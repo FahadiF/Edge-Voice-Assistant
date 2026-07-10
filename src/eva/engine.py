@@ -55,12 +55,27 @@ class Assistant:
     """None when the embedding model isn't installed or is disabled in
     settings — memory search still works via keyword/FTS (ADR-020)."""
 
+    _audio_started: bool = False
+    """Whether audio capture was actually opened (False when the microphone
+    permission is off — ADR-025 regroup); stop() must not stop what never
+    started."""
+
     def start_audio(self) -> None:
+        """Open the microphone/speaker pipeline — unless the user revoked
+        the microphone permission (ADR-025 regroup, M5.4), in which case the
+        assistant runs typed-chat-only: the web composer still works, TTS
+        still speaks, but no audio is captured."""
+        if not self.settings.permissions.devices.microphone:
+            self._audio_started = False
+            logger.info("Microphone permission is off — audio capture disabled (typed chat only)")
+            return
         self.audio.start()
+        self._audio_started = True
 
     def stop(self) -> None:
         self.orchestrator.request_shutdown()
-        self.audio.stop()
+        if self._audio_started:
+            self.audio.stop()
         self.memory.close()
 
     def preload(self) -> None:
@@ -145,7 +160,15 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
 
     audio = AudioSystem(settings, on_audio_event)
     orchestrator = Orchestrator(
-        settings, bus, audio, asr, llm, tts, memory, context_builder=context_builder
+        settings,
+        bus,
+        audio,
+        asr,
+        llm,
+        tts,
+        memory,
+        context_builder=context_builder,
+        embedding=embedding,
     )
     return Assistant(
         settings=settings,

@@ -43,6 +43,12 @@ class MemoryStore(ABC):
         """All conversations, newest first."""
 
     @abstractmethod
+    def set_title(self, conversation_id: str, title: str) -> None:
+        """Set/replace a conversation's title (M5.4: auto-generated after the
+        first exchange, editable by the user afterwards; exported/imported
+        with the conversation)."""
+
+    @abstractmethod
     def archive_conversation(self, conversation_id: str, *, archived: bool = True) -> None:
         """Reversible: hides from `all_conversations()` by default, keeps data."""
 

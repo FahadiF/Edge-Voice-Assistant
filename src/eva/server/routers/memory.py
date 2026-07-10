@@ -19,6 +19,7 @@ from eva.server.schemas import (
     ContextTraceResponse,
     MemorySearchRequest,
     MergeConversationsRequest,
+    RenameConversationRequest,
     RetrievedMemoryTraceResponse,
 )
 
@@ -84,6 +85,16 @@ def pin_turn(turn_id: int, state: StateDep, pinned: bool = Query(True)) -> dict[
 def favorite_turn(turn_id: int, state: StateDep, favorite: bool = Query(True)) -> dict[str, str]:
     state.require_assistant().memory.favorite(turn_id, favorite=favorite)
     return {"status": "favorited" if favorite else "unfavorited"}
+
+
+@router.patch("/conversations/{conversation_id}")
+def rename_conversation(
+    conversation_id: str, payload: RenameConversationRequest, state: StateDep
+) -> dict[str, str]:
+    """Edit a conversation's title (auto-generated titles stay editable —
+    M5.4 §2)."""
+    state.require_assistant().memory.set_title(conversation_id, payload.title)
+    return {"status": "renamed", "title": payload.title.strip()}
 
 
 @router.post("/conversations/{conversation_id}/archive")

@@ -145,3 +145,27 @@ max_turns_per_conversation` (retention policy, ADR-019 §10); a proper fix
 (a covering index, or restructuring the query to always drive from
 `embeddings`) is a candidate for M5 if a single-conversation-scoped search
 endpoint sees real use at that scale.
+
+## Amendment 2 (M5.4, 2026-07-06): retrieval was never wired to new turns
+
+Real-usage testing (M5.4 §1) found long-term recall didn't work in practice,
+for two integration reasons this ADR's design didn't catch:
+
+1. **Nothing embedded new turns.** `store_embedding()` existed and the
+   retriever read from it — but the only caller was the benchmark. The live
+   pipeline stored text and never vectors, so semantic retrieval always
+   scanned an empty set. Fixed: the orchestrator embeds both sides of every
+   completed exchange at write time (`_store_turns`, provider passed in by
+   `engine.py`); failures degrade to keyword-searchable text, never a
+   broken turn.
+2. **No fallback without the embedding model.** `ContextBuilder` returned
+   zero memories when the model wasn't installed — silently, on every
+   machine that hadn't downloaded it. Fixed: keyword fallback — the store's
+   FTS/LIKE search runs once per salient word of the utterance (a
+   whole-utterance phrase match would almost never hit) and merges results.
+   Semantic recall is better; *no* recall was the actual shipped behavior.
+
+Acceptance case now pinned by tests and live validation: "My nickname is
+Fahad" in one conversation → "What's my nickname?" in a later one →
+"Fahad" reaches the prompt (and the reply) on machines with and without
+the embedding model.

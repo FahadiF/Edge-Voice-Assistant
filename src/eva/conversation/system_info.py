@@ -47,28 +47,26 @@ def _hardware_facts() -> dict[str, str]:
 
 def system_facts_block(permissions: PermissionsSettings) -> str:
     """The prompt section listing permitted local facts, or "" if nothing is
-    permitted. Called per turn — date/time must be current."""
+    permitted. Called per turn — date/time must be current. Gated by the
+    grouped toggles (ADR-025 regroup, M5.4): `general.date_time` covers
+    date, time, and timezone; `general.system_information` covers OS, CPU,
+    GPU, RAM, and locale."""
     lines: list[str] = []
     now = datetime.now().astimezone()
 
-    if permissions.date_time:
+    if permissions.general.date_time:
         lines.append(f"Current local date and time: {now.strftime('%A, %B %d, %Y at %H:%M')}")
-    if permissions.timezone:
         lines.append(f"Timezone: {now.tzname() or 'unknown'} (UTC{now.strftime('%z')})")
-    if permissions.locale:
+
+    if permissions.general.system_information:
         lang, _encoding = locale_module.getlocale()
         if lang:
             lines.append(f"System locale: {lang}")
-    if permissions.os:
         lines.append(f"Operating system: {platform.system()} {platform.release()}")
-
-    hardware = _hardware_facts()
-    if permissions.cpu and "cpu" in hardware:
-        lines.append(f"CPU: {hardware['cpu']}")
-    if permissions.gpu and "gpu" in hardware:
-        lines.append(f"GPU: {hardware['gpu']}")
-    if permissions.ram and "ram" in hardware:
-        lines.append(f"RAM: {hardware['ram']}")
+        hardware = _hardware_facts()
+        for key, label in (("cpu", "CPU"), ("gpu", "GPU"), ("ram", "RAM")):
+            if key in hardware:
+                lines.append(f"{label}: {hardware[key]}")
 
     if not lines:
         return ""

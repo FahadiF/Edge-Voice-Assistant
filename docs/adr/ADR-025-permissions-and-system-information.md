@@ -72,3 +72,29 @@ image/document permissions above.
 - `submit_text` is the first non-audio input path; anything else that
   wants to start turns (plugins, scheduled prompts) should follow the same
   event-queue pattern rather than calling the pipeline directly.
+
+## Amendment (M5.4, 2026-07-06): grouped permissions, real enforcement
+
+The flat 15-toggle list regrouped into five sections (`general`, `files`,
+`devices`, `tools`, `privacy`) with coarser, clearer toggles —
+`general.date_time` covers date/time/timezone; `general.system_information`
+covers OS/CPU/GPU/RAM/locale. New toggles: `files.write_files`,
+`devices.microphone`, `privacy.remember_conversations`,
+`privacy.learn_preferences` (reserved). `clipboard` was dropped (never
+implemented, not in the regrouped design).
+
+Three toggles are now *enforced*, not declaratory:
+- `general.*` — gates the system-facts prompt section (as before);
+- `devices.microphone` — `Assistant.start_audio()` skips audio capture
+  entirely when off: a typed-chat-only assistant (composer + TTS still
+  work);
+- `privacy.remember_conversations` — the orchestrator stores nothing when
+  off. This replaces `conversation.memory_enabled`, which was **dead
+  code** (defined, displayed, enforced nowhere) since M4.
+
+Settings documents migrate in memory on load (`SETTINGS_SCHEMA_VERSION` 1→2,
+dict-level `_migrate_raw`, mirroring the memory DB's numbered-migration
+pattern); v1 flat keys map into the groups and `memory_enabled` carries
+into `privacy.remember_conversations`. The SchemaForm renders the nested
+groups automatically (one-level `$ref` resolution — ADR-009 still holds:
+no hand-coded settings UI).

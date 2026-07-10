@@ -177,6 +177,44 @@ class TestMultiTurnContext:
         assert built.trace.recent_turn_count == 20
 
 
+class TestLongTermRecall:
+    """M5.4 §1: remembered facts must actually reach the prompt in LATER
+    conversations — the nickname acceptance case."""
+
+    def test_keyword_fallback_recalls_across_conversations(self, store: SQLiteMemoryStore) -> None:
+        """Without an embedding model, recall degrades to keyword search —
+        not to nothing (the pre-M5.4 behavior)."""
+        earlier = store.start_conversation()
+        store.add_turn(earlier.id, "user", "My nickname is Fahad.")
+        store.add_turn(earlier.id, "assistant", "Nice to meet you, Fahad!")
+
+        later = store.start_conversation()
+        builder = ContextBuilder(Settings(), store)  # no retriever/embedding
+        built = builder.build(later.id, "What is my nickname?")
+        system = built.messages[0].content
+        assert "Fahad" in system
+        assert "You remember" in system
+
+    def test_fallback_produces_retrieval_trace(self, store: SQLiteMemoryStore) -> None:
+        earlier = store.start_conversation()
+        store.add_turn(earlier.id, "user", "My favorite color is teal.")
+        later = store.start_conversation()
+        built = ContextBuilder(Settings(), store).build(later.id, "Suggest a color for my office")
+        assert any("teal" in m.text_preview for m in built.trace.retrieved_memories)
+
+    def test_fallback_never_breaks_the_turn_on_store_errors(
+        self, store: SQLiteMemoryStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*a: object, **k: object) -> list[MemorySearchResult]:
+            raise RuntimeError("index corrupted")
+
+        monkeypatch.setattr(store, "search_text", boom)
+        conv = store.start_conversation()
+        built = ContextBuilder(Settings(), store).build(conv.id, "What is my nickname?")
+        assert built.messages  # composed fine, just without memories
+        assert built.trace.retrieved_memories == ()
+
+
 class TestRetrievedMemoryOrdering:
     def test_memory_block_preserves_score_order(self, store: SQLiteMemoryStore) -> None:
         """Highest-scored memory first in the block (the retriever sorts;
