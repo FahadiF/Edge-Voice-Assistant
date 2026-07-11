@@ -6,6 +6,49 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-06 — M5.5: Stability, lifecycle & performance (ADR-026)
+
+The milestone that makes EVA behave like a real desktop application:
+visible parallel startup, clean shutdown, fixed cancellation, owned
+background tasks, supervised component recovery, and a process CLI.
+
+**Fixed**
+- TTS cancellation race: `_drive_stream` now gives each synthesis stream a
+  single owner thread — a barge-in close is queued behind any in-flight
+  pull (never `ValueError: generator already executing`), close runs even
+  if the awaiting task is cancelled, and Kokoro's per-stream event loop is
+  only ever touched from its creating thread. Kokoro cleanup hardened
+  (guarded aclose/shutdown_asyncgens/close; `run_until_complete` provably
+  never runs on a running loop).
+- `eva serve` Ctrl+C: ordered, exception-proof engine teardown — no
+  tracebacks.
+
+**Added**
+- Parallel preload with progress: LLM→ASR stay GPU-ordered (ADR-015), TTS +
+  embedding load concurrently on CPU threads; new
+  `ComponentLoadStarted/Finished` events drive a live startup checklist in
+  the web UI (header button narrates the current component; Dashboard shows
+  per-component ✓ + seconds).
+- `tts.lazy_load` setting: skip TTS at startup, load on first spoken reply
+  (voices API loads on demand).
+- `eva.core.tasks.TaskManager`: named, owned background tasks with
+  one-call cancel-all/await-all; adopted by the server (downloads) and
+  orchestrator (barge-in measurements, recoveries).
+- Supervised component recovery: an ASR crash costs one turn, a TTS crash
+  one sentence — the engine reloads the component in the background
+  (cooldown-guarded); a WebSocket disconnect never affects the engine
+  (regression-tested).
+- Process lifecycle CLI: `eva start` / `stop` / `restart` / `status` /
+  `logs` — PID-file management over `eva serve` with graceful termination
+  and stale-PID detection.
+- Composer: ⏹ Stop button beside mic/send while the assistant is
+  thinking/speaking (moved out of the page header); mic button verified
+  (start engine when stopped, interrupt when speaking).
+
+**Tests** — stream-ownership cancellation (close-during-pull), preload
+progress/ordering/lazy/failure (4), component recovery incl. cooldown (3),
+WS-disconnect resilience, service lifecycle (11), composer Stop button (2).
+
 ### 2026-07-06 — M5.4: Final integration, UX polish & production readiness
 
 **Fixed — long-term memory finally works end-to-end (ADR-020 Amendment 2)**

@@ -450,3 +450,5 @@ export interface ModelDownloadProgressEvent {
 export interface ModelDownloadCompletedEvent { model_id: string }
 export interface ModelDownloadFailedEvent { model_id: string; error: string }
 export interface ErrorOccurredEvent { message: string; context: string }
+export interface ComponentLoadStartedEvent { component: string; label: string }
+export interface ComponentLoadFinishedEvent { component: string; ms: number; error: string }

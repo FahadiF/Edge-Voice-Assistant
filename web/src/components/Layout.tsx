@@ -56,6 +56,12 @@ function EngineControls() {
   });
 
   const running = status.data?.running ?? false;
+  const componentLoading = useWsStore((s) => s.componentLoading);
+  const loadingEntries = Object.values(componentLoading);
+  const activeLoad = loadingEntries.find((c) => !c.done);
+  const startLabel = start.isPending
+    ? (activeLoad?.label ?? "Starting…")
+    : "Start engine";
   return (
     <div className="engine-controls">
       <label className="mode-selector" title="Online providers are a future capability">
@@ -78,8 +84,13 @@ function EngineControls() {
           {stop.isPending ? "Stopping…" : "Stop engine"}
         </button>
       ) : (
-        <button className="primary" onClick={() => start.mutate()} disabled={start.isPending}>
-          {start.isPending ? "Starting…" : "Start engine"}
+        <button
+          className="primary"
+          onClick={() => start.mutate()}
+          disabled={start.isPending}
+          aria-live="polite"
+        >
+          {startLabel}
         </button>
       )}
     </div>

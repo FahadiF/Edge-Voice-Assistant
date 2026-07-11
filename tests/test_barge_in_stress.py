@@ -56,7 +56,7 @@ def test_twenty_consecutive_interruptions_leave_a_clean_state() -> None:
         cancelled = [e for e in events if isinstance(e, TurnCancelled)]
         assert len(cancelled) >= N_INTERRUPTIONS
         # No background barge-in-latency task leaked past shutdown.
-        assert not orch._background_tasks
+        assert not orch._tasks.active()  # TaskManager owns them now (M5.5)
         assert orch.state in ("listening", "idle")
         assert orch._turn_task is None or orch._turn_task.done()
 
@@ -83,7 +83,7 @@ def test_barge_in_faster_than_dispatch_still_settles(monkeypatch: pytest.MonkeyP
 
         events = await drive(orch, bus, script, timeout=15)
         assert audio.stops >= 1  # at minimum, the first barge-in stopped playback
-        assert not orch._background_tasks
+        assert not orch._tasks.active()  # TaskManager owns them now (M5.5)
         latency_events = [e for e in events if isinstance(e, BargeInLatencyMeasured)]
         assert latency_events, "at least one barge-in latency measurement must publish"
         assert all(e.detected_to_silent_ms >= 0 for e in latency_events)

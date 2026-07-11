@@ -159,6 +159,20 @@ class ModelDownloadFailed(Event):
 # ── Engine lifecycle (platform API) ──
 
 
+class ComponentLoadStarted(Event):
+    """A model/component began loading during engine startup (M5.5,
+    ADR-026) — drives the per-component startup progress UI."""
+
+    component: str  # "llm" | "asr" | "tts" | "embedding" | "audio"
+    label: str  # human-readable, e.g. "Loading language model…"
+
+
+class ComponentLoadFinished(Event):
+    component: str
+    ms: int
+    error: str = ""  # non-empty when the component failed to load
+
+
 class EngineStarted(Event):
     pass
 

@@ -27,6 +27,7 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncGenerator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -66,6 +67,7 @@ from eva.core.events import (
     TurnFinished,
     TurnStarted,
 )
+from eva.core.tasks import TaskManager
 from eva.core.turn import TurnController
 from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
@@ -81,6 +83,15 @@ _BARGE_IN_LATENCY_TIMEOUT_S = 1.0  # safety cap; a hit means "unmeasured", not "
 _TOKEN_QUEUE_MAXSIZE = 256  # bounds memory on a pathological long reply
 _SENTENCE_QUEUE_MAXSIZE = 32
 _QUEUE_BACKPRESSURE_TIMEOUT_S = 5.0  # cross-thread put() safety cap; never hit in practice
+_RECOVERY_COOLDOWN_S = 30.0  # one component-restart attempt per window (M5.5)
+
+
+class _Reloadable(Protocol):
+    """What supervised recovery needs from an engine (ASR/TTS both match)."""
+
+    def unload(self) -> None: ...
+
+    def load(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -120,21 +131,36 @@ def _close_iter(it: Iterator[Frame]) -> None:
 async def _drive_stream(sync_iter: Iterator[Frame]) -> AsyncGenerator[Frame, None]:
     """Advance a blocking generator one item at a time without blocking the loop.
 
-    `next()` runs in the default executor per item, so a slow chunk (TTS
-    synthesis) never stalls the event loop. The underlying generator is always
-    closed on exit — normal exhaustion, an exception, or the caller stopping
-    early (e.g. on barge-in) — so an engine's cleanup (ADR-018: KokoroTTS
-    closes its dedicated event loop) always runs promptly.
+    One dedicated thread OWNS the generator for the stream's whole lifetime
+    (M5.5, ADR-026). The previous version used the shared default executor,
+    which let `next()` and `close()` land on different threads — a barge-in
+    close during an in-flight pull raised ``ValueError: generator already
+    executing``, and KokoroTTS's per-stream event loop was touched from
+    multiple threads. With a single-worker executor, every interaction is
+    serialized on the owner thread: cancellation queues `close()` *behind*
+    any in-flight `next()` (request → generator exits → join → close), and
+    the engine's event loop only ever runs on the thread that created it.
+
+    Cleanup is guaranteed even if the awaiting task is cancelled: the close
+    is submitted to the owner thread *before* we await it, so it runs (and
+    the thread exits) whether or not the await survives cancellation.
     """
     loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-stream")
     try:
         while True:
-            chunk = await loop.run_in_executor(None, _pull_or_none, sync_iter)
+            chunk = await loop.run_in_executor(executor, _pull_or_none, sync_iter)
             if chunk is None:
                 return
             yield chunk
     finally:
-        await loop.run_in_executor(None, _close_iter, sync_iter)
+        close_future = executor.submit(_close_iter, sync_iter)
+        executor.shutdown(wait=False)  # queued close still runs; thread exits after
+        # BaseException: a CancelledError here (task cancelled mid-teardown)
+        # must not propagate — the close is already queued on the owner
+        # thread and WILL run; we just couldn't wait for it.
+        with contextlib.suppress(BaseException):
+            await asyncio.wrap_future(close_future)
 
 
 class Orchestrator:
@@ -183,7 +209,8 @@ class Orchestrator:
         self._partial_busy = False
         self._barge_in_count = 0
         self._last_barge_in_latency_ms: int | None = None
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._tasks = TaskManager("orchestrator")
+        self._recovery_at: dict[str, float] = {}
         self._current_tokens_queue: asyncio.Queue[str | None] | None = None
         self._current_sentences_queue: asyncio.Queue[str | None] | None = None
 
@@ -335,18 +362,8 @@ class Orchestrator:
                 await self._dispatch(event)
         finally:
             await self._cancel_turn("shutdown")
-            await self._drain_background_tasks()
+            await self._tasks.shutdown()
             self._set_state("idle")
-
-    async def _drain_background_tasks(self) -> None:
-        """Cancel any still-running fire-and-forget tasks (e.g. a barge-in
-        latency measurement in flight) so shutdown never leaves orphans."""
-        tasks = list(self._background_tasks)
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
 
     async def _dispatch(self, event: SegmenterEvent | _TextInput) -> None:
         match event:
@@ -392,11 +409,9 @@ class Orchestrator:
             # the next event (e.g. a second rapid barge-in). A strong
             # reference is kept until completion so the task cannot be
             # garbage-collected mid-flight.
-            measure_task = asyncio.create_task(
-                self._measure_barge_in_latency(stale_epoch, cancel_started)
+            self._tasks.spawn(
+                "barge-in-latency", self._measure_barge_in_latency(stale_epoch, cancel_started)
             )
-            self._background_tasks.add(measure_task)
-            measure_task.add_done_callback(self._background_tasks.discard)
 
     async def _measure_barge_in_latency(self, epoch: int, started: float) -> None:
         deadline = started + _BARGE_IN_LATENCY_TIMEOUT_S
@@ -470,6 +485,31 @@ class Orchestrator:
             except Exception:
                 logger.exception("Embedding turn %s failed (text is still stored)", turn.id)
 
+    # ── supervised component recovery (M5.5, ADR-026) ──
+
+    def _schedule_component_recovery(self, name: str, engine: _Reloadable) -> None:
+        """Reload a crashed component in the background (unload → load).
+
+        Cooldown-guarded: a persistently broken component gets one recovery
+        attempt per window, not a hot loop of reload attempts. EVA itself
+        never goes down with a component — the failing turn errors, the next
+        one meets a fresh engine."""
+        now = time.monotonic()
+        if now - self._recovery_at.get(name, 0.0) < _RECOVERY_COOLDOWN_S:
+            return
+        self._recovery_at[name] = now
+
+        async def recover() -> None:
+            logger.warning("Component '%s' failed — restarting it", name)
+            try:
+                await asyncio.to_thread(engine.unload)
+                await asyncio.to_thread(engine.load)
+                logger.info("Component '%s' restarted", name)
+            except Exception:
+                logger.exception("Component '%s' restart failed; will retry after cooldown", name)
+
+        self._tasks.spawn(f"recover-{name}", recover())
+
     # ── partial transcription (best-effort, never blocks the pipeline) ──
 
     async def _partial_transcribe(self, audio: Frame) -> None:
@@ -521,7 +561,14 @@ class Orchestrator:
             asr_ms = 0
         else:
             assert audio is not None  # exactly one of audio/text is set
-            result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
+            try:
+                result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
+            except Exception:
+                # Supervised recovery (M5.5, ADR-026): this turn errors, but
+                # the engine is reloaded in the background so the NEXT turn
+                # works — a component crash must never wedge the assistant.
+                self._schedule_component_recovery("asr", self._asr)
+                raise
             asr_ms = elapsed_ms()
             user_text = result.text.strip()
         if self._controller.is_stale(epoch):
@@ -595,10 +642,10 @@ class Orchestrator:
                     self._bus.publish(TtsStarted(epoch=epoch))
                     self._set_state("speaking")
                 synth_start = time.perf_counter()
-                sync_gen = self._tts.synthesize_stream(
-                    spoken_text, voice=self._voice, speed=self._settings.tts.speed
-                )
                 try:
+                    sync_gen = self._tts.synthesize_stream(
+                        spoken_text, voice=self._voice, speed=self._settings.tts.speed
+                    )
                     async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
                         async for chunk in chunks:
                             if self._controller.is_stale(epoch):
@@ -611,6 +658,15 @@ class Orchestrator:
                                     TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms)
                                 )
                             self._audio.say(chunk)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # A TTS crash degrades this sentence to silence — the
+                    # turn (text reply, storage, events) still completes,
+                    # and the engine is restarted in the background so the
+                    # next sentence/turn speaks again (M5.5, ADR-026).
+                    logger.exception("TTS failed for one sentence; recovering the engine")
+                    self._schedule_component_recovery("tts", self._tts)
                 finally:
                     self._audio.finish_utterance()
 

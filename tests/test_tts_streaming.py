@@ -124,3 +124,76 @@ def test_kokoro_stream_reusable_after_previous_call_closed() -> None:
     second = list(engine.synthesize_stream("second", voice="af_heart"))
     assert len(first) == 1
     assert len(second) == 1
+
+
+class TestDriveStreamOwnership:
+    """M5.5 cancellation fix (ADR-026): one thread owns the generator, so a
+    close arriving during an in-flight pull is queued behind it — never
+    'ValueError: generator already executing' — and cleanup runs even when
+    the consuming task is cancelled."""
+
+    def test_cancel_during_slow_pull_closes_generator_exactly_once(self) -> None:
+        import asyncio
+        import contextlib
+        import threading
+        import time
+
+        import numpy as np
+
+        from eva.conversation.orchestrator import _drive_stream
+
+        closed = {"count": 0}
+        pull_started = threading.Event()
+
+        def slow_stream():
+            try:
+                pull_started.set()
+                time.sleep(0.3)  # a pull is executing when the cancel lands
+                yield np.zeros(160, dtype=np.int16)
+                time.sleep(0.3)
+                yield np.zeros(160, dtype=np.int16)
+            finally:
+                closed["count"] += 1
+
+        async def scenario() -> None:
+            async def consume() -> None:
+                async with contextlib.aclosing(_drive_stream(slow_stream())) as chunks:
+                    async for _chunk in chunks:
+                        pass
+
+            task = asyncio.create_task(consume())
+            await asyncio.to_thread(pull_started.wait, 5)
+            task.cancel()  # lands mid-pull — the old code raced close vs next
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            # Give the owner thread a moment to run the queued close.
+            for _ in range(100):
+                if closed["count"] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert closed["count"] == 1
+
+        asyncio.run(scenario())
+
+    def test_normal_exhaustion_still_closes_and_joins(self) -> None:
+        import asyncio
+
+        import numpy as np
+
+        from eva.conversation.orchestrator import _drive_stream
+
+        closed = {"count": 0}
+
+        def stream():
+            try:
+                yield np.zeros(160, dtype=np.int16)
+                yield np.ones(160, dtype=np.int16)
+            finally:
+                closed["count"] += 1
+
+        async def scenario() -> None:
+            chunks = [c async for c in _drive_stream(stream())]
+            assert len(chunks) == 2
+            assert closed["count"] == 1  # close awaited (joined) before return
+
+        asyncio.run(scenario())

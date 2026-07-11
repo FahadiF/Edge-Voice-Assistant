@@ -106,6 +106,18 @@
   height: 36px;
 }
 
+.composer-interrupt {
+  height: 36px;
+  border-color: var(--warning);
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.composer-interrupt:hover {
+  background: var(--warning);
+  color: var(--accent-contrast);
+}
+
 .mode-selector {
   display: inline-flex;
   align-items: center;

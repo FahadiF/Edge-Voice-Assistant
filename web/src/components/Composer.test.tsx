@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Composer } from "./Composer";
 import { ToastHost } from "./common";
+import { useWsStore } from "../ws/store";
 
 function renderComposer(engineRunning = true) {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -103,5 +104,24 @@ describe("Composer", () => {
     fireEvent.click(screen.getByLabelText("Start the engine"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/engine/start");
+  });
+
+  it("shows a Stop button beside send while the assistant speaks (M5.5)", async () => {
+    const fetchMock = mockSayOk();
+    useWsStore.setState({ pipelineState: "speaking" });
+    renderComposer(true);
+    const stopButton = screen.getByLabelText("Stop the current reply");
+    expect(stopButton).toBeInTheDocument();
+    fireEvent.click(stopButton);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/conversation/interrupt");
+    useWsStore.setState({ pipelineState: "idle" });
+  });
+
+  it("hides the Stop button while idle/listening", () => {
+    useWsStore.setState({ pipelineState: "listening" });
+    renderComposer(true);
+    expect(screen.queryByLabelText("Stop the current reply")).toBeNull();
+    useWsStore.setState({ pipelineState: "idle" });
   });
 });

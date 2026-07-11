@@ -124,6 +124,23 @@ class TestConversationWithEngine:
         r = running_client.post("/api/v1/conversation/say", json={"text": ""})
         assert r.status_code == 422  # SayRequest min_length=1
 
+    def test_websocket_disconnect_leaves_engine_running(
+        self, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M5.5 §10: a browser closing its tab must never take the engine
+        down — the WebSocket is an observer, not a lifeline."""
+        monkeypatch.setattr("eva.engine.build_assistant", build_fake_assistant)
+        monkeypatch.setattr("eva.onboarding.check_readiness", lambda settings, paths: [])
+        with TestClient(create_app(app_paths)) as shared:
+            assert shared.post("/api/v1/engine/start").status_code == 200
+            with shared.websocket_connect("/api/v1/ws") as ws:
+                snapshot = ws.receive_json()
+                assert snapshot["type"] == "snapshot"
+            # WebSocket closed (browser gone) — the engine must be unaffected.
+            status = shared.get("/api/v1/engine/status").json()
+            assert status["running"] is True
+            shared.post("/api/v1/engine/stop")
+
     def test_clear_history(self, running_client: TestClient) -> None:
         r = running_client.post("/api/v1/conversation/clear")
         assert r.status_code == 200

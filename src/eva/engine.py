@@ -14,6 +14,9 @@ of depending on which engine grabbed VRAM first.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from eva.asr.base import ASREngine
@@ -24,7 +27,7 @@ from eva.config.settings import Settings
 from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.orchestrator import Orchestrator
 from eva.core.errors import ModelNotInstalledError
-from eva.core.events import EventBus
+from eva.core.events import ComponentLoadFinished, ComponentLoadStarted, EventBus
 from eva.embedding.base import EmbeddingProvider
 from eva.embedding.registry import create_embedding_provider
 from eva.llm.base import LLMEngine
@@ -38,6 +41,13 @@ from eva.tts.registry import create_tts
 from eva.tts.voices import register_voices_for_engine
 
 logger = logging.getLogger(__name__)
+
+_COMPONENT_LABELS = {
+    "llm": "Loading language model…",
+    "asr": "Loading speech recognition…",
+    "tts": "Loading speech synthesis…",
+    "embedding": "Loading memory embeddings…",
+}
 
 
 @dataclass
@@ -81,17 +91,56 @@ class Assistant:
     def preload(self) -> None:
         """Load all models up front so the first turn has no load latency.
 
-        Order matters: LLM first (owns the GPU), then ASR (uses leftover VRAM
-        or falls back to CPU — visibly), then TTS (CPU), then the optional
-        embedding model (CPU). See ADR-015, ADR-020.
+        GPU components stay strictly ordered — LLM first (owns the GPU,
+        ADR-015 §5), then ASR (leftover VRAM or CPU fallback) — while the
+        CPU-resident components (TTS, embedding) load concurrently on worker
+        threads (M5.5, ADR-026): total startup ≈ LLM+ASR time instead of the
+        sum of everything. Each component publishes ComponentLoadStarted/
+        Finished on the bus (a no-op when the bus is unbound, e.g. `eva run`
+        before its loop starts) so the UI renders per-component progress.
+        With `tts.lazy_load` the TTS engine is skipped here and loads on
+        first use (the Kokoro adapter self-loads; the voices API registers
+        voices on demand).
         """
         logger.info("Loading models (first run may download weights)...")
-        self.llm.load()
-        self.asr.load()
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="preload-cpu") as pool:
+            cpu_futures = []
+            if not self.settings.tts.lazy_load:
+                cpu_futures.append(pool.submit(self._load_component, "tts", self._load_tts))
+            if self.embedding is not None:
+                embedding = self.embedding
+                cpu_futures.append(pool.submit(self._load_component, "embedding", embedding.load))
+            self._load_component("llm", self.llm.load)
+            self._load_component("asr", self.asr.load)
+            for future in cpu_futures:
+                future.result()  # re-raise the first CPU-side load failure
+
+    def _load_tts(self) -> None:
         self.tts.load()
         register_voices_for_engine(self.settings.tts.engine, self.tts)
-        if self.embedding is not None:
-            self.embedding.load()
+
+    def _load_component(self, name: str, load: Callable[[], None]) -> None:
+        """Load one component, bracketing it with progress events; a failure
+        is reported before it propagates so the UI never shows a bar stuck
+        at 'loading'."""
+        self.bus.publish_threadsafe(
+            ComponentLoadStarted(component=name, label=_COMPONENT_LABELS.get(name, name))
+        )
+        start = time.perf_counter()
+        try:
+            load()
+        except Exception as exc:
+            self.bus.publish_threadsafe(
+                ComponentLoadFinished(
+                    component=name,
+                    ms=int((time.perf_counter() - start) * 1000),
+                    error=str(exc),
+                )
+            )
+            raise
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        self.bus.publish_threadsafe(ComponentLoadFinished(component=name, ms=elapsed_ms))
+        logger.info("Component '%s' loaded in %d ms", name, elapsed_ms)
 
     def active_models(self) -> dict[str, str]:
         """kind → model id actually configured (for banners and diagnostics)."""

@@ -130,6 +130,14 @@ class TTSSettings(_Section):
         1.0, description="Pitch multiplier; engines without pitch control ignore this"
     )
     streaming: bool = Field(True, description="Sentence-chunked synthesis during generation")
+    lazy_load: bool = Field(
+        False,
+        description=(
+            "Skip loading TTS at engine start; load it on the first spoken reply instead. "
+            "Faster startup for typed-chat-heavy use, at the cost of a one-time delay on "
+            "the first reply that speaks"
+        ),
+    )
 
 
 # ──────────────────────── Conversation ────────────────────────

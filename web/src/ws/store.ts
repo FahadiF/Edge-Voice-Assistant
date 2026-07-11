@@ -49,6 +49,14 @@ export interface EventLogEntry {
   summary: string;
 }
 
+export interface ComponentLoadState {
+  component: string;
+  label: string;
+  done: boolean;
+  ms: number | null;
+  error: string | null;
+}
+
 const EVENT_LOG_LIMIT = 200;
 
 /** Called when server-side state may have changed out from under the REST
@@ -67,6 +75,7 @@ export interface WsState {
   liveTurn: LiveTurn | null;
   transcript: TranscriptEntry[];
   downloads: Record<string, DownloadProgress>;
+  componentLoading: Record<string, ComponentLoadState>;
   eventLog: EventLogEntry[];
   lastError: string | null;
 
@@ -108,6 +117,7 @@ export const useWsStore = create<WsState>((set, get) => ({
   liveTurn: null,
   transcript: [],
   downloads: {},
+  componentLoading: {},
   eventLog: [],
   lastError: null,
 
@@ -288,7 +298,41 @@ export const useWsStore = create<WsState>((set, get) => ({
         set({ lastError: data.message as string });
         return;
 
+      case "ComponentLoadStarted":
+        set((s) => ({
+          componentLoading: {
+            ...s.componentLoading,
+            [data.component as string]: {
+              component: data.component as string,
+              label: data.label as string,
+              done: false,
+              ms: null,
+              error: null,
+            },
+          },
+        }));
+        return;
+      case "ComponentLoadFinished":
+        set((s) => {
+          const existing = s.componentLoading[data.component as string];
+          return {
+            componentLoading: {
+              ...s.componentLoading,
+              [data.component as string]: {
+                component: data.component as string,
+                label: existing?.label ?? (data.component as string),
+                done: true,
+                ms: data.ms as number,
+                error: (data.error as string) || null,
+              },
+            },
+          };
+        });
+        return;
       case "EngineStarted":
+        set({ componentLoading: {} }); // startup finished — clear the progress list
+        onServerStateChanged?.();
+        return;
       case "EngineStopped":
         // Engine lifecycle changes invalidate REST caches (engine status,
         // models, voices, memory stats, ...) — pushed, not polled.

@@ -8,6 +8,7 @@ the 16 kHz pipeline format.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -90,8 +91,20 @@ class KokoroTTS(TTSEngine):
                 pcm = float_to_int16(np.asarray(samples, dtype=np.float32))
                 yield resample_int16(pcm, int(sample_rate), _PIPELINE_RATE)
         finally:
-            loop.run_until_complete(agen.aclose())
-            loop.close()
+            # Cleanup must never crash the speak worker or leak the loop
+            # (M5.5, ADR-026). This runs on the single thread that owns the
+            # whole stream (the orchestrator's per-stream executor), so the
+            # loop is guaranteed NOT to be running here — but guard anyway:
+            # run_until_complete on a running loop is the one call that can
+            # never be allowed.
+            with contextlib.suppress(Exception):
+                if not loop.is_running():
+                    loop.run_until_complete(agen.aclose())
+            with contextlib.suppress(Exception):
+                if not loop.is_running():
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+            with contextlib.suppress(Exception):
+                loop.close()
 
     def voices(self) -> list[str]:
         if self._kokoro is None:

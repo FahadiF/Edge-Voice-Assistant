@@ -258,7 +258,7 @@ class TestNormalTurn:
 
         async def scenario() -> None:
             asr = FakeASR()
-            orch, bus, audio, tts = make_orchestrator(asr=asr)
+            orch, bus, audio, _tts = make_orchestrator(asr=asr)
 
             async def script() -> None:
                 assert orch.submit_text("Hello from the composer") is True

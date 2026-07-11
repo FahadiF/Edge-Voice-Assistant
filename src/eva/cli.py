@@ -820,6 +820,99 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_start(args: argparse.Namespace) -> int:
+    """Start the server as a background process (M5.5, ADR-026)."""
+    from eva import service
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    host = args.host or settings.server.host
+    port = args.port or settings.server.port
+
+    existing = service.read_server_pid(paths)
+    if existing is not None:
+        print(f"Already running (PID {existing}). Use `eva status` or `eva restart`.")
+        return 0
+    pid = service.spawn_server(paths, host, port)
+    url = service.health_url(host, port)
+    print(f"Starting Edge Voice Assistant (PID {pid})...")
+    if service.wait_until_healthy(url):
+        print(f"Ready: {url.removesuffix('/api/v1/health')}/")
+        return 0
+    print("error: server did not become healthy — check `eva logs`", file=sys.stderr)
+    return 1
+
+
+def _cmd_stop(_args: argparse.Namespace) -> int:
+    from eva import service
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    pid = service.read_server_pid(paths)
+    if pid is None:
+        print("Not running.")
+        return 0
+    print(f"Stopping (PID {pid})...")
+    if service.terminate_server(paths, pid):
+        print("Stopped.")
+        return 0
+    print("error: process did not exit — kill it manually", file=sys.stderr)
+    return 1
+
+
+def _cmd_restart(args: argparse.Namespace) -> int:
+    code = _cmd_stop(args)
+    if code != 0:
+        return code
+    return _cmd_start(args)
+
+
+def _cmd_status(_args: argparse.Namespace) -> int:
+    import json
+    import urllib.request
+
+    from eva import service
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    settings = load_settings(paths.settings_file)
+    pid = service.read_server_pid(paths)
+    url = service.health_url(settings.server.host, settings.server.port)
+
+    if pid is None:
+        print("Server:  not running")
+        return 1
+    print(f"Server:  running (PID {pid})")
+    if not service.probe_health(url):
+        print("API:     not responding (still starting, or a port mismatch)")
+        return 1
+    print(f"API:     healthy at {url.removesuffix('/api/v1/health')}")
+    try:
+        status_url = url.replace("/health", "/engine/status")
+        with urllib.request.urlopen(status_url, timeout=2) as response:
+            body = json.loads(response.read())
+        engine_state = f"running ({body['state']})" if body.get("running") else "stopped"
+        print(f"Engine:  {engine_state}")
+    except Exception:
+        print("Engine:  unknown")
+    return 0
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    from eva import service
+
+    paths = get_app_paths()
+    paths.ensure_exists()
+    lines = service.newest_log_lines(paths, args.lines)
+    if not lines:
+        print(f"No log files in {paths.logs_dir}")
+        return 0
+    for line in lines:
+        print(line)
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the platform API server (ADR-017). The CLI's other commands are a
     separate, lighter-weight client of the same underlying services — `eva
@@ -1097,6 +1190,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--open", action="store_true", help="Open the web UI in the default browser once built"
     )
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_start = sub.add_parser("start", help="Start the server in the background (M5.5)")
+    p_start.add_argument("--host", default=None, help="Override settings.server.host")
+    p_start.add_argument("--port", type=int, default=None, help="Override settings.server.port")
+    p_start.set_defaults(func=_cmd_start)
+
+    p_stop = sub.add_parser("stop", help="Stop the background server")
+    p_stop.set_defaults(func=_cmd_stop)
+
+    p_restart = sub.add_parser("restart", help="Restart the background server")
+    p_restart.add_argument("--host", default=None, help="Override settings.server.host")
+    p_restart.add_argument("--port", type=int, default=None, help="Override settings.server.port")
+    p_restart.set_defaults(func=_cmd_restart)
+
+    p_status = sub.add_parser("status", help="Show server process, API, and engine status")
+    p_status.set_defaults(func=_cmd_status)
+
+    p_logs = sub.add_parser("logs", help="Print the tail of the newest log file")
+    p_logs.add_argument("--lines", type=int, default=50, help="How many lines to show")
+    p_logs.set_defaults(func=_cmd_logs)
 
     p_config = sub.add_parser("config", help="Inspect or reset the settings document")
     config_sub = p_config.add_subparsers(dest="config_command", required=True)

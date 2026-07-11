@@ -85,13 +85,7 @@ export function Conversation() {
     }
   }, [transcript.length, liveTurn?.assistantText, liveTurn?.partialTranscript]);
 
-  const interrupt = useMutation({
-    mutationFn: conversation.interrupt,
-    onSuccess: (r) =>
-      toast(r.interrupted ? "success" : "info", r.interrupted ? "Turn interrupted" : "Nothing to interrupt"),
-    onError: (e) => toast("error", e.message),
-  });
-
+  // Interrupt lives in the composer now (M5.5 §11), next to mic/send.
   const clear = useMutation({
     mutationFn: conversation.clear,
     onSuccess: () => {
@@ -151,7 +145,6 @@ export function Conversation() {
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search conversation"
             />
-            <button onClick={() => interrupt.mutate()}>Interrupt</button>
             <button onClick={doExport}>Export</button>
             <button onClick={() => fileRef.current?.click()}>Import</button>
             <button className="danger" onClick={() => clear.mutate()}>

@@ -28,6 +28,7 @@ from eva.core.events import (
     ModelDownloadFailed,
     ModelDownloadProgress,
 )
+from eva.core.tasks import TaskManager
 from eva.engine import Assistant
 from eva.models.manager import ModelManager
 from eva.plugins.manager import PluginManager
@@ -48,7 +49,11 @@ class ServerState:
         self.plugin_manager = PluginManager()
         self.assistant: Assistant | None = None
         self._engine_task: asyncio.Task[None] | None = None
-        self._downloads: dict[str, asyncio.Task[None]] = {}
+        # Every server-owned background task (downloads today; anything
+        # fire-and-forget tomorrow) lives here so shutdown is one call
+        # (M5.5, ADR-026). The engine task stays separate — its lifecycle
+        # IS the engine lifecycle, awaited in stop_engine, not cancelled.
+        self.tasks = TaskManager("server")
 
     def reload_settings(self) -> Settings:
         """Re-read settings.json (call after any persisted change)."""
@@ -73,6 +78,9 @@ class ServerState:
         from eva.engine import build_assistant
 
         self.reload_settings()
+        # Bind the bus BEFORE preload so ComponentLoadStarted/Finished
+        # progress events reach WebSocket clients while models load (M5.5).
+        self.bus.bind_loop(asyncio.get_running_loop())
         assistant = build_assistant(self.settings, self.paths, bus=self.bus)
         await asyncio.to_thread(assistant.preload)
         await asyncio.to_thread(assistant.start_audio)
@@ -87,12 +95,21 @@ class ServerState:
         return assistant
 
     async def stop_engine(self) -> None:
+        """Ordered, exception-proof teardown (M5.5, ADR-026): background
+        tasks first, then the assistant (audio → orchestrator → memory),
+        then the orchestrator loop task. Any single step failing must never
+        abort the rest — Ctrl+C has to end clean, not in a traceback."""
         if not self.engine_running:
             return
         assert self.assistant is not None
         assert self._engine_task is not None
-        await asyncio.to_thread(self.assistant.stop)
-        with contextlib.suppress(asyncio.CancelledError):
+        logger.info("Stopping engine...")
+        await self.tasks.shutdown()
+        try:
+            await asyncio.to_thread(self.assistant.stop)
+        except Exception:
+            logger.exception("Assistant stop raised; continuing shutdown")
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await self._engine_task
         self.assistant = None
         self._engine_task = None
@@ -102,8 +119,7 @@ class ServerState:
     # ── model downloads (background, progress via the event bus) ──
 
     def download_active(self, model_id: str) -> bool:
-        task = self._downloads.get(model_id)
-        return task is not None and not task.done()
+        return f"download:{model_id}" in self.tasks.active()
 
     def start_download(self, model_id: str) -> None:
         if self.download_active(model_id):
@@ -124,4 +140,4 @@ class ServerState:
                 self.bus.publish(ModelDownloadFailed(model_id=model_id, error=str(exc)))
                 self.bus.publish(ErrorOccurred(message=str(exc), context=f"download:{model_id}"))
 
-        self._downloads[model_id] = asyncio.create_task(run())
+        self.tasks.spawn(f"download:{model_id}", run())

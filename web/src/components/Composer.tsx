@@ -189,7 +189,7 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           aria-label={
             engineRunning
               ? pipelineState === "speaking" || pipelineState === "thinking"
-                ? "Interrupt the assistant"
+                ? "Microphone — tap to interrupt"
                 : `Microphone active — assistant is ${pipelineState}`
               : "Start the engine"
           }
@@ -205,6 +205,16 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
         >
           🎙
         </button>
+        {engineRunning && (pipelineState === "speaking" || pipelineState === "thinking") && (
+          <button
+            className="composer-interrupt"
+            aria-label="Stop the current reply"
+            title="Stop the current reply"
+            onClick={() => interrupt.mutate()}
+          >
+            ⏹ Stop
+          </button>
+        )}
         <button
           className="primary composer-send"
           disabled={!canSend}

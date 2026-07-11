@@ -24,6 +24,8 @@ function MicLevel({ dbfs }: { dbfs: number }) {
 export function Dashboard() {
   const snapshot = useWsStore((s) => s.snapshot);
   const pipelineState = useWsStore((s) => s.pipelineState);
+  const componentLoading = useWsStore((s) => s.componentLoading);
+  const loadingEntries = Object.values(componentLoading);
   const status = useQuery({ queryKey: ["engine-status"], queryFn: engine.status });
   const readiness = useQuery({
     queryKey: ["engine-readiness"],
@@ -58,6 +60,20 @@ export function Dashboard() {
           <p>
             Status: <strong>{running ? "running" : "stopped"}</strong>
           </p>
+          {loadingEntries.length > 0 && (
+            <ul className="startup-progress" aria-label="Startup progress">
+              {loadingEntries.map((c) => (
+                <li key={c.component} className={c.error ? "load-error" : ""}>
+                  <span aria-hidden="true">{c.done ? (c.error ? "✕" : "✓") : "⏳"}</span>{" "}
+                  {c.label}
+                  {c.done && !c.error && c.ms !== null && (
+                    <span className="field-help"> {(c.ms / 1000).toFixed(1)}s</span>
+                  )}
+                  {c.error && <span className="field-error"> {c.error}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
           {!running && readiness.data && !readiness.data.ready && (
             <div>
               <p style={{ color: "var(--warning)" }}>Setup incomplete:</p>

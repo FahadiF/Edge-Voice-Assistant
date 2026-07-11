@@ -71,6 +71,19 @@
 .ws-on { color: var(--success); }
 .ws-off { color: var(--danger); }
 
+.startup-progress {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+
+.startup-progress .load-error {
+  color: var(--danger);
+}
+
 .content {
   flex: 1;
   overflow-y: auto;

@@ -601,6 +601,79 @@ Privacy):
 
 ---
 
+## 16. Stability, lifecycle & performance (M5.5)
+
+### 16.1 Startup progress
+
+From the web UI (engine stopped), click **Start engine**:
+
+- [ ] The button narrates the current component ("Loading language model…",
+      "Loading speech recognition…") instead of a bare "Starting…".
+- [ ] The Dashboard's Engine card shows a per-component checklist that
+      ticks off live (⏳ → ✓ with seconds).
+- [ ] Total startup is roughly the LLM+ASR time — TTS/embedding load in
+      parallel (check timestamps in `eva logs`: the tts/embedding lines
+      overlap the llm one).
+
+### 16.2 Lazy TTS (optional)
+
+Enable Settings → Speech Synthesis → *Lazy Load*, restart the engine:
+
+- [ ] Startup no longer includes "Loading speech synthesis…".
+- [ ] The first spoken reply has a one-time extra delay (Kokoro loading);
+      subsequent replies are normal.
+- [ ] The Voices page still lists voices (loads on demand).
+
+### 16.3 Graceful shutdown
+
+Run `eva serve` in a terminal, start the engine, then press **Ctrl+C**:
+
+- [ ] Output ends with an orderly stop ("Stopping engine…", "Engine
+      stopped") — **no traceback**.
+- [ ] Repeat while the assistant is mid-reply (speaking): still no
+      traceback, no "generator already executing", no event-loop errors.
+
+### 16.4 Barge-in cancellation stress
+
+With the engine running, interrupt the assistant mid-sentence repeatedly
+(voice barge-in or the composer's ⏹ Stop) a dozen times in a row:
+
+- [ ] Playback stops promptly every time; no errors in `eva logs`.
+
+### 16.5 Component recovery
+
+Hard to trigger without breaking a model on purpose — verify the passive
+side: after any turn that errors (e.g. unplug the microphone mid-turn),
+the NEXT turn works without restarting EVA.
+
+- [ ] A failed turn shows an error but the assistant stays responsive.
+- [ ] Closing the browser tab entirely does not stop the engine
+      (`eva status` still shows it running); reopening the UI reattaches.
+
+### 16.6 Process lifecycle CLI
+
+```bash
+eva start          # spawns the server in the background, waits for health
+eva status         # server PID + API health + engine state
+eva logs --lines 20
+eva restart
+eva stop           # graceful terminate, PID file removed
+eva status         # "not running", exit code 1
+```
+
+- [ ] Each command behaves as above; `eva start` twice says "already
+      running"; after a crash (`taskkill /f` the PID), `eva status` detects
+      the stale PID and reports not running.
+
+### 16.7 Composer controls
+
+- [ ] While the assistant is thinking/speaking, a **⏹ Stop** button appears
+      between the mic and Send; clicking it cuts the reply off.
+- [ ] The mic button: engine stopped → tap starts the engine; speaking/
+      thinking → tap interrupts; listening → decorative (always listening).
+
+---
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,
