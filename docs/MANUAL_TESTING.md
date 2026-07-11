@@ -1,12 +1,15 @@
-# Manual Testing Guide — M4 (Memory, Personalization & Intelligence) & M5 (Web UI)
+# Manual Testing Guide (M4 – M5.5)
 
-This guide lets someone with no source-code access validate every M4/M5
+This guide lets someone with no source-code access validate every shipped
 capability end-to-end: memory persistence, semantic retrieval, summaries,
 personas, user profiles, voices, the REST API, the WebSocket stream, raw
-SQLite inspection, diagnostics, and — as of M5 — the React web UI and the
-minimal desktop shell. Sections 1–12 use the `eva` CLI or plain
+SQLite inspection, diagnostics, the React web UI and desktop shell,
+conversational quality, Markdown-to-speech, permissions, and the M5.5
+lifecycle features (startup progress, graceful shutdown, crash recovery,
+`eva start/stop`). Sections 1–12 use the `eva` CLI or plain
 `curl`/`sqlite3`; [section 14](#14-web-ui-m5) walks the same capabilities
-through the browser. Nothing here requires reading the codebase.
+through the browser; later sections cover the M5.1–M5.5 additions.
+Nothing here requires reading the codebase.
 
 Assumes `eva doctor` reports all checks passing (models installed, runtime
 available). If not, run `eva first-run` first.

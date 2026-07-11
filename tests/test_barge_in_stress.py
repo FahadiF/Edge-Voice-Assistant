@@ -1,7 +1,7 @@
 """M3 barge-in stress tests: many rapid-fire interruptions with fake engines.
 
 These use fake ASR/LLM/TTS (no models, no audio hardware) so they run in the
-normal CI suite — unlike `docs/HANDOFF`'s manual real-hardware protocol
+normal CI suite — unlike the manual real-hardware protocol in the team notes
 (real mic, real models, a stopwatch), which validates actual audible-stop
 latency and is out of scope for an automated test. What this file *can*
 validate automatically: the epoch/cancellation machinery stays correct and

@@ -21,5 +21,5 @@ branched or modified.
 - The workspace keeps both side by side for easy comparison during development.
 
 ## Consequences
-- Thesis knowledge is carried over via `docs/THESIS_ANALYSIS.md`, not git history.
+- Thesis knowledge is carried over via a written analysis (internal notes), not git history.
 - The folder can be relocated anywhere later without breaking anything.

@@ -50,11 +50,9 @@ htmlcov/
 /conversations/
 
 # -----------------------------
-# Private documentation
+# Private / internal notes
 # -----------------------------
-docs/HANDOFF/
-docs/DEVELOPMENT.md
-docs/THESIS_ANALYSIS.md
+.dev/
 
 # -----------------------------
 # Frontend

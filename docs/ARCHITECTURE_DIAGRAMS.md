@@ -1,9 +1,10 @@
 # Architecture Diagrams
 
-Visual companions to `docs/ARCHITECTURE.md` and `docs/HANDOFF/HANDOFF.md`.
-These diagrams describe the system **as implemented through M2.6** unless a
-diagram is explicitly labeled "Future" — future diagrams describe intended,
-not-yet-built shapes and should not be mistaken for current behavior.
+Visual companions to `docs/ARCHITECTURE.md`.
+These diagrams describe the system **as implemented through M5.5 (v0.5)**
+unless a diagram is explicitly labeled "Future" — future diagrams describe
+intended, not-yet-built shapes and should not be mistaken for current
+behavior.
 
 All diagrams are Mermaid; they render natively in GitHub, GitLab, and most
 modern Markdown viewers.
@@ -13,9 +14,9 @@ modern Markdown viewers.
 ```mermaid
 flowchart TB
     subgraph Clients["Clients (thin, no business logic)"]
-        CLI["eva CLI\n(eva run / eva serve / ...)"]
-        WebUI["Web UI\n(not built — M5)"]
-        Desktop["Desktop App\n(not built — M6)"]
+        CLI["eva CLI\n(eva run / eva start / eva serve / ...)"]
+        WebUI["Web UI — React + TS (web/)\nbuilt, served statically by the API\n(SPA fallback, ADR-023)"]
+        Desktop["Desktop shell (eva-desktop)\nminimal pywebview window\n(tray/hotkey — M6)"]
         Plugin["Third-party Plugin\n(none exist yet)"]
     end
 
@@ -36,6 +37,8 @@ flowchart TB
         LLM["eva.llm"]
         TTS["eva.tts"]
         Audio["eva.audio"]
+        Memory["eva.memory\n(SQLite store, retriever,\nsummarizer — M4)"]
+        Embedding["eva.embedding\n(ONNX MiniLM — M4)"]
         Models["eva.models\n(ModelManager)"]
         Hardware["eva.hardware"]
         Config["eva.config"]
@@ -43,8 +46,9 @@ flowchart TB
 
     CLI -->|direct calls| Engine
     CLI -->|direct calls| Subsystems
-    WebUI -.->|HTTP + WS| API
-    Desktop -.->|HTTP + WS, spawns eva serve| API
+    CLI -->|"eva start/stop:\nPID-file process mgmt\n(eva.service, M5.5)"| API
+    WebUI -->|HTTP + WS| API
+    Desktop -->|HTTP + WS, hosts the built UI| API
     Plugin -.->|future: eva.sdk facade| Engine
 
     FastAPI --> State
@@ -58,7 +62,9 @@ flowchart TB
     Orchestrator --> LLM
     Orchestrator --> TTS
     Orchestrator --> Audio
+    Orchestrator --> Memory
     Orchestrator --> Bus
+    Memory --> Embedding
 
     VAD --> Config
     ASR --> Config
@@ -85,6 +91,8 @@ flowchart BT
     Runtime["eva.runtime"]
     Plugins["eva.plugins"]
     Metrics["eva.metrics"]
+    MemoryPkg["eva.memory"]
+    EmbeddingPkg["eva.embedding"]
 
     Conversation["eva.conversation"]
 
@@ -95,6 +103,8 @@ flowchart BT
     Server["eva.server"]
     CliMod["eva.cli"]
     VoiceLoop["eva.voice_loop"]
+    Service["eva.service\n(PID-file process mgmt)"]
+    DesktopMod["eva.desktop"]
 
     Config --> Core
     Hardware --> Core
@@ -112,6 +122,9 @@ flowchart BT
     Plugins --> Core
     Metrics --> Core
     Metrics --> Hardware
+    MemoryPkg --> Core
+    MemoryPkg --> Config
+    EmbeddingPkg --> Core
 
     Conversation --> Core
     Conversation --> Config
@@ -120,6 +133,8 @@ flowchart BT
     Conversation --> LLM
     Conversation --> TTS
     Conversation --> Audio
+    Conversation --> MemoryPkg
+    MemoryPkg --> EmbeddingPkg
 
     Engine --> Conversation
     Engine --> Models
@@ -141,8 +156,10 @@ flowchart BT
     CliMod --> Server
     CliMod --> Models
     CliMod --> Hardware
+    CliMod --> Service
 
     VoiceLoop --> Engine
+    DesktopMod --> Server
 
     style Core fill:#2d5,stroke:#333
 ```
@@ -265,13 +282,14 @@ stateDiagram-v2
     Building --> Building: readiness check\n(eva.onboarding.check_readiness)
     Building --> NotBuilt: readiness failed\n→ 409 with problems list
     Building --> Loading: build_assistant()\n(resolve settings → model files → engines)
-    Loading --> Loading: preload()\nLLM first, then ASR, then TTS\n(ADR-015 deterministic order)
+    Loading --> Loading: preload() — parallel (ADR-026)\nLLM strictly before ASR (GPU order,\nADR-015); TTS/embedding concurrent;\nComponentLoadStarted/Finished progress events
     Loading --> AudioStarting: start_audio()\n(opens duplex stream)
     AudioStarting --> Running: orchestrator.run() task scheduled
     Running --> Running: turns processed\n(see diagrams 4 & 5)
-    Running --> Stopping: POST /api/v1/engine/stop\n(or Ctrl+C in `eva run`)
-    Stopping --> Stopping: orchestrator shutdown\n(cascades TurnCancelled reason="shutdown")
-    Stopping --> NotBuilt: audio.stop(), assistant discarded
+    Running --> Running: supervised recovery (ADR-026)\nASR/TTS crash → unload+reload in background\n(cooldown-guarded; one turn lost, not the engine)
+    Running --> Stopping: POST /api/v1/engine/stop\n(or Ctrl+C in `eva run`, or `eva stop`)
+    Stopping --> Stopping: ordered shutdown —\ncancel owned tasks (TaskManager),\norchestrator shutdown (TurnCancelled reason="shutdown"),\naudio stop, engines unloaded; exception-proof
+    Stopping --> NotBuilt: assistant discarded
     NotBuilt --> [*]: process exits
 ```
 
@@ -336,7 +354,7 @@ flowchart TB
     State --> API["GET /api/v1/plugins\nenable/disable/reload"]
 
     State -.->|"NOT YET IMPLEMENTED:\nactually loading contributions\ninto engine registries"| Registries["eva.vad / eva.asr / eva.llm / eva.tts\nregistries, eva.conversation\npersona/template registries"]
-    Factory -.->|"NOT YET DESIGNED:\nnarrow eva.sdk facade\n(Open Question, see HANDOFF §42)"| EngineInternals["Engine internals\n(orchestrator, ports)"]
+    Factory -.->|"NOT YET DESIGNED:\nnarrow eva.sdk facade\n(open design question, ADR-011)"| EngineInternals["Engine internals\n(orchestrator, ports)"]
 
     style Registries stroke-dasharray: 5 5
     style EngineInternals stroke-dasharray: 5 5
@@ -357,8 +375,13 @@ flowchart TB
     App --> RouterDiagnostics["/diagnostics"]
     App --> RouterPlugins["/plugins\nlist/get/enable/disable/reload"]
     App --> RouterEngine["/engine\nstatus/readiness/start/stop"]
-    App --> RouterConversation["/conversation\nhistory/current/interrupt/cancel/\nclear/export/import"]
+    App --> RouterConversation["/conversation\nhistory/current/say/interrupt/\ncancel/clear/export/import"]
+    App --> RouterMemory["/memory\nsearch/stats/turns/conversations/\ncontext-preview/export/import (M4)"]
+    App --> RouterPersonas["/personas (M4)"]
+    App --> RouterUsers["/users (M4)"]
+    App --> RouterVoices["/voices + preview (M4)"]
     App --> RouterWS["/ws (WebSocket)"]
+    App --> StaticUI["Static web UI mount at /\n(SPA fallback, ADR-023 —\nonly when web/dist exists)"]
 
     RouterSettings -->|StateDep| ServerState["ServerState\n(single engine-lifecycle owner)"]
     RouterModels -->|StateDep| ServerState
@@ -366,6 +389,10 @@ flowchart TB
     RouterPlugins -->|StateDep| ServerState
     RouterEngine -->|StateDep| ServerState
     RouterConversation -->|StateDep| ServerState
+    RouterMemory -->|StateDep| ServerState
+    RouterPersonas -->|StateDep| ServerState
+    RouterUsers -->|StateDep| ServerState
+    RouterVoices -->|StateDep| ServerState
     RouterWS --> ServerState
 
     ServerState --> ConfigService["eva.config.service\n(shared with CLI)"]
@@ -396,7 +423,7 @@ flowchart LR
     Snapshot --> Sub2
 ```
 
-## 12. Desktop ↔ Backend ↔ Engine Communication (Future — M6)
+## 12. Desktop ↔ Backend ↔ Engine Communication (partially built — M6 completes it)
 
 ```mermaid
 flowchart LR
@@ -420,25 +447,28 @@ flowchart LR
     WebView -.->|POST /conversation/interrupt| FastAPIProc
 ```
 
-**Status: not built.** This diagram documents the intended shape per
-ADR-007 (one engine, thin frontends) — the backend side already exists
-(M2.6); the desktop shell and the web view content do not yet (M5/M6).
+**Status: partially built.** The backend, the web UI content, and a
+minimal window shell (`eva-desktop`: in-process server + pywebview window)
+shipped in M5. The tray icon, global push-to-talk hotkey, and
+subprocess-supervision shape shown above are M6 scope (the supervision
+primitives — PID file, spawn, health poll, terminate — already exist in
+`eva.service`).
 
 ## 13. Future v1.0 Architecture (aspirational — not current state)
 
 ```mermaid
 flowchart TB
-    subgraph UserFacing["User-Facing Surfaces (M5/M6/M8)"]
-        Web["Web UI\n(browser, localhost)"]
-        Desk["Desktop App\n(Windows/Linux installer)"]
+    subgraph UserFacing["User-Facing Surfaces — Web UI EXISTS (M5); installers are M8"]
+        Web["Web UI\n(browser, localhost) — built"]
+        Desk["Desktop App\n(window shell built; tray/hotkey/\ninstaller — M6/M8)"]
     end
 
-    subgraph PlatformAPI["Platform API — EXISTS TODAY (M2.6)"]
+    subgraph PlatformAPI["Platform API — EXISTS (M2.6–M5.5)"]
         API["FastAPI /api/v1\n+ WebSocket"]
     end
 
-    subgraph EngineCore["Engine Core — EXISTS TODAY, hardening ongoing (M3/M4)"]
-        Orch["Turn Orchestrator\n+ persistent memory (M4)\n+ personas/templates (M4)"]
+    subgraph EngineCore["Engine Core — EXISTS (M2–M5.5)"]
+        Orch["Turn Orchestrator\n+ persistent memory, personas (M4)\n+ lifecycle supervision (M5.5)"]
     end
 
     subgraph PluginEcosystem["Plugin Ecosystem — FUTURE (post-v1.0)"]

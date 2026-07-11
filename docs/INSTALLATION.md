@@ -21,6 +21,10 @@ needed. `eva first-run` launches the same wizard on demand.
 The manual, stage-by-stage flow below is for developers and advanced users who
 want to control each step.
 
+`eva run` is the terminal voice loop. For the full experience — chat with
+text or voice, manage memory, personas, models, and settings — use the
+**web UI** (see [Web UI](#web-ui-and-background-server) below).
+
 ---
 
 ## Manual installation (developer flow)
@@ -167,6 +171,35 @@ Any `MISSING` line is printed with the exact command to fix it.
 
 ---
 
+## Web UI and background server
+
+The web UI is a React app in `web/` served statically by the API server.
+Building it requires Node.js 20+ (a one-time step; end-user packages will
+ship it prebuilt in a later release):
+
+```bash
+cd web
+npm install
+npm run build        # outputs web/dist
+cd ..
+
+eva start            # start the server in the background
+# open http://127.0.0.1:8765/
+eva status           # process, API, and engine status
+eva logs             # tail the newest log file
+eva stop             # graceful shutdown
+```
+
+`eva serve --open` runs the server in the foreground and opens the browser
+automatically. The optional desktop window:
+
+```bash
+pip install -e ".[desktop]"
+eva-desktop
+```
+
+---
+
 ## Command reference
 
 | Command | Purpose | Needs |
@@ -181,7 +214,12 @@ Any `MISSING` line is printed with the exact command to fix it.
 | `eva echo-test` | Measure echo cancellation | base + mic/speakers |
 | `eva models list/download/remove` | Manage models | base |
 | `eva bench` | End-to-end pipeline benchmark (no mic) | full setup |
-| `eva run` | Interactive voice assistant | full setup + mic/speakers |
+| `eva run` | Interactive voice assistant (terminal) | full setup + mic/speakers |
+| `eva serve` | Platform API server (foreground; serves the web UI) | base |
+| `eva start/stop/restart` | Background server lifecycle | base |
+| `eva status` / `eva logs` | Server status / newest log tail | base |
+| `eva personas/users/voices/memory` | Manage personas, profiles, voices, memory | base |
+| `eva config show/schema/reset` | Inspect or reset settings | base |
 
 ---
 

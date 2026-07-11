@@ -6,6 +6,30 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-11 — v0.5 documentation synchronization
+
+A maintenance pass, not a feature milestone: the repository's documentation
+now matches the shipped M5.x state.
+
+**Changed**
+- Version bumped `0.1.0.dev0` → `0.5.0a1` (`pyproject.toml`,
+  `eva.__version__`); development-status classifier raised to Alpha.
+- `docs/ROADMAP.md` records M4 integration & validation, M5.1–M5.5, and
+  this pass; M6 remains the next milestone.
+- `README.md` updated with M5.1–M5.5 highlights and the current run
+  commands (`eva start/stop/status/logs`).
+- `docs/INSTALLATION.md` gains a "Web UI and background server" section
+  and an up-to-date command reference.
+- `docs/ARCHITECTURE_DIAGRAMS.md` updated to the M5.5 state: web UI and
+  desktop shell no longer marked "not built"; memory/embedding subsystems,
+  the M4 routers, static UI hosting, parallel preload, supervised
+  recovery, and the process CLI are all reflected.
+
+**Removed**
+- Internal working notes moved out of `docs/` into an untracked `.dev/`
+  folder; `.gitignore` simplified accordingly. Public docs are now
+  `README`, `CHANGELOG`, and `docs/` only.
+
 ### 2026-07-06 — M5.5: Stability, lifecycle & performance (ADR-026)
 
 The milestone that makes EVA behave like a real desktop application:
@@ -823,7 +847,7 @@ cancellation checkpoint mid-synthesis.
 
 ### 2026-07-03 — Project inception
 
-- Analyzed the thesis prototype; findings in `docs/THESIS_ANALYSIS.md`.
+- Analyzed the thesis prototype; findings recorded in internal notes.
 - Evaluated the current open-weight model landscape (ASR, LLM, TTS, VAD, AEC).
 - Defined the system architecture (`docs/ARCHITECTURE.md`), roadmap
   (`docs/ROADMAP.md`), and ADR-001 … ADR-009.

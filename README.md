@@ -18,9 +18,12 @@ Once the required models are installed, the assistant operates completely offlin
 - Fully offline after initial model installation
 - Natural voice conversations with streaming speech recognition and response generation
 - Real-time voice interruption (barge-in)
-- Streaming response generation for lower latency
+- Text and voice input through a full web UI (chat composer + microphone)
+- Persistent conversation memory with semantic recall, personas, and user profiles
 - Modular architecture with interchangeable AI models
 - Local REST + WebSocket API
+- Fine-grained permission controls (microphone, memory, system information)
+- Background server lifecycle (`eva start/stop/restart/status/logs`)
 - Cross-platform support for Windows and Linux
 - Automatic hardware detection and model recommendations
 - Built for developers, researchers, and edge AI applications
@@ -106,6 +109,25 @@ The project is under active development.
   - Live updates over the existing WebSocket event stream — no polling
   - Minimal `pywebview` desktop shell (`eva-desktop`) hosting the same UI
 
+- **M5.1 – M5.4 – Experience & Production Readiness**
+  - Markdown rendered in the UI and converted to natural speech at the
+    TTS boundary
+  - Rewritten prompt composition: stronger personas, capability honesty,
+    conversational continuity
+  - Chat composer with typed text turns sharing the voice pipeline
+  - Grouped permission settings (General, Files, Devices, Tools, Privacy)
+    that actually gate behavior
+  - Long-term memory integrated into replies (semantic recall with
+    keyword fallback), conversation titles, memory manager improvements
+
+- **M5.5 – Stability, Lifecycle & Performance**
+  - Parallel model loading with per-component startup progress (~18 s cold
+    start on the reference machine)
+  - Graceful shutdown and a hardened cancellation architecture
+  - Automatic recovery when speech recognition or synthesis crashes
+  - Background server commands: `eva start`, `eva stop`, `eva restart`,
+    `eva status`, `eva logs`
+
 ### Next milestone
 
 **M6 – Desktop polish** (tray icon, global push-to-talk hotkey, engine
@@ -117,9 +139,12 @@ See the [Roadmap](docs/ROADMAP.md) for implementation progress.
 
 ```bash
 cd web && npm install && npm run build   # builds web/dist/
-eva serve --open                         # serves it at http://127.0.0.1:8765/
+eva start                                # background server at http://127.0.0.1:8765/
+eva status                               # process, API, and engine status
+eva stop                                 # graceful shutdown
 ```
-Or, for frontend development with live reload: `eva serve` in one terminal,
+`eva serve --open` runs the server in the foreground and opens a browser.
+For frontend development with live reload: `eva serve` in one terminal,
 `cd web && npm run dev` in another (proxies `/api` to the backend).
 
 For the desktop shell: `pip install -e ".[desktop]"` then `eva-desktop`.

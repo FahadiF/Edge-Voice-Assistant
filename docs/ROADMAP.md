@@ -141,6 +141,17 @@ real N+1-query performance bug was found and fixed by that measurement
 before it shipped. Deferred to M5+ (documented, not silently dropped):
 `eva memory`/`eva user` CLI commands, real encryption-at-rest.
 
+## M4 Integration & validation pass ✅ (completed 2026-07-05)
+Real-hardware testing exposed integration gaps that unit tests with fakes
+could not: a release-blocking multi-system-message crash (fixed by
+refactoring `ContextBuilder` to emit exactly one system message with strict
+user/assistant alternation, enforced by `validate_chat_messages` — works
+across all supported chat templates with no model-specific hacks), assistant
+identity (introduces itself as "Edge Voice Assistant"), personas actually
+influencing replies, full CLI parity (`eva personas/users/voices/memory/
+profile`), persona/profile/voice visibility in the startup banner and
+diagnostics, and the first version of `docs/MANUAL_TESTING.md`.
+
 ## M5 — Web UI & Desktop Shell ✅ shipped
 
 The platform API and WebSocket protocol were already built (M2.6); this
@@ -173,6 +184,59 @@ Delivered:
 **Exit:** full product usable and fully configurable from a browser at
 localhost, and from a native desktop window; API documented (OpenAPI +
 WebSocket protocol reference in docs/). ✅ Both met.
+
+## M5.1 — Presentation layer ✅ (completed 2026-07-05)
+Markdown is the canonical text form everywhere (ADR-024): the web UI renders
+it (react-markdown + remark-gfm, GFM tables/lists/code), and a stateful
+`MarkdownSpeechFilter` at the TTS boundary converts it to natural speech —
+no asterisks or backticks are ever spoken, including markers split across
+sentence-chunker segments. Plus a frontend review pass: WebSocket reconnect
+cache invalidation, error surfacing, accessibility, autoscroll, race fixes.
+
+## M5.2 — Conversational intelligence ✅ (completed 2026-07-06)
+Prompt composition rewritten as an explicit hierarchy (ADR-021 amendment):
+identity → conversation guidance → capability honesty → persona →
+language/profile → summary → memories → technical facts. Fixes validated
+live: continuity across short follow-ups, honest "not enabled in this
+build" for image requests, helpfulness over literalness, stronger persona
+differentiation (Teacher persona added), natural identity answers, quality
+maintained in long conversations. Conversational-quality regression tests
+guard the composition.
+
+## M5.3 — Capability polish ✅ (completed 2026-07-06)
+Markdown-to-speech hardened (entities, nesting, unpaired-marker scrub).
+Chat composer: typed text turns flow through the same orchestrator event
+queue as voice (`POST /conversation/say`), Enter/Shift+Enter, attachment
+placeholders. Permissions settings page with named toggles wired to real
+behavior, and a permission-gated local system-information provider
+(date/time, hardware) so the assistant can answer "what time is it?"
+offline (ADR-025).
+
+## M5.4 — Production readiness ✅ (completed 2026-07-08)
+Long-term memory actually used in replies: embeddings computed at write
+time, keyword fallback when the embedding model is absent, end-to-end
+recall verified ("my nickname is …" → recalled in a later conversation).
+Permissions regrouped (General/Files/Devices/Tools/Privacy) with a
+settings-schema migration (v1→2). Conversation titles: auto-generated,
+editable, persisted, exported/imported. Memory page UX, sticky composer,
+streaming polish, markdown regression cases, full UI + backend review.
+
+## M5.5 — Stability, lifecycle & performance ✅ (completed 2026-07-10)
+Engine lifecycle and supervision (ADR-026): parallel model preload with
+per-component progress events (GPU order LLM→ASR preserved; ~18 s cold
+start vs ~22 s serial), optional lazy TTS loading, graceful shutdown
+(ordered, exception-proof), a cancellation-architecture fix (single-owner-
+thread stream driving — eliminates "generator already executing"), a named
+background-task manager, supervised ASR/TTS crash recovery (one turn lost,
+never the assistant; cooldown-guarded), and background server process
+management: `eva start`, `eva stop`, `eva restart`, `eva status`,
+`eva logs`. Composer gains a dedicated Stop control beside mic/send.
+636 tests total.
+
+## v0.5 — Documentation synchronization ✅ (completed 2026-07-11)
+Maintenance pass, not a feature milestone: all documentation synchronized
+with the shipped M5.x state, private team notes moved out of `docs/` into
+an untracked `.dev/` folder, version bumped to `0.5.0a1`.
 
 ## M6 — Desktop polish
 Tray icon, global push-to-talk hotkey, engine process supervision (auto-
