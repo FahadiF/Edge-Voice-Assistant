@@ -41,23 +41,41 @@ class FasterWhisperASR(ASREngine):
             if self._device in ("auto", "cuda")
             else [("cpu", self._compute_type)]
         )
+        # Offline-first (M5.7): once the model is cached, huggingface_hub still
+        # makes a HEAD request per file on every load to check for updates
+        # unless told the files are local. Try a fully offline load first; only
+        # if the model isn't cached (first run) do we permit the network. This
+        # keeps a fully-installed EVA from touching Hugging Face at startup.
         last_error: Exception | None = None
-        for device, compute_type in attempts:
-            try:
-                self._model = WhisperModel(
-                    self._model_name,
-                    device=device,
-                    compute_type=compute_type,
-                    download_root=root,
-                )
-                self.device = device
+        for local_files_only in (True, False):
+            if not local_files_only:
                 logger.info(
-                    "faster-whisper '%s' loaded (%s, %s)", self._model_name, device, compute_type
+                    "faster-whisper '%s' not in local cache — downloading", self._model_name
                 )
-                return
-            except Exception as exc:  # cuda runtime missing, unsupported type, …
-                logger.warning("faster-whisper load failed on %s: %s", device, exc)
-                last_error = exc
+            for device, compute_type in attempts:
+                try:
+                    self._model = WhisperModel(
+                        self._model_name,
+                        device=device,
+                        compute_type=compute_type,
+                        download_root=root,
+                        local_files_only=local_files_only,
+                    )
+                    self.device = device
+                    logger.info(
+                        "faster-whisper '%s' loaded (%s, %s%s)",
+                        self._model_name,
+                        device,
+                        compute_type,
+                        ", offline" if local_files_only else "",
+                    )
+                    return
+                except Exception as exc:  # not cached, cuda missing, bad type, …
+                    # The offline pass failing is expected on first run — stay
+                    # quiet there and let the online pass report real trouble.
+                    if not local_files_only:
+                        logger.warning("faster-whisper load failed on %s: %s", device, exc)
+                    last_error = exc
         raise ModelError(f"Cannot load faster-whisper '{self._model_name}': {last_error}")
 
     def unload(self) -> None:

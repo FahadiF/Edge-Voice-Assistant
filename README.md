@@ -135,17 +135,38 @@ process supervision, first-run wizard window, installers)
 
 See the [Roadmap](docs/ROADMAP.md) for implementation progress.
 
-## Running the web UI
+## Starting, stopping, and exiting
+
+Two ways to run the assistant — pick the one that matches what you're doing.
+
+**Development — foreground, stop with Ctrl+C:**
 
 ```bash
-cd web && npm install && npm run build   # builds web/dist/
-eva start                                # background server at http://127.0.0.1:8765/
-eva status                               # process, API, and engine status
-eva stop                                 # graceful shutdown
+cd web && npm install && npm run build   # once: builds web/dist/
+eva serve --open   # API + web UI in the foreground; opens a browser
+eva run            # or: voice-only console loop, no server
 ```
-`eva serve --open` runs the server in the foreground and opens a browser.
-For frontend development with live reload: `eva serve` in one terminal,
-`cd web && npm run dev` in another (proxies `/api` to the backend).
+
+Stop with **Ctrl+C**. Shutdown is bounded (≤ ~5 s even with browser tabs
+still connected) and always ends cleanly: the turn in flight is cancelled,
+components stop in order, no tracebacks, no orphan processes. For UI work
+with live reload, run `eva serve` in one terminal and `cd web && npm run
+dev` in another (it proxies `/api` to the backend).
+
+**Background / production — start, stop, restart, status:**
+
+```bash
+eva start          # background server at http://127.0.0.1:8765/ (no window)
+eva status         # process, API, and engine state
+eva restart        # stop + start (e.g. after changing models)
+eva logs           # tail the newest log file
+eva stop           # graceful: engine stops, audio released, DB flushed,
+                   # then the process exits
+```
+
+`eva stop` asks the background server to shut down over the API first (the
+clean path) and only falls back to terminating the process if the API
+doesn't answer.
 
 For the desktop shell: `pip install -e ".[desktop]"` then `eva-desktop`.
 

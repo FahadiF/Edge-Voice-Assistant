@@ -9,10 +9,10 @@
  * silently dropping the file.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ClipboardEvent, KeyboardEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { conversation, engine } from "../api/endpoints";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { conversation, engine, settings } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import { toast } from "./common";
 import "./composer.css";
@@ -39,7 +39,35 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const pipelineState = useWsStore((s) => s.pipelineState);
+  const micMuted = useWsStore((s) => s.microphoneMuted);
+  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: settings.get });
+  // The mic can be toggled only when the engine is running AND the user
+  // granted microphone permission (otherwise EVA runs typed-chat-only,
+  // ADR-025 — there is nothing to mute).
+  const micPermission = settingsQuery.data?.permissions?.devices?.microphone ?? false;
+  const micAvailable = engineRunning && micPermission;
+
+  // The + menu dismisses like a real menu (M5.6): click anywhere outside
+  // or press Escape — before this it only toggled via its own button.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [menuOpen]);
 
   const send = useMutation({
     mutationFn: (message: string) => conversation.say(message),
@@ -108,15 +136,28 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
     mutationFn: conversation.interrupt,
     onError: (e) => toast("error", e.message),
   });
+  const toggleMic = useMutation({
+    mutationFn: () => conversation.setMicrophone(!micMuted),
+    onError: (e) => toast("error", e.message),
+  });
 
   const onMicClick = () => {
     if (!engineRunning) {
-      startEngine.mutate();
-    } else if (pipelineState === "speaking" || pipelineState === "thinking") {
-      interrupt.mutate(); // tap the mic to cut the assistant off
+      startEngine.mutate(); // stopped → tap to start the engine
+    } else if (micAvailable) {
+      toggleMic.mutate(); // running → tap to mute/unmute listening
     }
-    // listening/idle while running: nothing to do — it's always listening
+    // running without mic permission: button is disabled (nothing to mute).
+    // Interrupting a reply lives on the dedicated ⏹ Stop button.
   };
+
+  const micLabel = !engineRunning
+    ? "Start the engine"
+    : !micPermission
+      ? "Microphone permission is off — enable it in Settings (typed chat only)"
+      : micMuted
+        ? "Microphone muted — tap to unmute"
+        : "Microphone on — tap to mute";
 
   return (
     <div
@@ -146,9 +187,9 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
         </div>
       )}
       <div className="composer-row">
-        <div className="composer-plus">
+        <div className="composer-plus" ref={menuRef}>
           <button
-            aria-label="Add attachment"
+            aria-label="Add attachment (attachments await Vision support)"
             aria-expanded={menuOpen}
             aria-haspopup="menu"
             onClick={() => setMenuOpen((open) => !open)}
@@ -157,14 +198,16 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           </button>
           {menuOpen && (
             <div className="composer-menu" role="menu">
+              {/* Honest placeholders (M5.6): each entry says "coming soon"
+                  up front instead of only after being clicked. */}
               <button role="menuitem" onClick={() => placeholderAction("Image upload")}>
-                🖼 Attach image
+                🖼 Attach image <span className="field-help">(coming soon)</span>
               </button>
               <button role="menuitem" onClick={() => placeholderAction("Document upload")}>
-                📄 Attach document
+                📄 Attach document <span className="field-help">(coming soon)</span>
               </button>
               <button role="menuitem" onClick={() => placeholderAction("Screenshot capture")}>
-                📷 Capture screenshot
+                📷 Capture screenshot <span className="field-help">(coming soon)</span>
               </button>
             </div>
           )}
@@ -185,25 +228,14 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           onPaste={onPaste}
         />
         <button
-          className={`composer-mic mic-${pipelineState}`}
-          aria-label={
-            engineRunning
-              ? pipelineState === "speaking" || pipelineState === "thinking"
-                ? "Microphone — tap to interrupt"
-                : `Microphone active — assistant is ${pipelineState}`
-              : "Start the engine"
-          }
-          title={
-            engineRunning
-              ? pipelineState === "speaking" || pipelineState === "thinking"
-                ? "Tap to interrupt the assistant"
-                : `Always listening (${pipelineState}) — just talk`
-              : "Tap to start the engine and enable the microphone"
-          }
-          disabled={startEngine.isPending}
+          className={`composer-mic mic-${pipelineState}${micMuted ? " mic-muted" : ""}`}
+          aria-label={micLabel}
+          aria-pressed={micAvailable ? micMuted : undefined}
+          title={micLabel}
+          disabled={startEngine.isPending || toggleMic.isPending || (engineRunning && !micAvailable)}
           onClick={onMicClick}
         >
-          🎙
+          {micMuted ? "🔇" : "🎙"}
         </button>
         {engineRunning && (pipelineState === "speaking" || pipelineState === "thinking") && (
           <button

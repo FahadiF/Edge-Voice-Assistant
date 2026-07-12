@@ -19,13 +19,22 @@ function renderComposer(engineRunning = true) {
 }
 
 function mockSayOk() {
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => ({ status: "accepted" }),
-  } as Response);
+  // The Composer fetches /settings (for mic permission) alongside the action
+  // call, so responses are matched by URL rather than assumed to arrive in a
+  // fixed order.
+  const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>((url) => {
+    const body = url.includes("/settings")
+      ? { permissions: { devices: { microphone: true } } }
+      : { status: "accepted" };
+    return Promise.resolve({ ok: true, status: 200, json: async () => body } as Response);
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+/** URLs the app called, ignoring the incidental /settings query. */
+function actionCalls(fetchMock: ReturnType<typeof mockSayOk>): string[] {
+  return fetchMock.mock.calls.map((c) => c[0] as string).filter((u) => !u.includes("/settings"));
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -36,10 +45,12 @@ describe("Composer", () => {
     renderComposer();
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "  hello  " } });
     fireEvent.click(screen.getByLabelText("Send message"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/v1/conversation/say");
-    expect(JSON.parse(init.body)).toEqual({ text: "hello" });
+    const sayCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => c[0] === "/api/v1/conversation/say");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse((sayCall[1] as RequestInit).body as string)).toEqual({ text: "hello" });
   });
 
   it("Enter sends; Shift+Enter does not", async () => {
@@ -48,9 +59,13 @@ describe("Composer", () => {
     const input = screen.getByLabelText("Message");
     fireEvent.change(input, { target: { value: "line one" } });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(actionCalls(fetchMock)).not.toContain("/api/v1/conversation/say");
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(actionCalls(fetchMock).filter((u) => u === "/api/v1/conversation/say")).toHaveLength(
+        1,
+      ),
+    );
   });
 
   it("clears the input after a successful send", async () => {
@@ -75,7 +90,7 @@ describe("Composer", () => {
 
   it("the + menu offers Vision-coming-soon placeholder actions", () => {
     renderComposer();
-    fireEvent.click(screen.getByLabelText("Add attachment"));
+    fireEvent.click(screen.getByLabelText(/Add attachment/));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     fireEvent.click(screen.getByText(/Attach image/));
     // Action is a placeholder: a toast explains, no crash, menu closes.
@@ -102,8 +117,7 @@ describe("Composer", () => {
     const fetchMock = mockSayOk(); // any ok JSON response works for /engine/start
     renderComposer(false);
     fireEvent.click(screen.getByLabelText("Start the engine"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/engine/start");
+    await waitFor(() => expect(actionCalls(fetchMock)).toContain("/api/v1/engine/start"));
   });
 
   it("shows a Stop button beside send while the assistant speaks (M5.5)", async () => {
@@ -113,8 +127,7 @@ describe("Composer", () => {
     const stopButton = screen.getByLabelText("Stop the current reply");
     expect(stopButton).toBeInTheDocument();
     fireEvent.click(stopButton);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/conversation/interrupt");
+    await waitFor(() => expect(actionCalls(fetchMock)).toContain("/api/v1/conversation/interrupt"));
     useWsStore.setState({ pipelineState: "idle" });
   });
 
@@ -123,5 +136,45 @@ describe("Composer", () => {
     renderComposer(true);
     expect(screen.queryByLabelText("Stop the current reply")).toBeNull();
     useWsStore.setState({ pipelineState: "idle" });
+  });
+
+  it("mic button mutes/unmutes when running with permission (M5.7)", async () => {
+    const fetchMock = mockSayOk(); // /settings grants mic permission
+    useWsStore.setState({ microphoneMuted: false });
+    renderComposer(true);
+    // Wait for the settings query so the button becomes an enabled mute toggle.
+    const micButton = await waitFor(() => {
+      const btn = screen.getByLabelText(/Microphone on — tap to mute/);
+      expect(btn).not.toBeDisabled();
+      return btn;
+    });
+    fireEvent.click(micButton);
+    await waitFor(() =>
+      expect(actionCalls(fetchMock)).toContain("/api/v1/conversation/microphone"),
+    );
+    const call = fetchMock.mock.calls.find((c) => c[0] === "/api/v1/conversation/microphone")!;
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({ muted: true });
+    useWsStore.setState({ microphoneMuted: false });
+  });
+
+  it("mic button is disabled when microphone permission is off (M5.7)", async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>((url) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/settings")
+            ? { permissions: { devices: { microphone: false } } }
+            : { status: "accepted" },
+      } as Response),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderComposer(true);
+    const micButton = await waitFor(() => {
+      const btn = screen.getByLabelText(/permission is off/i);
+      expect(btn).toBeDisabled();
+      return btn;
+    });
+    expect(micButton).toBeInTheDocument();
   });
 });

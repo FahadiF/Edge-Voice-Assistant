@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from eva.audio.frames import FRAME_SAMPLES, SAMPLE_RATE, Frame
 from eva.audio.playback import PlaybackQueue
@@ -52,25 +53,47 @@ class DuplexAudioStream:
         self._stream: Any = None
         self._callback_errors = 0
 
-    def start(self) -> None:
+    def start(self, *, playback_only: bool = False) -> None:
+        """Open the audio device(s).
+
+        `playback_only` (M5.6) opens ONLY the output device — used when the
+        microphone permission is off (ADR-025): speech synthesis still plays,
+        but no input device is ever opened (a revoked mic permission must not
+        even touch the microphone). Previously mic-off skipped audio startup
+        entirely, which left the playback queue undrained and wedged every
+        typed turn in the "speaking" state forever.
+        """
         import sounddevice as sd
 
         if self._stream is not None:
             raise AudioError("Duplex stream already started")
         try:
-            self._stream = sd.Stream(
-                samplerate=SAMPLE_RATE,
-                blocksize=FRAME_SAMPLES,
-                channels=1,
-                dtype="int16",
-                device=(self._input_device, self._output_device),
-                callback=self._callback,
-            )
+            if playback_only:
+                self._stream = sd.OutputStream(
+                    samplerate=SAMPLE_RATE,
+                    blocksize=FRAME_SAMPLES,
+                    channels=1,
+                    dtype="int16",
+                    device=self._output_device,
+                    callback=self._output_callback,
+                )
+            else:
+                self._stream = sd.Stream(
+                    samplerate=SAMPLE_RATE,
+                    blocksize=FRAME_SAMPLES,
+                    channels=1,
+                    dtype="int16",
+                    device=(self._input_device, self._output_device),
+                    callback=self._callback,
+                )
             self._stream.start()
         except Exception as exc:
             self._stream = None
             raise AudioError(f"Cannot open duplex audio stream: {exc}") from exc
 
+        if playback_only:
+            logger.info("Playback-only stream started (microphone permission is off)")
+            return
         # Report the render→capture loop latency to the echo canceller.
         try:
             in_lat, out_lat = self._stream.latency
@@ -94,10 +117,28 @@ class DuplexAudioStream:
     def running(self) -> bool:
         return self._stream is not None
 
+    def _output_callback(
+        self,
+        outdata: npt.NDArray[np.int16],
+        frames: int,
+        _time: Any,
+        status: Any,
+    ) -> None:
+        """Render-only callback (playback-only mode): no capture ring, no
+        echo-canceller render feed — there is no mic signal to clean."""
+        try:
+            out_frame = self._playback.next_frame()
+            if self._volume != 1.0:
+                out_frame = (out_frame.astype(np.float32) * self._volume).astype(np.int16)
+            outdata[:, 0] = out_frame
+        except Exception:
+            self._callback_errors += 1
+            outdata.fill(0)
+
     def _callback(
         self,
-        indata: np.ndarray,
-        outdata: np.ndarray,
+        indata: npt.NDArray[np.int16],
+        outdata: npt.NDArray[np.int16],
         frames: int,
         _time: Any,
         status: Any,

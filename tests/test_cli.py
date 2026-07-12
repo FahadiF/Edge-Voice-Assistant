@@ -111,12 +111,34 @@ def test_config_reset(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_serve_command_starts_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`eva serve` uses a programmatic uvicorn.Server (M5.6) so it can set
+    a bounded graceful-shutdown timeout and register the /system/shutdown
+    exit hook — verify both are wired."""
     calls = {}
 
-    def fake_run(app: object, host: str, port: int, log_level: str) -> None:
-        calls["host"] = host
-        calls["port"] = port
+    class FakeConfig:
+        def __init__(
+            self, app: object, host: str, port: int, log_level: str, timeout_graceful_shutdown: int
+        ) -> None:
+            calls["app"] = app
+            calls["host"] = host
+            calls["port"] = port
+            calls["timeout"] = timeout_graceful_shutdown
 
-    monkeypatch.setattr("uvicorn.run", fake_run)
+    class FakeServer:
+        def __init__(self, config: FakeConfig) -> None:
+            self.should_exit = False
+
+        def run(self) -> None:
+            calls["ran"] = True
+
+    monkeypatch.setattr("uvicorn.Config", FakeConfig)
+    monkeypatch.setattr("uvicorn.Server", FakeServer)
     assert main(["serve", "--host", "0.0.0.0", "--port", "9999"]) == 0
-    assert calls == {"host": "0.0.0.0", "port": 9999}
+    assert calls["host"] == "0.0.0.0"
+    assert calls["port"] == 9999
+    assert calls["timeout"] == 5  # bounded shutdown — the Ctrl+C-hang fix
+    assert calls["ran"] is True
+    # The graceful-stop hook is registered on the app's ServerState.
+    app = calls["app"]
+    assert app.state.eva.shutdown_callback is not None  # type: ignore[attr-defined]

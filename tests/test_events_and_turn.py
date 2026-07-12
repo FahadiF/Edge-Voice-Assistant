@@ -83,6 +83,45 @@ class TestEventBus:
 
         asyncio.run(scenario())
 
+    def test_close_wakes_subscribers_with_sentinel(self) -> None:
+        """M5.7: close() must unblock a consumer waiting in get() so its
+        task returns before shutdown cancellation — otherwise 'Cancel N
+        running task(s)' and a timeout wait."""
+
+        async def scenario() -> None:
+            from eva.core.events import STREAM_CLOSED
+
+            bus = EventBus()
+            q = bus.subscribe()
+            woke: list[object] = []
+
+            async def consumer() -> None:
+                while True:
+                    event = await q.get()
+                    if event is STREAM_CLOSED:
+                        woke.append(event)
+                        return
+
+            task = asyncio.create_task(consumer())
+            await asyncio.sleep(0.01)  # consumer is now blocked in get()
+            bus.close()
+            await asyncio.wait_for(task, 1)  # returns promptly, not cancelled
+            assert woke == [STREAM_CLOSED]
+            assert bus.closed
+
+        asyncio.run(scenario())
+
+    def test_subscribe_after_close_is_immediately_woken(self) -> None:
+        async def scenario() -> None:
+            from eva.core.events import STREAM_CLOSED
+
+            bus = EventBus()
+            bus.close()
+            q = bus.subscribe()  # races shutdown
+            assert await asyncio.wait_for(q.get(), 1) is STREAM_CLOSED
+
+        asyncio.run(scenario())
+
     def test_threadsafe_publish_without_loop_is_noop(self) -> None:
         bus = EventBus()
         bus.publish_threadsafe(TurnStarted(epoch=1))  # must not raise

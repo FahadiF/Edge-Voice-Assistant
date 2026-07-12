@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 
 from eva.config.paths import AppPaths
 from eva.config.settings import Settings, load_settings
@@ -54,6 +55,11 @@ class ServerState:
         # (M5.5, ADR-026). The engine task stays separate — its lifecycle
         # IS the engine lifecycle, awaited in stop_engine, not cancelled.
         self.tasks = TaskManager("server")
+        # Set by `eva serve` to uvicorn's "please exit" hook; None under a
+        # bare test app. POST /system/shutdown uses it (M5.6) — the graceful
+        # remote-stop path for `eva stop` (Windows has no graceful signal
+        # for detached processes; TerminateProcess skips all cleanup).
+        self.shutdown_callback: Callable[[], None] | None = None
 
     def reload_settings(self) -> Settings:
         """Re-read settings.json (call after any persisted change)."""

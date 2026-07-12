@@ -27,6 +27,14 @@ class ModelFile(BaseModel):
     url: str
     filename: str
     size_mb: int
+    # Integrity metadata (M5.6). `size_bytes` is the exact upstream file size;
+    # `sha256` the upstream content hash — both from the publisher's own
+    # metadata (HF LFS API / GitHub release assets), never computed from a
+    # downloaded copy. Empty/zero means "publisher exposes no such metadata";
+    # the manager then verifies what it can and logs that the file is only
+    # size-checked. A mismatch on either is a hard failure, not a warning.
+    size_bytes: int = 0
+    sha256: str = ""
 
 
 class ModelInfo(BaseModel):
@@ -76,6 +84,8 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 url=_hf("unsloth/Qwen3.5-4B-GGUF", "Qwen3.5-4B-Q4_K_M.gguf"),
                 filename="Qwen3.5-4B-Q4_K_M.gguf",
                 size_mb=2700,
+                size_bytes=2_740_937_888,
+                sha256="00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
             ),
         ),
         vram_mb=3400,
@@ -99,6 +109,8 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 ),
                 filename="Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
                 size_mb=2500,
+                size_bytes=2_497_281_120,
+                sha256="3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
             ),
         ),
         vram_mb=3200,
@@ -120,6 +132,8 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 url=_hf("unsloth/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
                 filename="Qwen3.5-9B-Q4_K_M.gguf",
                 size_mb=5800,
+                size_bytes=5_680_522_464,
+                sha256="03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
             ),
         ),
         vram_mb=7200,
@@ -141,6 +155,8 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 url=_hf("unsloth/Qwen3-1.7B-GGUF", "Qwen3-1.7B-Q4_K_M.gguf"),
                 filename="Qwen3-1.7B-Q4_K_M.gguf",
                 size_mb=1100,
+                size_bytes=1_107_409_472,
+                sha256="b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
             ),
         ),
         vram_mb=1600,
@@ -204,12 +220,16 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 url="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
                 filename="kokoro-v1.0.onnx",
                 size_mb=310,
+                # GitHub release assets expose exact sizes but no content
+                # hash — size-verified only (logged by the manager).
+                size_bytes=325_532_387,
             ),
             ModelFile(
                 key="voices",
                 url="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
                 filename="voices-v1.0.bin",
                 size_mb=27,
+                size_bytes=28_214_398,
             ),
         ),
         ram_mb=700,
@@ -241,12 +261,16 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
                 url=_hf("Xenova/all-MiniLM-L6-v2", "onnx/model_quantized.onnx"),
                 filename="all-minilm-l6-v2.onnx",
                 size_mb=23,
+                size_bytes=22_972_370,
+                sha256="afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1",
             ),
             ModelFile(
                 key="tokenizer",
                 url=_hf("Xenova/all-MiniLM-L6-v2", "tokenizer.json"),
                 filename="all-minilm-l6-v2-tokenizer.json",
                 size_mb=1,
+                size_bytes=711_661,
+                sha256="da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
             ),
         ),
         ram_mb=200,

@@ -113,3 +113,85 @@ class TestHealthAndLogs:
 
     def test_no_logs_returns_empty(self, app_paths: AppPaths) -> None:
         assert service.newest_log_lines(app_paths, 5) == []
+
+
+class TestGracefulShutdown:
+    """M5.6: `eva stop` asks the server to stop itself over the API before
+    falling back to terminate — on Windows, terminate is TerminateProcess
+    (no cleanup at all), so the API call is the only graceful path."""
+
+    def test_request_graceful_shutdown_posts_to_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import urllib.request
+
+        seen: dict[str, str] = {}
+
+        class _Response:
+            status = 200
+
+            def __enter__(self) -> _Response:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _Response:
+            seen["url"] = request.full_url
+            seen["method"] = request.get_method()
+            return _Response()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        assert service.request_graceful_shutdown("127.0.0.1", 8765)
+        assert seen["url"] == "http://127.0.0.1:8765/api/v1/system/shutdown"
+        assert seen["method"] == "POST"
+
+    def test_request_graceful_shutdown_false_when_unreachable(self) -> None:
+        # Port 9 (discard) is never an EVA server.
+        assert not service.request_graceful_shutdown("127.0.0.1", 9, timeout_s=0.2)
+
+    def test_terminate_prefers_graceful_path(
+        self, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+        import sys
+
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+        )
+        try:
+            service.pid_file(app_paths).write_text(str(process.pid), encoding="utf-8")
+            calls: list[str] = []
+
+            def fake_graceful(host: str, port: int, timeout_s: float = 5.0) -> bool:
+                calls.append("graceful")
+                process.terminate()  # simulate the server exiting on request
+                return True
+
+            monkeypatch.setattr(service, "request_graceful_shutdown", fake_graceful)
+            assert service.terminate_server(app_paths, process.pid, host="127.0.0.1", port=8765)
+            assert calls == ["graceful"]
+            assert not service.pid_file(app_paths).exists()
+        finally:
+            if process.poll() is None:
+                process.kill()
+
+    def test_terminate_falls_back_when_graceful_fails(
+        self, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+        import sys
+
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+        )
+        try:
+            service.pid_file(app_paths).write_text(str(process.pid), encoding="utf-8")
+            monkeypatch.setattr(
+                service, "request_graceful_shutdown", lambda host, port, timeout_s=5.0: False
+            )
+            assert service.terminate_server(app_paths, process.pid, host="127.0.0.1", port=8765)
+            assert process.poll() is not None  # hard-terminated
+        finally:
+            if process.poll() is None:
+                process.kill()

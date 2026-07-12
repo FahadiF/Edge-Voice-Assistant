@@ -6,6 +6,11 @@
   flex-direction: column;
   gap: 10px;
   background: var(--bg);
+  /* Grid items default to min-width:auto — unwrappable content (model ids,
+     button rows) then forces the card wider than its track and everything
+     spills outside the card (M5.6 layout fix). */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .model-active {
@@ -19,9 +24,17 @@
   gap: 8px;
 }
 
+.model-head > div:first-child {
+  min-width: 0; /* let long names/ids wrap instead of pushing the badges out */
+}
+
 .model-id {
   margin-top: 2px;
   font-size: 0.8rem;
+}
+
+.model-id code {
+  overflow-wrap: anywhere; /* ids like qwen3.5-4b-instruct-q4_k_m must wrap */
 }
 
 .model-badges {
@@ -42,6 +55,7 @@
 .model-facts div {
   display: flex;
   gap: 6px;
+  min-width: 0;
 }
 
 .model-facts dt {
@@ -51,6 +65,8 @@
 
 .model-facts dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .model-notes {
@@ -63,12 +79,18 @@
   font-size: 0.78rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .model-actions {
   display: flex;
+  flex-wrap: wrap; /* narrow cards: buttons wrap inside instead of overflowing */
   gap: 8px;
   margin-top: auto;
+}
+
+.model-actions button {
+  white-space: nowrap;
 }
 
 .voice-grid {
@@ -85,6 +107,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .voice-active {

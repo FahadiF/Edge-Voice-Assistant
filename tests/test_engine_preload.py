@@ -107,3 +107,26 @@ class TestPreloadProgress:
             assert any(f.component == "llm" and "VRAM" in f.error for f in failures)
 
         asyncio.run(scenario())
+
+
+class TestMicrophonePermissionAudio:
+    """M5.6: mic-off must still start PLAYBACK (typed conversations speak,
+    and the playback queue drains so turns can finish) — before this,
+    mic-off skipped audio entirely and every typed turn wedged in the
+    'speaking' state waiting on a queue nothing ever drained."""
+
+    def test_mic_on_starts_duplex(self, app_paths: AppPaths) -> None:
+        settings = Settings()
+        assistant = build_fake_assistant(settings, app_paths)
+        assistant.start_audio()
+        assert assistant.audio.started_mode == "duplex"
+        assert assistant._audio_started is True
+
+    def test_mic_off_starts_playback_only(self, app_paths: AppPaths) -> None:
+        settings = Settings()
+        settings.permissions.devices.microphone = False
+        assistant = build_fake_assistant(settings, app_paths)
+        assistant.start_audio()
+        assert assistant.audio.started_mode == "playback-only"
+        # stop() must stop the playback-only stream too.
+        assert assistant._audio_started is True

@@ -6,8 +6,10 @@
 
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { engine, memory } from "../api/endpoints";
+import { useNavigate } from "react-router-dom";
+import { conversation as conversationApi, engine, memory } from "../api/endpoints";
 import type { MemoryTurn } from "../api/types";
+import { useWsStore } from "../ws/store";
 import {
   Card,
   ConfirmDialog,
@@ -146,8 +148,26 @@ function ContextPreview() {
 
 export function Memory() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const clearTranscriptLocal = useWsStore((s) => s.clearTranscript);
   const status = useQuery({ queryKey: ["engine-status"], queryFn: engine.status });
   const running = status.data?.running ?? false;
+
+  // Continue a stored conversation exactly where it ended (M5.6): switch the
+  // engine's active conversation, drop the locally shown transcript (it
+  // belongs to the previous conversation), and let the Conversation page
+  // reseed itself from the freshly invalidated history query.
+  const continueConversation = async (conversationId: string, title: string) => {
+    try {
+      const r = await conversationApi.resume(conversationId);
+      clearTranscriptLocal();
+      await queryClient.invalidateQueries({ queryKey: ["conversation-history"] });
+      toast("success", `Continuing "${title || "untitled conversation"}" (${r.turns} turns)`);
+      navigate("/conversation");
+    } catch (e) {
+      toast("error", `Continue failed: ${(e as Error).message}`);
+    }
+  };
 
   const stats = useQuery({ queryKey: ["memory-stats"], queryFn: memory.stats, enabled: running });
   const exportAll = useQuery({
@@ -328,8 +348,8 @@ export function Memory() {
             No stored conversations yet. Every conversation is saved here
             automatically — have one on the Conversation page (voice or typed) and it
             appears in this list with an auto-generated title, searchable and
-            manageable. Each restart starts a fresh conversation; old ones stay
-            until you delete them.
+            manageable. Each restart starts a fresh conversation; press Continue on
+            any stored one to reopen it exactly where it ended.
           </EmptyState>
         ) : (
           <table>
@@ -382,6 +402,18 @@ export function Memory() {
                   </td>
                   <td>{entry.turns.length}</td>
                   <td className="turn-actions">
+                    <button
+                      className="primary"
+                      title="Reopen this conversation where it ended — the next message continues it"
+                      onClick={() =>
+                        void continueConversation(
+                          entry.conversation.id,
+                          entry.conversation.title,
+                        )
+                      }
+                    >
+                      Continue
+                    </button>
                     <button
                       title="Download this conversation as JSON"
                       onClick={async () =>

@@ -72,6 +72,8 @@ export interface WsState {
   connected: boolean;
   snapshot: RuntimeSnapshot | null;
   pipelineState: PipelineState;
+  microphoneAvailable: boolean;
+  microphoneMuted: boolean;
   liveTurn: LiveTurn | null;
   transcript: TranscriptEntry[];
   downloads: Record<string, DownloadProgress>;
@@ -114,6 +116,8 @@ export const useWsStore = create<WsState>((set, get) => ({
   connected: false,
   snapshot: null,
   pipelineState: "idle",
+  microphoneAvailable: false,
+  microphoneMuted: false,
   liveTurn: null,
   transcript: [],
   downloads: {},
@@ -160,7 +164,12 @@ export const useWsStore = create<WsState>((set, get) => ({
       case "snapshot": {
         const snapshot = data as unknown as RuntimeSnapshot;
         const isReconnect = get().snapshot !== null;
-        set({ snapshot, pipelineState: snapshot.state });
+        set({
+          snapshot,
+          pipelineState: snapshot.state,
+          microphoneAvailable: snapshot.microphone_available,
+          microphoneMuted: snapshot.microphone_muted,
+        });
         // A snapshot after the first one means the socket reconnected —
         // anything cached from before the gap may be stale.
         if (isReconnect) onServerStateChanged?.();
@@ -168,6 +177,10 @@ export const useWsStore = create<WsState>((set, get) => ({
       }
       case "StateChanged":
         set({ pipelineState: data.state as PipelineState });
+        return;
+
+      case "MicrophoneMuted":
+        set({ microphoneMuted: data.muted as boolean });
         return;
 
       case "TurnStarted": {
@@ -330,12 +343,14 @@ export const useWsStore = create<WsState>((set, get) => ({
         });
         return;
       case "EngineStarted":
-        set({ componentLoading: {} }); // startup finished — clear the progress list
+        // Fresh engine starts unmuted; clear the startup progress list.
+        set({ componentLoading: {}, microphoneMuted: false });
         onServerStateChanged?.();
         return;
       case "EngineStopped":
         // Engine lifecycle changes invalidate REST caches (engine status,
         // models, voices, memory stats, ...) — pushed, not polled.
+        set({ microphoneMuted: false, microphoneAvailable: false });
         onServerStateChanged?.();
         return;
     }

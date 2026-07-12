@@ -182,16 +182,43 @@ cd web
 npm install
 npm run build        # outputs web/dist
 cd ..
-
-eva start            # start the server in the background
-# open http://127.0.0.1:8765/
-eva status           # process, API, and engine status
-eva logs             # tail the newest log file
-eva stop             # graceful shutdown
 ```
 
-`eva serve --open` runs the server in the foreground and opens the browser
-automatically. The optional desktop window:
+There are two ways to run the server — pick the one that matches what you
+are doing:
+
+### Development — foreground, stop with Ctrl+C
+
+Run the server attached to your terminal and watch its log stream live:
+
+```bash
+eva serve --open     # API + web UI in the foreground; opens the browser
+# ... work ...
+# Ctrl+C to stop — shutdown is bounded (≤ ~5 s even with the UI connected)
+#                  and clean: no traceback, no orphan process
+```
+
+For frontend hot-reload during UI work, run the API in one terminal
+(`eva serve`) and Vite in another (`cd web && npm run dev`, which proxies
+`/api` to the backend). Prefer `eva run` for a quick terminal-only voice
+loop with no server at all.
+
+### Background / production — start, stop, restart, status
+
+Run the server detached so it keeps running after you close the terminal
+(this is how the desktop app in M6 will manage it):
+
+```bash
+eva start            # spawn the server in the background (no console window)
+# open http://127.0.0.1:8765/
+eva status           # process, API, and engine state
+eva restart          # stop + start (e.g. after switching models)
+eva logs             # tail the newest log file
+eva stop             # graceful shutdown (asks the server to stop over the
+                     # API first; falls back to terminating only if it must)
+```
+
+The optional desktop window:
 
 ```bash
 pip install -e ".[desktop]"

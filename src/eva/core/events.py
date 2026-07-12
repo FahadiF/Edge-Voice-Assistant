@@ -137,6 +137,14 @@ class StateChanged(Event):
     state: Literal["idle", "listening", "thinking", "speaking"]
 
 
+class MicrophoneMuted(Event):
+    """The user muted/unmuted the microphone (M5.7). Muted = the assistant
+    stops acting on captured speech (typed chat still works); the audio
+    device stays open so echo cancellation and playback are unaffected."""
+
+    muted: bool
+
+
 # ── Model management (platform API) ──
 
 
@@ -189,6 +197,16 @@ class ErrorOccurred(Event):
     context: str = ""
 
 
+class _StreamClosed(Event):
+    """Internal wake-up pushed to every subscriber on `EventBus.close()` so
+    long-lived consumers (WebSocket streams) return promptly at shutdown
+    instead of being cancelled mid-`get()` (M5.7). Never serialized to a
+    client — consumers check identity against `STREAM_CLOSED` and stop."""
+
+
+STREAM_CLOSED: Event = _StreamClosed()
+
+
 class EventBus:
     """Fan-out pub/sub bound to one asyncio loop."""
 
@@ -196,10 +214,15 @@ class EventBus:
         self._subscribers: list[asyncio.Queue[Event]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
         self._history: deque[Event] = deque(maxlen=history_size)
+        self._closed = False
 
     def recent_events(self) -> list[Event]:
         """The most recent published events (diagnostics; newest last)."""
         return list(self._history)
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind the loop used by `publish_threadsafe` (call once at startup)."""
@@ -208,11 +231,30 @@ class EventBus:
     def subscribe(self) -> asyncio.Queue[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_SIZE)
         self._subscribers.append(queue)
+        # A subscriber that connects after close() (e.g. a request racing
+        # shutdown) is told immediately, so it never blocks forever.
+        if self._closed:
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(STREAM_CLOSED)
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue[Event]) -> None:
         with contextlib.suppress(ValueError):
             self._subscribers.remove(queue)
+
+    def close(self) -> None:
+        """Wake every subscriber with `STREAM_CLOSED` so streaming consumers
+        exit their `get()` loop promptly at shutdown (M5.7). Without this, an
+        open WebSocket task blocks in `queue.get()` until uvicorn's graceful
+        timeout cancels it — which logs "Cancel N running task(s)" and adds a
+        multi-second wait. Idempotent."""
+        self._closed = True
+        for queue in self._subscribers:
+            if queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()  # make room; the sentinel must land
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(STREAM_CLOSED)
 
     def publish(self, event: Event) -> None:
         """Publish from the event-loop thread. Never blocks."""

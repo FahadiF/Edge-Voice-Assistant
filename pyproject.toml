@@ -8,11 +8,12 @@ version = "0.5.0a1"
 description = "Fully offline edge voice assistant with streaming pipeline and voice barge-in"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Fahad Ibne Fahian" }]
 keywords = ["voice-assistant", "offline", "edge-ai", "speech", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3.12",
@@ -72,6 +73,11 @@ desktop = ["pywebview>=5"]
 [project.scripts]
 eva = "eva.cli:main"
 eva-desktop = "eva.desktop:main"
+
+[project.urls]
+Homepage = "https://github.com/FahadiF/Edge-Voice-Assistant"
+Repository = "https://github.com/FahadiF/Edge-Voice-Assistant"
+Issues = "https://github.com/FahadiF/Edge-Voice-Assistant/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

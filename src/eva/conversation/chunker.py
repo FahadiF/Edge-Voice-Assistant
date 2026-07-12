@@ -15,6 +15,13 @@ biggest lever on time-to-first-audio. Emission rules:
   on, so it is worth trading a touch of "naturalness" (occasionally speaking
   a short fragment on its own) for a materially earlier first sound. Every
   segment after the first uses `min_chars` as before.
+- The first segment additionally splits at the first CLAUSE break — a comma,
+  semicolon, or colon followed by whitespace (M5.6). Synthesis cost scales
+  with text length, so "Sure, let me check that." starts speaking after
+  "Sure," instead of after the whole sentence — the single biggest
+  time-to-first-audio lever left after streaming synthesis (ADR-018). Only
+  the first segment: later sentences are synthesized while earlier ones
+  play, so they gain nothing from splitting and keep natural prosody.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from __future__ import annotations
 import re
 
 _SENTENCE_END = re.compile(r"[.!?…。！？](?=\s|$)")  # noqa: RUF001 — CJK punctuation intended
+_CLAUSE_BREAK = re.compile(r"[,;:](?=\s)")  # decimal commas ("1,5") don't match
 _ABBREVIATIONS = frozenset(
     {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "approx"}
 )
@@ -78,6 +86,17 @@ class SentenceChunker:
             self._buffer = self._buffer[end:].lstrip()
             self._emitted_any = True
             return segment
+        # First segment only (M5.6): a clause break is good enough to start
+        # audio — the user is waiting in silence; see the module docstring.
+        if not self._emitted_any and self._first_chunk_min_chars is not None:
+            for match in _CLAUSE_BREAK.finditer(self._buffer):
+                end = match.end()
+                if end < min_chars:
+                    continue
+                segment = self._buffer[:end].strip()
+                self._buffer = self._buffer[end:].lstrip()
+                self._emitted_any = True
+                return segment
         if len(self._buffer) >= self._max_chars:
             return self._force_split()
         return None

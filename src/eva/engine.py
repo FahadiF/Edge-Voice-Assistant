@@ -73,11 +73,15 @@ class Assistant:
     def start_audio(self) -> None:
         """Open the microphone/speaker pipeline — unless the user revoked
         the microphone permission (ADR-025 regroup, M5.4), in which case the
-        assistant runs typed-chat-only: the web composer still works, TTS
-        still speaks, but no audio is captured."""
+        assistant runs typed-chat-only: the web composer still works and TTS
+        still speaks (playback-only stream, M5.6 — no input device is ever
+        opened), but no audio is captured. Before M5.6 mic-off skipped audio
+        entirely, so the playback queue never drained and every typed turn
+        wedged in the "speaking" state."""
         if not self.settings.permissions.devices.microphone:
-            self._audio_started = False
             logger.info("Microphone permission is off — audio capture disabled (typed chat only)")
+            self.audio.start_playback_only()
+            self._audio_started = True
             return
         self.audio.start()
         self._audio_started = True

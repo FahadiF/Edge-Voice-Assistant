@@ -56,6 +56,7 @@ from eva.core.events import (
     LlmSentence,
     LlmStarted,
     LlmToken,
+    MicrophoneMuted,
     PartialTranscript,
     SpeechFinished,
     SpeechStarted,
@@ -72,6 +73,7 @@ from eva.core.turn import TurnController
 from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.memory.base import MemoryStore
+from eva.memory.models import MemoryConversation
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 from eva.tts.base import TTSEngine
 
@@ -213,6 +215,7 @@ class Orchestrator:
         self._recovery_at: dict[str, float] = {}
         self._current_tokens_queue: asyncio.Queue[str | None] | None = None
         self._current_sentences_queue: asyncio.Queue[str | None] | None = None
+        self._microphone_muted = False
 
     @property
     def metrics(self) -> MetricsCollector:
@@ -292,6 +295,22 @@ class Orchestrator:
         self._conversation = self._memory.start_conversation(language=self._language_code)
         self._conversation_titled = False  # the new conversation gets its own title
 
+    def resume_conversation(self, conversation_id: str) -> MemoryConversation:
+        """Continue a stored conversation exactly where it ended (M5.6) —
+        the ChatGPT-style "open an old chat". Only the active-conversation
+        pointer moves: the next turn's context (recent turns, summary,
+        retrieved memories) follows automatically because `ContextBuilder`
+        keys everything off the active conversation id (ADR-021), and new
+        turns persist under the resumed id. The title is kept — a resumed
+        conversation is never re-titled. Raises `MemoryNotFoundError` for an
+        unknown id."""
+        conversation = self._memory.get_conversation(conversation_id)
+        self._conversation = conversation
+        # An untitled conversation (e.g. cleared before its first exchange
+        # completed) still gets one title attempt on its next exchange.
+        self._conversation_titled = bool(conversation.title)
+        return conversation
+
     def load_conversation_turns(self, turns: list[ConversationTurn]) -> None:
         """Import paired turns into the active conversation (platform API
         import)."""
@@ -322,10 +341,33 @@ class Orchestrator:
         await self._cancel_turn("manual")
         return True
 
+    @property
+    def microphone_muted(self) -> bool:
+        """Whether captured speech is currently ignored (M5.7)."""
+        return self._microphone_muted
+
+    def set_microphone_muted(self, muted: bool) -> bool:
+        """Mute/unmute the microphone. Muted drops captured-speech events at
+        the door — the assistant stops listening while typed chat and
+        playback keep working, and the audio device stays open (echo
+        cancellation is unaffected). Returns the resulting state; publishes
+        `MicrophoneMuted` so every client stays in sync. Thread-safe: only
+        touches a bool and the bus."""
+        if muted == self._microphone_muted:
+            return self._microphone_muted
+        self._microphone_muted = muted
+        self._bus.publish(MicrophoneMuted(muted=muted))
+        logger.info("Microphone %s", "muted" if muted else "unmuted")
+        return self._microphone_muted
+
     # ── input bridge (called from the capture thread) ──
 
     def feed_audio_event(self, event: SegmenterEvent) -> None:
         if self._loop is None or self._loop.is_closed():
+            return
+        # Muted: ignore everything the microphone produces (M5.7). Typed
+        # input (submit_text) bypasses this path, so chat still works.
+        if self._microphone_muted:
             return
         with contextlib.suppress(RuntimeError):
             self._loop.call_soon_threadsafe(self._events.put_nowait, event)
@@ -644,7 +686,10 @@ class Orchestrator:
                 synth_start = time.perf_counter()
                 try:
                     sync_gen = self._tts.synthesize_stream(
-                        spoken_text, voice=self._voice, speed=self._settings.tts.speed
+                        spoken_text,
+                        voice=self._voice,
+                        speed=self._settings.tts.speed,
+                        language=self._language_code,
                     )
                     async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
                         async for chunk in chunks:

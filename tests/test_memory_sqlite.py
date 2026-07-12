@@ -473,3 +473,82 @@ def test_sqlite_row_factory_used(db_path: Path) -> None:
     conn = db.connect(db_path)
     assert conn.row_factory is sqlite3.Row
     conn.close()
+
+
+class TestSharedConnectionConcurrency:
+    """M5.6: one connection (check_same_thread=False) is shared between the
+    orchestrator's worker threads and API request handlers. Both stores hold
+    a shared re-entrant lock for every public method, making each method one
+    atomic unit — without it, interleaved execute()/commit() from two
+    threads merge transactions or raise 'database is locked'."""
+
+    def test_stores_share_one_lock_via_create_stores(self, tmp_path: Path) -> None:
+        from eva.config.paths import get_app_paths
+        from eva.config.settings import Settings
+        from eva.memory.registry import create_stores
+
+        paths = get_app_paths(home=tmp_path)
+        paths.ensure_exists()
+        memory, profiles = create_stores(Settings(), paths)
+        assert memory._lock is profiles._lock  # type: ignore[attr-defined]
+        memory.close()
+
+    def test_concurrent_writers_and_readers(self, db_path: Path) -> None:
+        import threading
+
+        conn = db.connect(db_path)
+        lock = threading.RLock()
+        store = SQLiteMemoryStore(conn, lock)
+        profiles = SQLiteUserProfileStore(conn, lock)
+        conv = store.start_conversation()
+        errors: list[Exception] = []
+
+        def writer() -> None:
+            try:
+                for i in range(50):
+                    store.add_turn(conv.id, "user", f"writer turn {i}")
+            except Exception as exc:
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                for _ in range(50):
+                    store.search_text("writer")
+                    store.stats()
+                    profiles.list()
+            except Exception as exc:
+                errors.append(exc)
+
+        def manager() -> None:
+            try:
+                for i in range(25):
+                    c = store.start_conversation(title=f"side {i}")
+                    store.add_turn(c.id, "assistant", "side reply")
+                    store.delete_conversation(c.id)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=writer),
+            threading.Thread(target=writer),
+            threading.Thread(target=reader),
+            threading.Thread(target=manager),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        assert not errors, errors
+        # Both writers' turns all landed; the manager's side conversations
+        # were fully cleaned up.
+        assert store.stats().turn_count == 100
+        assert len(store.all_conversations()) == 1
+        store.close()
+
+    def test_get_conversation_roundtrip(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation(title="resumable")
+        fetched = store.get_conversation(conv.id)
+        assert fetched.id == conv.id
+        assert fetched.title == "resumable"
+        with pytest.raises(MemoryNotFoundError):
+            store.get_conversation("missing-id")

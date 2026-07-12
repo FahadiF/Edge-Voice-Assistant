@@ -40,6 +40,7 @@ def _stub_assistant() -> SimpleNamespace:
         last_barge_in_latency_ms=85,
         last_retrieval_ms=12,
         last_retrieval_score_top1=0.83,
+        microphone_muted=False,
         metrics=metrics,
     )
     audio = SimpleNamespace(

@@ -35,16 +35,28 @@ class TTSEngine(ABC):
         """Release model resources (hot-swap support)."""
 
     @abstractmethod
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
-        """Render one text segment to 16 kHz mono int16 PCM."""
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
+        """Render one text segment to 16 kHz mono int16 PCM.
 
-    def synthesize_stream(self, text: str, *, voice: str, speed: float = 1.0) -> Iterator[Frame]:
+        `language` (M5.6) is the conversation's BCP-47 primary subtag ("en",
+        "es", …) or None for the engine default. Engines that phonemize
+        text-to-sound MUST honor it where they can: Kokoro fed Spanish text
+        under English phonemization produces recognizably wrong pronunciation
+        — the pre-M5.6 behavior. Engines without language-aware frontends
+        ignore it.
+        """
+
+    def synthesize_stream(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Iterator[Frame]:
         """Yield PCM chunks as they become available.
 
         Default: one chunk via `synthesize()`. Override for engines that can
         render incrementally.
         """
-        yield self.synthesize(text, voice=voice, speed=speed)
+        yield self.synthesize(text, voice=voice, speed=speed, language=language)
 
     @abstractmethod
     def voices(self) -> list[str]:

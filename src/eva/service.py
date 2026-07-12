@@ -53,9 +53,15 @@ def read_server_pid(paths: AppPaths) -> int | None:
     return pid
 
 
+def display_host(host: str) -> str:
+    """A connectable host for URLs/messages: the wildcard bind ``0.0.0.0``
+    means "listen on every interface", which is not an address you can open
+    — show ``127.0.0.1`` instead. Any concrete host passes through."""
+    return "127.0.0.1" if host == "0.0.0.0" else host
+
+
 def health_url(host: str, port: int) -> str:
-    display_host = "127.0.0.1" if host == "0.0.0.0" else host
-    return f"http://{display_host}:{port}/api/v1/health"
+    return f"http://{display_host(host)}:{port}/api/v1/health"
 
 
 def probe_health(url: str, timeout_s: float = 2.0) -> bool:
@@ -102,12 +108,44 @@ def wait_until_healthy(url: str, timeout_s: float = _HEALTH_TIMEOUT_S) -> bool:
     return False
 
 
-def terminate_server(paths: AppPaths, pid: int) -> bool:
-    """Graceful stop: terminate → wait → kill. Returns True when the
-    process is gone (however it went)."""
+def request_graceful_shutdown(host: str, port: int, timeout_s: float = 5.0) -> bool:
+    """Ask a running server to stop itself via POST /system/shutdown (M5.6).
+
+    This is the clean path: the engine stops (audio devices released, the
+    memory database flushed), then uvicorn exits. Returns True when the
+    server accepted the request. On Windows, `Process.terminate()` is
+    TerminateProcess — a hard kill with zero cleanup — so this API call is
+    the only genuinely graceful stop for a detached background server.
+    """
+    url = f"http://{display_host(host)}:{port}/api/v1/system/shutdown"
+    request = urllib.request.Request(url, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return bool(response.status == 200)
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+        return False
+
+
+def wait_for_exit(pid: int, timeout_s: float) -> bool:
+    """True once `pid` no longer exists (polls; tolerates PID errors)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not psutil.pid_exists(pid):
+            return True
+        time.sleep(0.2)
+    return not psutil.pid_exists(pid)
+
+
+def terminate_server(paths: AppPaths, pid: int, *, host: str = "", port: int = 0) -> bool:
+    """Stop the server: graceful API shutdown first (when host/port are
+    known), then terminate → wait → kill. Returns True when the process is
+    gone (however it went)."""
     try:
         process = psutil.Process(pid)
     except psutil.NoSuchProcess:
+        pid_file(paths).unlink(missing_ok=True)
+        return True
+    if port and request_graceful_shutdown(host, port) and wait_for_exit(pid, _STOP_TIMEOUT_S):
         pid_file(paths).unlink(missing_ok=True)
         return True
     process.terminate()

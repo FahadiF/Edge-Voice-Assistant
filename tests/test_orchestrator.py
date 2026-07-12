@@ -90,7 +90,9 @@ class FakeTTS(TTSEngine):
 
     def unload(self) -> None: ...
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
         self.synthesized.append(text)
         return np.ones(1600, dtype=np.int16)
 
@@ -389,6 +391,69 @@ class TestNormalTurn:
             assert len(orch.conversation_turns) == 2
 
         asyncio.run(scenario())
+
+
+class TestMicrophoneMute:
+    """M5.7: muting drops captured-speech events at the door; typed input
+    still works; the state is broadcast so clients stay in sync."""
+
+    def test_muted_microphone_ignores_captured_speech(self) -> None:
+        async def scenario() -> None:
+            orch, bus, _audio, _tts = make_orchestrator()
+
+            async def script() -> None:
+                assert orch.set_microphone_muted(True) is True
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.2)
+
+            events = await drive(orch, bus, script)
+            # A muted mic produces no turn at all.
+            assert "TurnStarted" not in names(events)
+            assert "FinalTranscript" not in names(events)
+            # But the mute change was announced for clients.
+            assert "MicrophoneMuted" in names(events)
+
+        asyncio.run(scenario())
+
+    def test_typed_input_works_while_muted(self) -> None:
+        async def scenario() -> None:
+            orch, bus, _audio, _tts = make_orchestrator()
+
+            async def script() -> None:
+                orch.set_microphone_muted(True)
+                assert orch.submit_text("hello despite mute") is True
+                await asyncio.sleep(0.3)
+
+            events = await drive(orch, bus, script)
+            assert "TurnFinished" in names(events)
+            assert len(orch.conversation_turns) == 1
+
+        asyncio.run(scenario())
+
+    def test_unmute_restores_listening(self) -> None:
+        async def scenario() -> None:
+            orch, bus, _audio, _tts = make_orchestrator()
+
+            async def script() -> None:
+                orch.set_microphone_muted(True)
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.1)
+                orch.set_microphone_muted(False)
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.3)
+
+            events = await drive(orch, bus, script)
+            # Exactly one turn — the one fed after unmuting.
+            assert names(events).count("TurnFinished") == 1
+
+        asyncio.run(scenario())
+
+    def test_set_same_state_is_noop_no_event(self) -> None:
+        orch, bus, _audio, _tts = make_orchestrator()
+        queue = bus.subscribe()
+        assert orch.set_microphone_muted(False) is False  # already unmuted
+        assert queue.empty()  # no redundant MicrophoneMuted published
+        assert orch.microphone_muted is False
 
 
 class TestCancellation:

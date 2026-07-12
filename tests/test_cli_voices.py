@@ -28,7 +28,9 @@ class _FakeTTS(TTSEngine):
     def unload(self) -> None:
         self.unloaded = True
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
         return np.zeros(1600, dtype=np.int16)
 
     def voices(self) -> list[str]:

@@ -7,6 +7,7 @@ atomic rename, so an interrupted download never leaves a model half-"installed".
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import urllib.error
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from eva.config.paths import AppPaths
 from eva.core.errors import ModelError, ModelNotInstalledError
-from eva.models.catalog import ModelInfo, model_catalog, register_builtin_models
+from eva.models.catalog import ModelFile, ModelInfo, model_catalog, register_builtin_models
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class ModelManager:
             if target.exists():
                 logger.info("%s already present — skipping", file.filename)
                 continue
-            self._download_file(file.url, target, file.filename, progress)
+            self._download_file(file, target, progress)
         logger.info("Model '%s' installed", model_id)
 
     def remove(self, model_id: str) -> None:
@@ -156,29 +157,41 @@ class ModelManager:
             logger.info("Model '%s' removed", model_id)
 
     def _download_file(
-        self, url: str, target: Path, filename: str, progress: ProgressCallback | None
+        self, file: ModelFile, target: Path, progress: ProgressCallback | None
     ) -> None:
-        """Download with resume (HTTP Range) and size verification.
+        """Download with resume (HTTP Range) and integrity verification.
 
         A dropped connection surfaces as a short read, not an exception, so the
         received byte count MUST be checked against Content-Length — a silently
         truncated model file loads as "corrupted" much later and is far harder
         to diagnose. Partial data stays in the `.part` file and is resumed on
         retry (here and on any later download attempt).
+
+        Verification ladder (M5.6): the catalog's `size_bytes` (exact upstream
+        size) is checked in addition to Content-Length — it also covers the
+        case where the server sends no Content-Length at all, which the old
+        byte-count check silently waved through. When the catalog carries a
+        `sha256`, the completed file is hashed and MUST match; a mismatched
+        file is deleted (never resumed — the bytes themselves are wrong).
+        A file with neither hash nor known size is accepted with a logged
+        warning, never silently.
         """
+        filename = file.filename
         part = target.with_suffix(target.suffix + ".part")
-        logger.info("Downloading %s", url)
+        logger.info("Downloading %s", file.url)
         total = 0
         try:
             for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
                 done = part.stat().st_size if part.exists() else 0
                 headers = {"Range": f"bytes={done}-"} if done else {}
-                request = urllib.request.Request(url, headers=headers)
+                request = urllib.request.Request(file.url, headers=headers)
                 with urllib.request.urlopen(request) as response:
                     resumed = response.status == 206
                     if done and not resumed:
                         done = 0  # server ignored the range request; restart
                     total = done + int(response.headers.get("Content-Length", 0))
+                    if not total and file.size_bytes:
+                        total = file.size_bytes  # no Content-Length; catalog knows the size
                     with part.open("ab" if done else "wb") as out:
                         while True:
                             chunk = response.read(_CHUNK_SIZE)
@@ -202,9 +215,43 @@ class ModelManager:
             raise ModelError(f"Download failed for {filename}: {exc}") from exc
 
         received = part.stat().st_size if part.exists() else 0
-        if total and received != total:
+        expected = file.size_bytes or total
+        if expected and received < expected:
             raise ModelError(
-                f"Download of {filename} is incomplete ({received} of {total} bytes); "
+                f"Download of {filename} is incomplete ({received} of {expected} bytes); "
                 "re-run the download to resume"
             )
+        if file.size_bytes and received != file.size_bytes:
+            # More bytes than the published file has: not a resumable gap but
+            # wrong content (changed upstream file, proxy error page, ...).
+            part.unlink(missing_ok=True)
+            raise ModelError(
+                f"Download of {filename} does not match its published size "
+                f"({received} bytes received, {file.size_bytes} expected) — "
+                "the partial file was discarded; re-run the download"
+            )
+        if file.sha256:
+            digest = self._sha256_of(part)
+            if digest != file.sha256:
+                part.unlink(missing_ok=True)
+                raise ModelError(
+                    f"Checksum mismatch for {filename}: the downloaded file does not "
+                    "match the published SHA-256 — the file was discarded. Re-run the "
+                    "download; if this repeats, the upstream file may have changed."
+                )
+            logger.info("Checksum verified for %s", filename)
+        elif not file.size_bytes and not total:
+            logger.warning(
+                "%s could not be verified (no Content-Length, no published size or "
+                "checksum in the catalog) — accepting as-is",
+                filename,
+            )
         part.replace(target)
+
+    @staticmethod
+    def _sha256_of(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while chunk := handle.read(_CHUNK_SIZE):
+                digest.update(chunk)
+        return digest.hexdigest()

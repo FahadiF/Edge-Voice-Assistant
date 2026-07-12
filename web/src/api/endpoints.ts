@@ -58,8 +58,15 @@ export const engine = {
 export const conversation = {
   history: () => api.get<ConversationTurn[]>("/conversation/history"),
   say: (text: string) => api.post<{ status: string }>("/conversation/say", { text }),
+  setMicrophone: (muted: boolean) =>
+    api.post<{ muted: boolean }>("/conversation/microphone", { muted }),
   interrupt: () => api.post<{ interrupted: boolean }>("/conversation/interrupt"),
   clear: () => api.post<{ status: string }>("/conversation/clear"),
+  resume: (conversationId: string) =>
+    api.post<{ status: string; conversation_id: string; title: string; turns: number }>(
+      "/conversation/resume",
+      { conversation_id: conversationId },
+    ),
   exportJson: () => api.get<ConversationExport>("/conversation/export"),
   importJson: (turns: ConversationTurn[]) =>
     api.post<{ status: string; turns: string }>("/conversation/import", { turns }),

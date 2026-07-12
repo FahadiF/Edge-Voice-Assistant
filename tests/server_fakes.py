@@ -71,7 +71,9 @@ class FakeTTS(TTSEngine):
     def load(self) -> None: ...
     def unload(self) -> None: ...
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
         return np.ones(1600, dtype=np.int16)
 
     def voices(self) -> list[str]:
@@ -121,10 +123,14 @@ class FakeAudioSystem:
 
     # Lifecycle (used by Assistant.start_audio/stop)
     def start(self) -> None:
-        pass
+        self.started_mode = "duplex"
+
+    def start_playback_only(self) -> None:
+        # M5.6: mic permission off — playback still runs (typed chat speaks).
+        self.started_mode = "playback-only"
 
     def stop(self) -> None:
-        pass
+        self.started_mode = None
 
 
 class FakeMemoryStore(MemoryStore):
@@ -147,6 +153,11 @@ class FakeMemoryStore(MemoryStore):
         )
         self._conversations[conversation_id] = conv
         return conv
+
+    def get_conversation(self, conversation_id: str) -> MemoryConversation:
+        if conversation_id not in self._conversations:
+            raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
+        return self._conversations[conversation_id]
 
     def all_conversations(self, *, include_archived: bool = False) -> list[MemoryConversation]:
         return [c for c in self._conversations.values() if include_archived or not c.archived]

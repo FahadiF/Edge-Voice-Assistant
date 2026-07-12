@@ -12,7 +12,7 @@ class FrameChunker:
         if chunk_samples <= 0:
             raise ValueError("chunk_samples must be positive")
         self._chunk_samples = chunk_samples
-        self._buffer = np.empty(0, dtype=np.int16)
+        self._buffer: Frame = np.empty(0, dtype=np.int16)
 
     def push(self, frame: Frame) -> list[Frame]:
         """Add one frame; return every complete chunk now available."""

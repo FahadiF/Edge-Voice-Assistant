@@ -75,6 +75,8 @@ class RuntimeSnapshot(BaseModel):
     # Pipeline
     state: str  # idle / listening / thinking / speaking
     epoch: int
+    microphone_available: bool  # mic permission on AND capturing (M5.7)
+    microphone_muted: bool  # user muted capture; typed chat still works (M5.7)
     playback_active: bool
     input_level_dbfs: float
     pending_audio_events: int
@@ -123,6 +125,8 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
         devices={"llm": "unloaded", "asr": "unloaded", "tts": "unloaded", "vad": "unloaded"},
         state="idle",
         epoch=0,
+        microphone_available=False,  # nothing capturing until the engine starts
+        microphone_muted=False,
         playback_active=False,
         input_level_dbfs=-120.0,
         pending_audio_events=0,
@@ -175,6 +179,8 @@ class DiagnosticsProvider:
             },
             state=a.orchestrator.state,
             epoch=a.orchestrator.current_epoch,
+            microphone_available=a.settings.permissions.devices.microphone,
+            microphone_muted=a.orchestrator.microphone_muted,
             playback_active=a.audio.is_speaking,
             input_level_dbfs=a.audio.pipeline.level_dbfs,
             pending_audio_events=a.orchestrator.pending_audio_events,

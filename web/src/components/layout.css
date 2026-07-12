@@ -102,6 +102,14 @@
   gap: 16px;
 }
 
+/* Grid items default to min-width:auto, so any unwrappable content (ids,
+   long file names, button rows) silently forces an item wider than its
+   track and the content spills out of its card (M5.6 layout fix). */
+.grid-2 > *,
+.grid-3 > * {
+  min-width: 0;
+}
+
 @media (max-width: 760px) {
   .layout {
     grid-template-columns: 1fr;

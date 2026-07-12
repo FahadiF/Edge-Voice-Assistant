@@ -37,6 +37,7 @@ matching update.
 |---|---|---|
 | GET | `/api/v1/health` | Liveness + version |
 | GET | `/api/v1/system/hardware` | Detected CPU/GPU/RAM/VRAM + recommended tier |
+| POST | `/api/v1/system/shutdown` | Gracefully stop the whole server process (M5.6) — engine stops, then uvicorn exits; how `eva stop` works |
 | GET | `/api/v1/settings` | Current settings document |
 | GET | `/api/v1/settings/schema` | JSON Schema (drives UI form generation) |
 | PUT | `/api/v1/settings` | Replace the entire settings document |
@@ -59,8 +60,10 @@ matching update.
 | GET | `/api/v1/conversation/history` | Turns in the active session (needs a running engine) |
 | GET | `/api/v1/conversation/current` | Current turn/pipeline state |
 | POST | `/api/v1/conversation/say` | Start a turn from typed text (composer, M5.3) — same pipeline minus ASR |
+| POST | `/api/v1/conversation/microphone` | Mute/unmute the microphone (M5.7); `{muted: bool}`. Broadcasts `MicrophoneMuted` |
 | POST | `/api/v1/conversation/interrupt` \| `/cancel` | Stop the current turn now (aliases) |
-| POST | `/api/v1/conversation/clear` | Clear history |
+| POST | `/api/v1/conversation/clear` | Clear history (starts a fresh conversation; old data kept) |
+| POST | `/api/v1/conversation/resume` | Continue a stored conversation where it ended (M5.6): id, context, summary, and title preserved |
 | GET | `/api/v1/conversation/export` | Export history as JSON |
 | POST | `/api/v1/conversation/import` | Replace history from a JSON payload |
 | POST | `/api/v1/memory/search` | Keyword search across all conversations (M4) |
@@ -105,7 +108,14 @@ rather than going through HTTP — see
 
 ## WebSocket event stream
 
-Connect to `ws://127.0.0.1:8765/api/v1/ws`. On connect you immediately receive:
+Connect to `ws://127.0.0.1:8765/api/v1/ws`. Browser connections must come
+from a localhost origin: CORS middleware does not cover WebSocket
+handshakes, so the endpoint checks the `Origin` header itself and rejects
+foreign origins with close code 1008 (M5.6) — otherwise any website the
+user visits could read live transcripts. Requests without an `Origin`
+header (CLI tools, the desktop shell) are always accepted.
+
+On connect you immediately receive:
 
 ```json
 {"type": "snapshot", "data": { /* RuntimeSnapshot */ }}
@@ -119,6 +129,7 @@ After that, every engine event is forwarded as it happens:
 {"type": "LlmSentence", "data": {"epoch": 3, "text": "It looks sunny today."}}
 {"type": "TtsAudioReady", "data": {"epoch": 3, "ttfa_ms": 1180}}
 {"type": "StateChanged", "data": {"state": "speaking"}}
+{"type": "MicrophoneMuted", "data": {"muted": true}}
 {"type": "TurnCancelled", "data": {"epoch": 3, "reason": "barge-in"}}
 {"type": "BargeInLatencyMeasured", "data": {"epoch": 3, "detected_to_silent_ms": 62}}
 {"type": "ModelDownloadProgress", "data": {"model_id": "...", "bytes_done": ..., "bytes_total": ...}}

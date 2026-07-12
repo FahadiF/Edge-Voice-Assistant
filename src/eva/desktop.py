@@ -21,6 +21,7 @@ import uvicorn
 
 from eva.config import get_app_paths, load_settings
 from eva.server import create_app
+from eva.service import display_host
 
 _HEALTH_TIMEOUT_S = 30.0
 _HEALTH_POLL_INTERVAL_S = 0.1
@@ -63,7 +64,7 @@ def main() -> int:
     paths = get_app_paths()
     paths.ensure_exists()
     settings = load_settings(paths.settings_file)
-    host = settings.server.host if settings.server.host != "0.0.0.0" else "127.0.0.1"
+    host = display_host(settings.server.host)
     port = find_free_port(host)
 
     server_thread = threading.Thread(target=_run_server, args=(host, port), daemon=True)

@@ -29,7 +29,9 @@ class _MinimalTTS(TTSEngine):
 
     def unload(self) -> None: ...
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
         self.calls.append(text)
         return np.full(800, 7, dtype=np.int16)
 
@@ -54,7 +56,10 @@ class _FakeKokoroStreaming:
         self._fail = fail
         self.closed_streams = 0
 
-    async def create_stream(self, text: str, voice: str, speed: float = 1.0) -> Any:
+    async def create_stream(
+        self, text: str, voice: str, speed: float = 1.0, lang: str = "en-us"
+    ) -> Any:
+        self.lang = lang  # recorded so tests can assert language wiring (M5.6)
         # Real kokoro_onnx.Kokoro.create_stream is `async def` + `yield` in the
         # same body, making it an async-generator function: calling it returns
         # the generator directly (no coroutine to await first). Match that shape.
@@ -197,3 +202,27 @@ class TestDriveStreamOwnership:
             assert closed["count"] == 1  # close awaited (joined) before return
 
         asyncio.run(scenario())
+
+
+def test_kokoro_stream_passes_language_to_engine() -> None:
+    """M5.6: the conversation language must reach Kokoro's phonemizer —
+    Spanish text phonemized as US English is why non-English replies
+    sounded wrong."""
+    fake = _FakeKokoroStreaming([np.ones(2400, dtype=np.int16)])
+    engine = _make_kokoro(fake)
+    list(engine.synthesize_stream("Hola.", voice="ef_dora", language="es"))
+    assert fake.lang == "es"
+    list(engine.synthesize_stream("Hi.", voice="af_heart"))
+    assert fake.lang == "en-us"  # default stays English
+
+
+def test_espeak_lang_mapping() -> None:
+    from eva.tts.kokoro import _espeak_lang
+
+    assert _espeak_lang(None) == "en-us"
+    assert _espeak_lang("en") == "en-us"
+    assert _espeak_lang("es") == "es"
+    assert _espeak_lang("fi") == "fi"
+    assert _espeak_lang("sv") == "sv"
+    assert _espeak_lang("fr-CA") == "fr-fr"  # primary subtag wins
+    assert _espeak_lang("unknown") == "en-us"  # graceful fallback

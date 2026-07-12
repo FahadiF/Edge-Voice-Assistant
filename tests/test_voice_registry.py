@@ -20,7 +20,9 @@ class _FakeTTS(TTSEngine):
     def load(self) -> None: ...
     def unload(self) -> None: ...
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0) -> Frame:
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
         import numpy as np
 
         self.synthesize_calls.append((text, voice))

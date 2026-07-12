@@ -17,6 +17,7 @@ duplicate their logic.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -853,8 +854,11 @@ def _cmd_stop(_args: argparse.Namespace) -> int:
     if pid is None:
         print("Not running.")
         return 0
+    settings = load_settings(paths.settings_file)
     print(f"Stopping (PID {pid})...")
-    if service.terminate_server(paths, pid):
+    # Graceful first (engine stops, audio released, database flushed via
+    # POST /system/shutdown — M5.6), hard terminate only as fallback.
+    if service.terminate_server(paths, pid, host=settings.server.host, port=settings.server.port):
         print("Stopped.")
         return 0
     print("error: process did not exit — kill it manually", file=sys.stderr)
@@ -918,12 +922,27 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     separate, lighter-weight client of the same underlying services — `eva
     serve` is for the desktop app, a web UI, or any external integration."""
     import webbrowser
+    from collections.abc import Callable
 
     import uvicorn
 
+    from eva import service
     from eva.conversation.personas import resolve_persona
     from eva.server import create_app
     from eva.server.static import ui_dist_dir
+
+    class _GracefulServer(uvicorn.Server):
+        """uvicorn.Server that runs a callback at the very start of shutdown
+        (M5.7) — before the wait-for-connections/tasks pass — so open
+        WebSocket handlers are woken and return cleanly."""
+
+        def __init__(self, config: uvicorn.Config, *, on_shutdown: Callable[[], None]) -> None:
+            super().__init__(config)
+            self._on_shutdown = on_shutdown
+
+        async def shutdown(self, sockets: object = None) -> None:
+            self._on_shutdown()
+            await super().shutdown(sockets)  # type: ignore[arg-type]
 
     paths = get_app_paths()
     paths.ensure_exists()
@@ -931,7 +950,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or settings.server.host
     port = args.port or settings.server.port
     persona = resolve_persona(settings)
-    display_host = "127.0.0.1" if host == "0.0.0.0" else host
+    display_host = service.display_host(host)
     print(f"Edge Voice Assistant API on http://{host}:{port}")
     print(f"  Docs:      http://{host}:{port}/docs")
     print(f"  WebSocket: ws://{host}:{port}/api/v1/ws")
@@ -944,7 +963,38 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             webbrowser.open(f"http://{display_host}:{port}/")
     elif args.open:
         print("  --open requested, but no built web UI was found — skipping.")
-    uvicorn.run(create_app(paths), host=host, port=port, log_level="info")
+    print("  Stop with Ctrl+C (or `eva stop` from another terminal).")
+
+    # Programmatic server instead of uvicorn.run() (M5.6/M5.7) for three
+    # reasons:
+    # 1. `timeout_graceful_shutdown` — without it uvicorn waits FOREVER for
+    #    open connections on Ctrl+C, and the web UI keeps a WebSocket open
+    #    for its whole lifetime, so Ctrl+C appeared to hang until the
+    #    browser tab was closed. Five seconds bounds the worst case.
+    # 2. The shutdown hook: POST /system/shutdown sets `should_exit`, which
+    #    is how `eva stop` ends a background server gracefully (Windows has
+    #    no graceful signal for detached processes).
+    # 3. `_GracefulServer` closes the event bus at the very START of
+    #    shutdown (M5.7) — before uvicorn's wait-for-connections/tasks pass —
+    #    so open WebSocket handlers wake on the STREAM_CLOSED sentinel and
+    #    return instead of blocking in queue.get(). That is what removes the
+    #    "Cancel N running task(s), timeout graceful shutdown exceeded"
+    #    message and the multi-second wait. (The lifespan also closes the
+    #    bus, as a fallback for non-uvicorn hosts such as the test client.)
+    app = create_app(paths)
+    config = uvicorn.Config(
+        app, host=host, port=port, log_level="info", timeout_graceful_shutdown=5
+    )
+    server = _GracefulServer(config, on_shutdown=lambda: app.state.eva.bus.close())
+
+    def request_exit() -> None:
+        server.should_exit = True
+
+    app.state.eva.shutdown_callback = request_exit
+    # suppress: a second Ctrl+C during teardown must still end cleanly.
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()  # returns after Ctrl+C / shutdown request completes
+    print("Shutdown complete.")
     return 0
 
 

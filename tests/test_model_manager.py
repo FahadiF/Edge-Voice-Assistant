@@ -1,18 +1,49 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
 from eva.config.paths import AppPaths
 from eva.core.errors import ModelError, ModelNotInstalledError
-from eva.models.catalog import BUILTIN_CATALOG
+from eva.models.catalog import BUILTIN_CATALOG, ModelFile, ModelInfo, model_catalog
 from eva.models.manager import ModelManager
 
 
 @pytest.fixture
 def manager(app_paths: AppPaths) -> ModelManager:
     return ModelManager(app_paths)
+
+
+def _register_test_model(suffix: str, *, payload: bytes, verified: bool) -> str:
+    """Register (once) a synthetic single-file catalog entry for download
+    tests. `verified=True` stamps the payload's real size and SHA-256 into
+    the catalog entry, exercising the M5.6 integrity path; `verified=False`
+    leaves both unset (the pre-M5.6 trust model)."""
+    model_id = f"test-download-{suffix}"
+    if model_id not in model_catalog:
+        model_catalog.register(
+            model_id,
+            ModelInfo(
+                id=model_id,
+                kind="tts",
+                display_name=f"Test model ({suffix})",
+                engine="test",
+                license="none",
+                files=(
+                    ModelFile(
+                        key="model",
+                        url=f"https://example.invalid/{model_id}.bin",
+                        filename=f"{model_id}.bin",
+                        size_mb=1,
+                        size_bytes=len(payload) if verified else 0,
+                        sha256=hashlib.sha256(payload).hexdigest() if verified else "",
+                    ),
+                ),
+            ),
+        )
+    return model_id
 
 
 class _FakeResponse:
@@ -78,7 +109,7 @@ class TestManager:
     def test_download_and_resolve(
         self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def fake_download(url: str, target: Path, filename: str, progress: object) -> None:
+        def fake_download(file: object, target: Path, progress: object) -> None:
             target.write_bytes(b"weights")
 
         monkeypatch.setattr(manager, "_download_file", fake_download)
@@ -92,7 +123,7 @@ class TestManager:
         monkeypatch.setattr(
             manager,
             "_download_file",
-            lambda url, target, filename, progress: target.write_bytes(b"x"),
+            lambda file, target, progress: target.write_bytes(b"x"),
         )
         manager.download("kokoro-82m-v1.0")
         manager.remove("kokoro-82m-v1.0")
@@ -135,13 +166,14 @@ class TestManager:
     ) -> None:
         import urllib.request
 
-        info = manager.info("kokoro-82m-v1.0")
-        target_dir = manager.model_dir("kokoro-82m-v1.0")
-        target_dir.mkdir(parents=True, exist_ok=True)
         payload = b"0123456789"
+        model_id = _register_test_model("resume", payload=payload, verified=False)
+        info = manager.info(model_id)
+        target_dir = manager.model_dir(model_id)
+        target_dir.mkdir(parents=True, exist_ok=True)
         seen_ranges: list[str | None] = []
 
-        # Pre-seed a partial file for the first catalog file only.
+        # Pre-seed a partial file.
         first = info.files[0]
         (target_dir / (first.filename + ".part")).write_bytes(payload[:4])
 
@@ -156,10 +188,92 @@ class TestManager:
             return _FakeResponse(payload, claimed_total=len(payload))
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-        manager.download("kokoro-82m-v1.0")
-        assert manager.is_installed("kokoro-82m-v1.0")
+        manager.download(model_id)
+        assert manager.is_installed(model_id)
         assert (target_dir / first.filename).read_bytes() == payload
         assert "bytes=4-" in seen_ranges
+
+    def test_checksum_verified_download_installs(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import urllib.request
+
+        payload = b"verified model weights"
+        model_id = _register_test_model("sha-ok", payload=payload, verified=True)
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda request: _FakeResponse(payload, claimed_total=len(payload)),
+        )
+        manager.download(model_id)
+        assert manager.is_installed(model_id)
+
+    def test_checksum_mismatch_discards_file(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Wrong bytes of the right length must be rejected AND deleted —
+        a poisoned .part must never be 'resumed' into an install."""
+        import urllib.request
+
+        good = b"the authentic payload!"
+        model_id = _register_test_model("sha-bad", payload=good, verified=True)
+        tampered = b"x" * len(good)  # right size, wrong content
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda request: _FakeResponse(tampered, claimed_total=len(tampered)),
+        )
+        with pytest.raises(ModelError, match="Checksum mismatch"):
+            manager.download(model_id)
+        assert not manager.is_installed(model_id)
+        assert not list(manager.model_dir(model_id).glob("*.part"))
+
+    def test_oversized_download_discards_file(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """More bytes than the published size is wrong content (proxy error
+        page, changed upstream file) — discard, don't 'resume'."""
+        import urllib.request
+
+        good = b"tiny"
+        model_id = _register_test_model("oversize", payload=good, verified=True)
+        bloated = b"<html>proxy error page pretending to be a model</html>"
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda request: _FakeResponse(bloated, claimed_total=len(bloated)),
+        )
+        with pytest.raises(ModelError, match="published size"):
+            manager.download(model_id)
+        assert not manager.is_installed(model_id)
+        assert not list(manager.model_dir(model_id).glob("*.part"))
+
+    def test_missing_content_length_with_known_size_detects_truncation(
+        self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pre-M5.6 hole: no Content-Length used to mean 'no check at
+        all' — with the catalog's size_bytes, truncation is still caught."""
+        import urllib.request
+
+        payload = b"complete payload bytes"
+        model_id = _register_test_model("no-cl", payload=payload, verified=True)
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda request: _FakeResponse(payload[: len(payload) // 2], claimed_total=0),
+        )
+        with pytest.raises(ModelError, match="incomplete"):
+            manager.download(model_id)
+        assert not manager.is_installed(model_id)
+
+    def test_builtin_catalog_carries_integrity_metadata(self) -> None:
+        """Every manager-downloaded builtin file must publish its exact size;
+        hashes are required wherever the publisher exposes them (HF LFS)."""
+        for model in BUILTIN_CATALOG:
+            for file in model.files:
+                assert file.size_bytes > 0, f"{model.id}/{file.filename}: no size_bytes"
+                if "huggingface.co" in file.url:
+                    assert len(file.sha256) == 64, f"{model.id}/{file.filename}: no sha256"
 
     def test_describe_full_model_card(
         self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
@@ -211,7 +325,7 @@ class TestManager:
         monkeypatch.setattr(
             manager,
             "_download_file",
-            lambda url, target, filename, progress: target.write_bytes(b"0" * 2_097_152),
+            lambda file, target, progress: target.write_bytes(b"0" * 2_097_152),
         )
         manager.download("kokoro-82m-v1.0")
         assert manager.disk_usage_mb("kokoro-82m-v1.0") == 4  # 2 files x 2 MB

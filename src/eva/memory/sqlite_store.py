@@ -4,15 +4,29 @@ Both classes share one `sqlite3.Connection` (from `eva.memory.db.connect()`)
 rather than opening the database twice — they are two ports backed by one
 file because user profiles and conversation memory are different concerns
 that happen to want the same transactional/backup unit.
+
+Thread safety (M5.6): the shared connection is opened with
+``check_same_thread=False`` and is reached from two thread populations at
+once — the orchestrator's worker threads (storing turns, building context)
+and the API server's request handlers (memory management). WAL mode only
+isolates *separate* connections; two threads interleaving ``execute()`` /
+``commit()`` on one connection can merge their transactions (thread B's
+commit flushing thread A's half-written work). Every public method therefore
+holds the store's re-entrant lock for its whole body, so each method is one
+atomic unit. Both stores share the same lock because they share the
+connection (`create_stores` passes it to both).
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Concatenate, Protocol, cast
 
 from eva.core.errors import MemoryNotFoundError, MemoryStoreError
 from eva.memory import db
@@ -30,6 +44,27 @@ from eva.memory.models import (
 EXPORT_FORMAT_VERSION = 1
 
 
+class _Lockable(Protocol):
+    _lock: threading.RLock
+
+
+def _locked[T: _Lockable, **P, R](
+    method: Callable[Concatenate[T, P], R],
+) -> Callable[Concatenate[T, P], R]:
+    """Hold the store's lock for the whole method — one method, one
+    transaction-sized critical section (see the module docstring)."""
+
+    @functools.wraps(method)
+    def wrapper(self: T, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    # functools.wraps types the result as _Wrapped with a *named* self
+    # parameter, which mypy strict rejects against the Concatenate
+    # signature — the runtime object is exactly the declared callable.
+    return cast("Callable[Concatenate[T, P], R]", wrapper)
+
+
 def _fts5_phrase(query: str) -> str:
     """Treat arbitrary user input as one literal FTS5 phrase, not a query
     expression — otherwise characters like `-`/`*`/`"` can raise
@@ -38,12 +73,14 @@ def _fts5_phrase(query: str) -> str:
 
 
 class SQLiteMemoryStore(MemoryStore):
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock | None = None) -> None:
         self._conn = conn
+        self._lock = lock or threading.RLock()
         self._closed = False
 
     # ── conversations ──
 
+    @_locked
     def start_conversation(self, *, language: str = "en", title: str = "") -> MemoryConversation:
         conversation_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -56,6 +93,16 @@ class SQLiteMemoryStore(MemoryStore):
             id=conversation_id, started_at=now, title=title, language=language
         )
 
+    @_locked
+    def get_conversation(self, conversation_id: str) -> MemoryConversation:
+        row = self._conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        if row is None:
+            raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
+        return self._row_to_conversation(row)
+
+    @_locked
     def all_conversations(self, *, include_archived: bool = False) -> list[MemoryConversation]:
         if include_archived:
             rows = self._conn.execute(
@@ -67,6 +114,7 @@ class SQLiteMemoryStore(MemoryStore):
             ).fetchall()
         return [self._row_to_conversation(r) for r in rows]
 
+    @_locked
     def set_title(self, conversation_id: str, title: str) -> None:
         cur = self._conn.execute(
             "UPDATE conversations SET title = ? WHERE id = ?",
@@ -76,6 +124,7 @@ class SQLiteMemoryStore(MemoryStore):
         if cur.rowcount == 0:
             raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
 
+    @_locked
     def archive_conversation(self, conversation_id: str, *, archived: bool = True) -> None:
         cur = self._conn.execute(
             "UPDATE conversations SET archived = ? WHERE id = ?",
@@ -85,6 +134,7 @@ class SQLiteMemoryStore(MemoryStore):
         if cur.rowcount == 0:
             raise MemoryNotFoundError(f"No conversation with id {conversation_id!r}")
 
+    @_locked
     def delete_conversation(self, conversation_id: str) -> None:
         self._require_conversation(conversation_id)
         self._conn.execute(
@@ -97,6 +147,7 @@ class SQLiteMemoryStore(MemoryStore):
         self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         self._conn.commit()
 
+    @_locked
     def merge_conversations(self, source_id: str, target_id: str) -> None:
         self._require_conversation(source_id)
         self._require_conversation(target_id)
@@ -111,6 +162,7 @@ class SQLiteMemoryStore(MemoryStore):
         self._conn.execute("DELETE FROM conversations WHERE id = ?", (source_id,))
         self._conn.commit()
 
+    @_locked
     def delete_all(self) -> None:
         self._conn.execute("DELETE FROM embeddings")
         self._conn.execute("DELETE FROM summaries")
@@ -120,6 +172,7 @@ class SQLiteMemoryStore(MemoryStore):
 
     # ── turns ──
 
+    @_locked
     def add_turn(
         self,
         conversation_id: str,
@@ -150,6 +203,7 @@ class SQLiteMemoryStore(MemoryStore):
             metadata=meta,
         )
 
+    @_locked
     def get_turn(self, turn_id: int) -> MemoryTurn:
         row = self._conn.execute(
             "SELECT * FROM turns WHERE id = ? AND deleted = 0", (turn_id,)
@@ -158,6 +212,7 @@ class SQLiteMemoryStore(MemoryStore):
             raise MemoryNotFoundError(f"No turn with id {turn_id}")
         return self._row_to_turn(row)
 
+    @_locked
     def recent_turns(self, conversation_id: str, limit: int) -> list[MemoryTurn]:
         rows = self._conn.execute(
             "SELECT * FROM turns WHERE conversation_id = ? AND deleted = 0 "
@@ -166,6 +221,7 @@ class SQLiteMemoryStore(MemoryStore):
         ).fetchall()
         return [self._row_to_turn(r) for r in reversed(rows)]
 
+    @_locked
     def get_turns(self, turn_ids: list[int]) -> list[MemoryTurn]:
         if not turn_ids:
             return []
@@ -178,6 +234,7 @@ class SQLiteMemoryStore(MemoryStore):
         ).fetchall()
         return [self._row_to_turn(r) for r in rows]
 
+    @_locked
     def all_turns(self, conversation_id: str) -> list[MemoryTurn]:
         rows = self._conn.execute(
             "SELECT * FROM turns WHERE conversation_id = ? AND deleted = 0 ORDER BY id",
@@ -185,6 +242,7 @@ class SQLiteMemoryStore(MemoryStore):
         ).fetchall()
         return [self._row_to_turn(r) for r in rows]
 
+    @_locked
     def forget(self, turn_id: int) -> None:
         self._conn.execute("DELETE FROM embeddings WHERE turn_id = ?", (turn_id,))
         cur = self._conn.execute("DELETE FROM turns WHERE id = ?", (turn_id,))
@@ -192,12 +250,14 @@ class SQLiteMemoryStore(MemoryStore):
         if cur.rowcount == 0:
             raise MemoryNotFoundError(f"No turn with id {turn_id}")
 
+    @_locked
     def pin(self, turn_id: int, *, pinned: bool = True) -> None:
         cur = self._conn.execute("UPDATE turns SET pinned = ? WHERE id = ?", (int(pinned), turn_id))
         self._conn.commit()
         if cur.rowcount == 0:
             raise MemoryNotFoundError(f"No turn with id {turn_id}")
 
+    @_locked
     def favorite(self, turn_id: int, *, favorite: bool = True) -> None:
         cur = self._conn.execute(
             "UPDATE turns SET favorite = ? WHERE id = ?", (int(favorite), turn_id)
@@ -208,6 +268,7 @@ class SQLiteMemoryStore(MemoryStore):
 
     # ── search ──
 
+    @_locked
     def search_text(
         self, query: str, *, limit: int = 20, conversation_id: str | None = None
     ) -> list[MemorySearchResult]:
@@ -240,6 +301,7 @@ class SQLiteMemoryStore(MemoryStore):
             for r in rows
         ]
 
+    @_locked
     def store_embedding(self, turn_id: int, model_id: str, vector: bytes, dim: int) -> None:
         self._conn.execute(
             "INSERT INTO embeddings (turn_id, model_id, vector, dim, created_at) "
@@ -251,6 +313,7 @@ class SQLiteMemoryStore(MemoryStore):
         )
         self._conn.commit()
 
+    @_locked
     def embeddings_for(
         self, conversation_id: str | None = None, *, limit: int | None = None
     ) -> list[tuple[int, bytes, int]]:
@@ -279,6 +342,7 @@ class SQLiteMemoryStore(MemoryStore):
 
     # ── summaries ──
 
+    @_locked
     def add_summary(self, summary: MemorySummary) -> MemorySummary:
         self._require_conversation(summary.conversation_id)
         cur = self._conn.execute(
@@ -297,6 +361,7 @@ class SQLiteMemoryStore(MemoryStore):
         self._conn.commit()
         return summary.model_copy(update={"id": cur.lastrowid})
 
+    @_locked
     def latest_summary(self, conversation_id: str) -> MemorySummary | None:
         row = self._conn.execute(
             "SELECT * FROM summaries WHERE conversation_id = ? ORDER BY id DESC LIMIT 1",
@@ -306,6 +371,7 @@ class SQLiteMemoryStore(MemoryStore):
 
     # ── import/export ──
 
+    @_locked
     def export_json(self, conversation_id: str | None = None) -> dict[str, Any]:
         if conversation_id is not None:
             self._require_conversation(conversation_id)
@@ -334,6 +400,7 @@ class SQLiteMemoryStore(MemoryStore):
             )
         return {"version": EXPORT_FORMAT_VERSION, "conversations": entries}
 
+    @_locked
     def import_json(self, payload: dict[str, Any]) -> int:
         if payload.get("version") != EXPORT_FORMAT_VERSION:
             raise MemoryStoreError(
@@ -399,6 +466,7 @@ class SQLiteMemoryStore(MemoryStore):
 
     # ── lifecycle ──
 
+    @_locked
     def stats(self) -> MemoryStats:
         conv_count = self._conn.execute("SELECT COUNT(*) AS c FROM conversations").fetchone()["c"]
         turn_count = self._conn.execute(
@@ -417,6 +485,7 @@ class SQLiteMemoryStore(MemoryStore):
             fts_enabled=db.fts5_enabled(self._conn),
         )
 
+    @_locked
     def close(self) -> None:
         if not self._closed:
             self._conn.close()
@@ -467,9 +536,11 @@ class SQLiteMemoryStore(MemoryStore):
 
 
 class SQLiteUserProfileStore(UserProfileStore):
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock | None = None) -> None:
         self._conn = conn
+        self._lock = lock or threading.RLock()
 
+    @_locked
     def create(self, profile: UserProfile) -> UserProfile:
         now = datetime.now(UTC)
         self._conn.execute(
@@ -495,6 +566,7 @@ class SQLiteUserProfileStore(UserProfileStore):
         self._conn.commit()
         return profile.model_copy(update={"created_at": now, "updated_at": now})
 
+    @_locked
     def get(self, profile_id: str) -> UserProfile:
         row = self._conn.execute(
             "SELECT * FROM user_profiles WHERE id = ?", (profile_id,)
@@ -503,10 +575,12 @@ class SQLiteUserProfileStore(UserProfileStore):
             raise MemoryNotFoundError(f"No user profile with id {profile_id!r}")
         return self._row_to_profile(row)
 
+    @_locked
     def list(self) -> list[UserProfile]:
         rows = self._conn.execute("SELECT * FROM user_profiles ORDER BY created_at").fetchall()
         return [self._row_to_profile(r) for r in rows]
 
+    @_locked
     def update(self, profile: UserProfile) -> UserProfile:
         now = datetime.now(UTC)
         cur = self._conn.execute(
@@ -531,16 +605,19 @@ class SQLiteUserProfileStore(UserProfileStore):
             raise MemoryNotFoundError(f"No user profile with id {profile.id!r}")
         return profile.model_copy(update={"updated_at": now})
 
+    @_locked
     def set_active(self, profile_id: str) -> None:
         self.get(profile_id)  # raises MemoryNotFoundError if missing
         self._conn.execute("UPDATE user_profiles SET active = 0")
         self._conn.execute("UPDATE user_profiles SET active = 1 WHERE id = ?", (profile_id,))
         self._conn.commit()
 
+    @_locked
     def active(self) -> UserProfile | None:
         row = self._conn.execute("SELECT * FROM user_profiles WHERE active = 1 LIMIT 1").fetchone()
         return self._row_to_profile(row) if row is not None else None
 
+    @_locked
     def delete(self, profile_id: str) -> None:
         cur = self._conn.execute("DELETE FROM user_profiles WHERE id = ?", (profile_id,))
         self._conn.commit()

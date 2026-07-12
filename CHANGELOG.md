@@ -6,6 +6,138 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-12 — M5.7: Final UX & Windows polish
+
+The last polish pass before M6: the microphone control does something real,
+the background server behaves like a native Windows app (no flashing
+consoles, no scary shutdown logs), and a fully-installed EVA no longer
+touches the network at startup.
+
+**Fixed**
+- **Flashing console windows** on `eva start`: `sample_resources()` runs
+  `nvidia-smi` on every diagnostics snapshot, and from a detached
+  (console-less) server each call made Windows allocate — and flash — a
+  console window. All external probes now go through
+  `eva.core.proc.no_window_kwargs()` (`CREATE_NO_WINDOW` on Windows).
+- **Faster-whisper hit Hugging Face on every startup**: even with the model
+  cached, huggingface_hub makes a HEAD request per file to check for updates
+  unless told the files are local. The adapter now attempts a fully-offline
+  load first and only permits the network when the model isn't cached yet —
+  a fully-installed EVA starts with zero network calls (verified: the load
+  log gains an "offline" marker and the preceding HF request disappears).
+- **`eva serve` shutdown was noisy and slow with the web UI open**: an open
+  WebSocket blocks in `queue.get()`, so uvicorn's graceful pass timed out
+  and logged `ERROR: Cancel N running task(s), timeout graceful shutdown
+  exceeded` after a multi-second wait. `EventBus.close()` now pushes a
+  `STREAM_CLOSED` sentinel to every subscriber, and a `uvicorn.Server`
+  subclass calls it at the *start* of shutdown — WS handlers return
+  immediately. Shutdown with 3 sockets held open went from ~7.8 s (with the
+  error) to ~1.9 s, clean.
+- **Abrupt WebSocket drops logged stack traces**: a closed browser tab
+  surfaces as `ConnectionResetError` / WinError 10054 on the next send. That
+  is a normal disconnect and is now debug-logged, never a traceback.
+
+**Added**
+- **Functional microphone button**: the Composer mic button is now a real
+  mute/unmute toggle when the engine is running with microphone permission
+  (🎙 ↔ 🔇). Muting drops captured-speech events at the orchestrator door —
+  the assistant stops listening while typed chat and playback keep working,
+  and the audio device stays open so echo cancellation is unaffected. When
+  microphone permission is off the button is disabled with a tooltip
+  pointing to Settings (honest, not a no-op). New `POST
+  /api/v1/conversation/microphone`, `MicrophoneMuted` event, and
+  `microphone_available` / `microphone_muted` fields on the runtime
+  snapshot; interrupting a reply lives solely on the ⏹ Stop button now.
+- `eva.core.proc` — a tiny shared home for the no-console-window subprocess
+  kwargs.
+
+**Changed**
+- README and `docs/INSTALLATION.md` now split running the server into two
+  clearly-labelled workflows: **Development** (`eva serve` → Ctrl+C) and
+  **Background/production** (`eva start` / `stop` / `restart` / `status`).
+
+### 2026-07-12 — M5.6: Final hardening, UX & production readiness
+
+The last M5 milestone: everything M5 promised now behaves like a finished
+product — conversations can be continued, shutdown is bounded and clean,
+downloads are integrity-verified, and the remaining trust boundaries are
+closed. No new capabilities; M6 (desktop) starts from here.
+
+**Fixed**
+- `eva serve` Ctrl+C no longer hangs while a web UI tab is open: uvicorn
+  ran with an unbounded graceful-shutdown wait, and the UI keeps a
+  WebSocket connected for its whole lifetime — shutdown now runs with
+  `timeout_graceful_shutdown=5`, so exit is bounded (≤ ~5 s worst case,
+  immediate when idle) and always traceback-free.
+- Microphone permission OFF wedged every typed turn in the "speaking"
+  state forever: audio startup was skipped entirely, so nothing drained
+  the playback queue. Mic-off now opens a playback-ONLY stream (the input
+  device is never touched — the permission means what it says) and typed
+  conversations speak normally (`DuplexAudioStream.start(playback_only=)`).
+- Non-English TTS pronunciation: the conversation language was never
+  passed to Kokoro, so every reply was phonemized as US English — Spanish
+  text through an English G2P is why it sounded wrong. The TTS port now
+  carries `language`, and the Kokoro adapter maps it to the matching
+  espeak phonemizer voice (`es`, `de`, `fi`, `sv`, …).
+- Models page layout: buttons and long model ids overflowed their cards
+  (grid items default to `min-width:auto`); cards now clamp and wrap
+  (`min-width: 0`, `overflow-wrap`, wrapping action rows) — applied
+  systemically to all `.grid-2`/`.grid-3` children.
+- Stale documentation: model-catalog count corrected to 10 (was "9" in two
+  places), an unedited thinking-aloud sentence removed from `HANDOFF.md`,
+  milestone naming aligned (M4.5), and `ARCHITECTURE.md`'s ≤1.2 s
+  first-audio target now carries the measured ~2.0 s reality and the M7
+  lever (WASAPI).
+
+**Added**
+- **Continue a conversation** (ChatGPT-style): `POST
+  /api/v1/conversation/resume` switches the engine back to any stored
+  conversation — same id, context, summary, and title; the next message
+  continues it. The Memory page's conversation list gains a primary
+  "Continue" button that reopens the conversation on the Conversation
+  page. New `MemoryStore.get_conversation()` port method.
+- **Graceful process shutdown**: `POST /api/v1/system/shutdown` stops the
+  engine then exits uvicorn via a registered hook. `eva stop` uses it
+  first and only falls back to terminating the process — on Windows,
+  terminate is a hard `TerminateProcess` with zero cleanup, so the API
+  call is the only genuinely graceful stop for a background server.
+- **Download integrity verification**: `ModelFile` carries the publisher's
+  exact `size_bytes` and (where the publisher exposes one — all Hugging
+  Face LFS files) `sha256`. Downloads are verified after completion; a
+  checksum or size mismatch discards the file and fails loudly. The
+  pre-M5.6 hole where a response without `Content-Length` skipped
+  verification entirely is closed.
+- **WebSocket origin policy** (`eva.server.security`): CORS middleware
+  does not apply to WebSocket handshakes, so `/api/v1/ws` validated
+  nothing — any website could have read live transcripts. Browser origins
+  are now checked against the same localhost-only policy (foreign origins
+  rejected with close code 1008; header-less non-browser clients still
+  connect).
+- **Time-to-first-audio cuts**: Kokoro warm-up synthesis at load (moves
+  onnxruntime's first-inference kernel initialization out of the first
+  reply, and it runs on the preload worker in parallel with the LLM load —
+  free in wall-clock); the sentence chunker's FIRST segment may now end at
+  a clause break (comma/semicolon/colon), so "Sure, let me check that."
+  starts speaking after "Sure," while the rest synthesizes
+  (`first_sentence_min_chars` default 6 → 4 so short openers qualify).
+- SQLite thread-safety: both stores share one connection
+  (`check_same_thread=False`) reached from orchestrator worker threads and
+  API handlers at once — every public store method now holds a shared
+  re-entrant lock, making each method one atomic critical section (WAL
+  only isolates *separate* connections).
+- Composer polish: the "+" menu dismisses on outside-click/Escape and
+  each entry is labeled "(coming soon)" up front; attachment chips remain
+  honest placeholders pending Vision support.
+
+**Changed**
+- `eva serve` uses a programmatic `uvicorn.Server` (required for both the
+  bounded shutdown and the exit hook) and prints how to stop it.
+- Multilingual reality documented honestly: EVA understands and answers
+  in all six registered languages; a *native* voice exists only for
+  English and Spanish (Kokoro has none for Finnish/Swedish/Bengali — a
+  model gap, not an architecture gap). Automatic language detection and
+  per-language TTS engines remain M7+ research (see ROADMAP).
+
 ### 2026-07-11 — v0.5 documentation synchronization
 
 A maintenance pass, not a feature milestone: the repository's documentation

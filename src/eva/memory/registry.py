@@ -44,8 +44,13 @@ def create_stores(settings: Settings, paths: AppPaths) -> tuple[MemoryStore, Use
         raise RegistryError(
             f"No user-profile store paired with memory engine '{settings.memory.engine}'"
         )
+    import threading
+
     from eva.memory import db
     from eva.memory.sqlite_store import SQLiteMemoryStore, SQLiteUserProfileStore
 
     conn = db.connect(paths.conversations_dir / db.DB_FILENAME)
-    return SQLiteMemoryStore(conn), SQLiteUserProfileStore(conn)
+    # One lock for both stores: they share the connection, so they must
+    # share the critical section too (M5.6 — see sqlite_store's docstring).
+    lock = threading.RLock()
+    return SQLiteMemoryStore(conn, lock), SQLiteUserProfileStore(conn, lock)

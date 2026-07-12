@@ -18,6 +18,8 @@ from typing import Literal
 import psutil
 from pydantic import BaseModel, ConfigDict
 
+from eva.core.proc import no_window_kwargs
+
 GpuBackend = Literal["cuda", "rocm", "none"]
 
 _PROBE_TIMEOUT_S = 10
@@ -66,16 +68,22 @@ class HardwareReport(BaseModel):
 
 
 def run_probe(cmd: list[str]) -> str | None:
-    """Run an external probe command; None on any failure."""
+    """Run an external probe command; None on any failure.
+
+    `no_window_kwargs()` keeps hardware probes (nvidia-smi/rocm-smi) from
+    flashing a console window when the server runs detached on Windows —
+    `sample_resources()` calls nvidia-smi on every diagnostics snapshot.
+    """
     if shutil.which(cmd[0]) is None:
         return None
     try:
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_S,
             check=False,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

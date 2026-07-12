@@ -47,11 +47,11 @@ class _FlakyTTS(FakeTTS):
     def unload(self) -> None:
         self.reloads += 1
 
-    def synthesize(self, text: str, *, voice: str, speed: float = 1.0):  # type: ignore[no-untyped-def]
+    def synthesize(self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None):  # type: ignore[no-untyped-def]
         if self.failures > 0:
             self.failures -= 1
             raise RuntimeError("tts backend died")
-        return super().synthesize(text, voice=voice, speed=speed)
+        return super().synthesize(text, voice=voice, speed=speed, language=language)
 
 
 async def _wait_turn_done(orch) -> None:

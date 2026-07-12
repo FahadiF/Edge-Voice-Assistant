@@ -85,6 +85,9 @@ user stops speaking ──► endpoint detected (VAD, ~300–500 ms adaptive)
    LLM prefill + first sentence tokens (llama.cpp, streaming)    ~300–600 ms
    TTS first sentence (Kokoro)                                   ~150–300 ms
 ──► FIRST AUDIO OUT                                       target ≤ 1.2 s
+   (measured on the reference laptop: ~2.0 s — the gap is dominated by the
+    MME host API's ~210 ms audio loop and CPU TTS synthesis of the first
+    segment; WASAPI/low-latency audio is the planned M7 lever, see ROADMAP)
    ...while remaining sentences generate + synthesize in parallel
 ```
 

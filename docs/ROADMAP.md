@@ -141,7 +141,7 @@ real N+1-query performance bug was found and fixed by that measurement
 before it shipped. Deferred to M5+ (documented, not silently dropped):
 `eva memory`/`eva user` CLI commands, real encryption-at-rest.
 
-## M4 Integration & validation pass ✅ (completed 2026-07-05)
+## M4.5 Integration & validation pass ✅ (completed 2026-07-05)
 Real-hardware testing exposed integration gaps that unit tests with fakes
 could not: a release-blocking multi-system-message crash (fixed by
 refactoring `ContextBuilder` to emit exactly one system message with strict
@@ -237,6 +237,25 @@ management: `eva start`, `eva stop`, `eva restart`, `eva status`,
 Maintenance pass, not a feature milestone: all documentation synchronized
 with the shipped M5.x state, private team notes moved out of `docs/` into
 an untracked `.dev/` folder, version bumped to `0.5.0a1`.
+
+## M5.6 — Final hardening, UX & production readiness ✅ (completed 2026-07-12)
+
+The last M5 milestone — no new capabilities, everything M5 promised made
+production-quality before M6 begins:
+
+- Continue stored conversations (`POST /conversation/resume` + Memory-page
+  "Continue"), preserving id, context, summaries, and title.
+- Bounded, clean shutdown everywhere: `eva serve` Ctrl+C ≤ ~5 s with the
+  web UI connected; `eva stop` goes through `POST /system/shutdown`
+  (graceful) before falling back to terminate.
+- Mic-permission-off now runs a playback-only audio stream — typed chats
+  speak, and the input device is never opened.
+- Time-to-first-audio: Kokoro warm-up at load + first-segment clause
+  splitting in the chunker.
+- Non-English pronunciation: conversation language wired through the TTS
+  port to Kokoro's espeak phonemizer.
+- Hardening: SQLite shared-connection locking, download size/SHA-256
+  verification, WebSocket Origin validation, documentation sync.
 
 ## M6 — Desktop polish
 Tray icon, global push-to-talk hotkey, engine process supervision (auto-

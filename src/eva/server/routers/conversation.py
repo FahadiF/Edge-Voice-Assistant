@@ -18,6 +18,10 @@ from eva.server.schemas import (
     ConversationImportRequest,
     EngineStatusResponse,
     InterruptResponse,
+    MicrophoneRequest,
+    MicrophoneResponse,
+    ResumeConversationRequest,
+    ResumeConversationResponse,
     SayRequest,
 )
 
@@ -44,6 +48,16 @@ def say(payload: SayRequest, state: StateDep) -> dict[str, str]:
     return {"status": "accepted" if accepted else "rejected"}
 
 
+@router.post("/microphone", response_model=MicrophoneResponse)
+def set_microphone(payload: MicrophoneRequest, state: StateDep) -> MicrophoneResponse:
+    """Mute/unmute the microphone (M5.7). Muted stops the assistant acting on
+    captured speech; typed messages (`/say`) and playback keep working. The
+    change is broadcast on the WebSocket (`MicrophoneMuted`) so every client
+    stays in sync."""
+    muted = state.require_assistant().orchestrator.set_microphone_muted(payload.muted)
+    return MicrophoneResponse(muted=muted)
+
+
 @router.post("/interrupt", response_model=InterruptResponse)
 async def interrupt(state: StateDep) -> InterruptResponse:
     happened = await state.require_assistant().orchestrator.interrupt()
@@ -61,6 +75,25 @@ async def cancel(state: StateDep) -> InterruptResponse:
 def clear_history(state: StateDep) -> dict[str, str]:
     state.require_assistant().orchestrator.clear_conversation()
     return {"status": "cleared"}
+
+
+@router.post("/resume", response_model=ResumeConversationResponse)
+def resume_conversation(
+    payload: ResumeConversationRequest, state: StateDep
+) -> ResumeConversationResponse:
+    """Continue a stored conversation exactly where it ended (M5.6): the
+    active conversation switches to `conversation_id`, `GET /history`
+    returns its turns, and the next spoken/typed message continues it —
+    same context, summary, memories, and title."""
+    assistant = state.require_assistant()
+    conversation = assistant.orchestrator.resume_conversation(payload.conversation_id)
+    turns = assistant.orchestrator.conversation_turns
+    return ResumeConversationResponse(
+        status="resumed",
+        conversation_id=conversation.id,
+        title=conversation.title,
+        turns=len(turns),
+    )
 
 
 @router.get("/export", response_model=ConversationExport)

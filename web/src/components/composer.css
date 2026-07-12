@@ -101,6 +101,17 @@
 .mic-thinking { opacity: 0.8; }
 .mic-speaking { opacity: 0.8; }
 
+/* Muted: full-opacity so the 🔇 state reads clearly, tinted with the danger
+   color to signal "the assistant is not listening". */
+.composer-mic.mic-muted {
+  opacity: 1;
+  color: var(--danger);
+}
+
+.composer-mic:disabled {
+  cursor: not-allowed;
+}
+
 .composer-send {
   min-width: 64px;
   height: 36px;

@@ -107,3 +107,49 @@ def test_reset_restores_first_chunk_threshold() -> None:
     segments = feed_all(c, "Hi. It works fine now.")
     # After reset, the next turn's first segment is eligible again.
     assert segments[0] == "Hi."
+
+
+class TestFirstChunkClauseSplit:
+    """M5.6: the first segment of a turn may end at a clause break (comma/
+    semicolon/colon + whitespace) — synthesis cost scales with text length,
+    so speaking 'Sure,' while the rest synthesizes cuts time-to-first-audio
+    materially. Later segments keep whole-sentence prosody."""
+
+    def test_first_chunk_splits_at_comma(self) -> None:
+        chunker = SentenceChunker(min_chars=12, max_chars=350, first_chunk_min_chars=4)
+        segments = _feed_all(chunker, "Sure, let me check that for you. Here it is.")
+        assert segments[0] == "Sure,"
+        assert segments[1] == "let me check that for you."
+
+    def test_later_chunks_do_not_clause_split(self) -> None:
+        chunker = SentenceChunker(min_chars=12, max_chars=350, first_chunk_min_chars=4)
+        segments = _feed_all(chunker, "Yes, I can. Second sentence, with a comma, stays whole.")
+        assert segments[0] == "Yes,"
+        # The rest is NOT clause-split: commas inside later segments survive.
+        assert segments[1:] == ["I can. Second sentence, with a comma, stays whole."]
+
+    def test_clause_split_respects_first_min_chars(self) -> None:
+        chunker = SentenceChunker(min_chars=12, max_chars=350, first_chunk_min_chars=6)
+        # "Hm," (3 chars) is below the threshold — waits for the next break.
+        segments = _feed_all(chunker, "Hm, well, that depends on the context.")
+        assert segments[0] == "Hm, well,"
+
+    def test_decimal_comma_does_not_split(self) -> None:
+        chunker = SentenceChunker(min_chars=12, max_chars=350, first_chunk_min_chars=4)
+        segments = _feed_all(chunker, "About 1,500 people attended the event.")
+        assert segments == ["About 1,500 people attended the event."]
+
+    def test_disabled_without_first_chunk_min_chars(self) -> None:
+        chunker = SentenceChunker(min_chars=12, max_chars=350)
+        segments = _feed_all(chunker, "Sure, let me check that for you.")
+        assert segments == ["Sure, let me check that for you."]
+
+
+def _feed_all(chunker: SentenceChunker, text: str) -> list[str]:
+    segments: list[str] = []
+    for token in text.split(" "):
+        segments.extend(chunker.feed(token + " "))
+    tail = chunker.flush()
+    if tail:
+        segments.append(tail)
+    return segments

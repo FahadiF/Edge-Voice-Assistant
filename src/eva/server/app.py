@@ -33,15 +33,17 @@ from eva.server.routers import (
     voices,
     websocket,
 )
+from eva.server.security import LOCALHOST_ORIGIN_REGEX
 from eva.server.state import ServerState
 from eva.server.static import mount_ui, ui_dist_dir
 
 API_PREFIX = "/api/v1"
 
 # Desktop/web clients run from localhost during development; no external
-# origin is ever allowed. Authentication is intentionally absent for
-# localhost-only use today — see ADR-017 Part 9 for the extension point.
-_LOCALHOST_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+# origin is ever allowed (eva.server.security — the WebSocket endpoint
+# enforces the same policy itself, CORS middleware doesn't cover it).
+# Authentication is intentionally absent for localhost-only use today —
+# see ADR-017 Part 9 for the extension point.
 
 
 def create_app(paths: AppPaths | None = None) -> FastAPI:
@@ -53,6 +55,11 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
         yield
         state: ServerState = app.state.eva
         await state.stop_engine()
+        # Wake any still-open WebSocket streams so their tasks return before
+        # uvicorn's graceful-shutdown pass (M5.7) — clean exit, no "Cancel N
+        # running task(s)". Done after stop_engine so clients still receive
+        # the final EngineStopped event first.
+        state.bus.close()
 
     app = FastAPI(
         title="Edge Voice Assistant API",
@@ -64,7 +71,7 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=_LOCALHOST_ORIGIN_REGEX,
+        allow_origin_regex=LOCALHOST_ORIGIN_REGEX,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

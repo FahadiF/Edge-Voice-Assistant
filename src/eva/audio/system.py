@@ -68,6 +68,13 @@ class AudioSystem:
         self.stream.start()
         self.pipeline.start()
 
+    def start_playback_only(self) -> None:
+        """Speakers without microphone (M5.6): the mic permission is off, so
+        no input device is opened and the capture pipeline never runs — but
+        TTS playback still drains, so typed conversations still speak."""
+        logger.info("Audio system starting playback-only (microphone permission off)")
+        self.stream.start(playback_only=True)
+
     def stop(self) -> None:
         self.pipeline.stop()
         self.stream.stop()

@@ -382,6 +382,8 @@ export interface RuntimeSnapshot {
   devices: Record<string, string>;
   state: PipelineState;
   epoch: number;
+  microphone_available: boolean;
+  microphone_muted: boolean;
   playback_active: boolean;
   input_level_dbfs: number;
   pending_audio_events: number;

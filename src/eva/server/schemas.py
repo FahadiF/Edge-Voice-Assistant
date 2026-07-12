@@ -83,6 +83,37 @@ class SayRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000, description="Message to send as a turn")
 
 
+class MicrophoneRequest(BaseModel):
+    """Mute/unmute the microphone (M5.7)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    muted: bool = Field(description="True to stop acting on captured speech")
+
+
+class MicrophoneResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    muted: bool
+
+
+class ResumeConversationRequest(BaseModel):
+    """Continue a stored conversation where it ended (M5.6)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    conversation_id: str = Field(min_length=1, description="Stored conversation id to resume")
+
+
+class ResumeConversationResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    status: str
+    conversation_id: str
+    title: str
+    turns: int
+
+
 class RenameConversationRequest(BaseModel):
     """Edit a conversation's title (M5.4 — titles are auto-generated after
     the first exchange and editable afterwards)."""

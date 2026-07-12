@@ -677,6 +677,69 @@ eva status         # "not running", exit code 1
 
 ---
 
+## 17. M5.6 — Final hardening & UX
+
+### 17.1 Continue a stored conversation
+
+1. Have a short conversation (typed is fine), note its auto-title on the
+   Memory page.
+2. Press **Clear** on the Conversation page (a fresh conversation starts).
+3. Memory page → the stored conversation row → **Continue**.
+
+- [ ] You land on the Conversation page with the old transcript restored.
+- [ ] The next message continues the SAME conversation: its reply can use
+      earlier context ("what did I just ask you?"), and the Memory page
+      shows the new turns under the same conversation id and title.
+- [ ] `POST /api/v1/conversation/resume` with a bogus id returns 404.
+
+### 17.2 Simultaneous typing + speaking
+
+- [ ] Send a typed message: tokens stream into the reply bubble while the
+      first sentence is already being spoken — text and speech overlap
+      rather than text finishing first by seconds.
+- [ ] First audio for a reply that starts with a clause ("Sure, ...") is
+      audibly earlier than pre-M5.6 (the first segment ends at the comma).
+
+### 17.3 Bounded shutdown
+
+- [ ] `eva serve` + web UI open in a browser tab → Ctrl+C exits within
+      ~5 s, prints "Shutdown complete.", no traceback, no orphan process.
+- [ ] `eva start` → `eva stop` prints Stopping/Stopped; `eva logs` shows
+      "Stopping engine..." and "Engine stopped" (the graceful API path).
+
+### 17.4 Microphone permission off still speaks
+
+1. Settings → Permissions → Devices → microphone OFF; restart the engine.
+
+- [ ] Typed messages still get SPOKEN replies; the turn ends normally
+      (state returns to listening; the reply bubble finalizes).
+- [ ] No input device is opened (no mic indicator in the OS).
+
+### 17.5 Non-English pronunciation (Spanish)
+
+1. Settings → Conversation → language `es`; restart the engine.
+
+- [ ] Replies are written AND pronounced in Spanish (voice `ef_dora`,
+      Spanish phonemization — not English-accented phonemes).
+- [ ] Languages without a native Kokoro voice (fi/sv/bn) still answer in
+      that language with the fallback voice, and the log notes the
+      fallback (honest limitation, ADR-016).
+
+### 17.6 Download integrity
+
+- [ ] `eva models download <id>` on a fresh model logs "Checksum verified"
+      for Hugging Face files.
+- [ ] Corrupting a `.part` file mid-download (append junk, re-run) fails
+      loudly and discards the file instead of installing it.
+
+### 17.7 WebSocket origin policy
+
+- [ ] From a non-localhost page (or `websocat -H "Origin: https://evil.example"`),
+      connecting to `/api/v1/ws` is rejected (close 1008).
+- [ ] The web UI and CLI clients connect exactly as before.
+
+---
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,

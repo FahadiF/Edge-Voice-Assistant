@@ -39,6 +39,11 @@ class MemoryStore(ABC):
         this is what a "clear the current conversation" action maps to."""
 
     @abstractmethod
+    def get_conversation(self, conversation_id: str) -> MemoryConversation:
+        """One conversation by id (M5.6: resume needs its title/language).
+        Raises `MemoryNotFoundError` if `conversation_id` does not exist."""
+
+    @abstractmethod
     def all_conversations(self, *, include_archived: bool = False) -> list[MemoryConversation]:
         """All conversations, newest first."""
 
