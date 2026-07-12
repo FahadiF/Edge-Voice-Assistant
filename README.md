@@ -5,7 +5,7 @@
 
 # Edge Voice Assistant
 
-An offline AI voice assistant designed for natural, low-latency conversations on local hardware.
+A local-first, offline AI voice assistant designed for natural, low-latency conversations on consumer hardware.
 
 Edge Voice Assistant runs entirely on your computer after the required AI models are installed. It combines local speech recognition, language models, and speech synthesis into a modular AI platform that prioritizes **privacy**, **responsiveness**, and **extensibility**.
 
