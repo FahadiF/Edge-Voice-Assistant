@@ -6,6 +6,17 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-12 — Architecture cleanup
+
+A structural pass, no features. **Fixed** a slow memory leak:
+`MetricsCollector` accumulated one `TurnMetrics` per turn in an unbounded
+list for the whole process lifetime — a real growth path for the
+long-running sessions EVA targets (ADR-020). Per-turn samples are now kept
+in a bounded deque (last 1000) while lifetime totals moved to counters, so
+diagnostics and the CLI summary stay accurate past the window. Also aligned
+the `pyproject.toml` license metadata with the project's actual Apache-2.0
+license and added `[project.urls]` (found during the OSS-readiness review).
+
 ### 2026-07-12 — M5.7: Final UX & Windows polish
 
 The last polish pass before M6: the microphone control does something real,

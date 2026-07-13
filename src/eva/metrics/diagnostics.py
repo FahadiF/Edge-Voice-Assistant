@@ -191,7 +191,10 @@ class DiagnosticsProvider:
             playback_queued_seconds=a.audio.playback.queued_seconds(),
             resources=sample_resources(),
             last_turn=turns[-1] if turns else None,
-            turns_completed=sum(1 for t in turns if not t.cancelled),
+            # Lifetime count via a counter, not len(window) — the samples
+            # list is bounded (see MetricsCollector), so summing it would
+            # undercount once a long session exceeds the window.
+            turns_completed=a.orchestrator.metrics.non_cancelled_count,
             metrics_summary=a.orchestrator.metrics.summary(),
             barge_in_count=a.orchestrator.barge_in_count,
             last_barge_in_latency_ms=a.orchestrator.last_barge_in_latency_ms,

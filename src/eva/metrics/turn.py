@@ -9,8 +9,17 @@ speaking) because that is what perceived responsiveness is measured against:
 from __future__ import annotations
 
 import statistics
+from collections import deque
 
 from pydantic import BaseModel, ConfigDict
+
+# In-memory per-turn samples are bounded: EVA is designed to run for a long
+# time (ADR-020 — "a personal assistant used for years"), and an unbounded
+# list would grow one entry per turn for the whole process lifetime. Lifetime
+# totals are tracked with counters; only the most recent samples are kept for
+# the latency medians. 1000 turns is far more than any single session's
+# latency summary needs and keeps the footprint trivially small.
+_MAX_TURN_SAMPLES = 1000
 
 
 class TurnMetrics(BaseModel):
@@ -33,14 +42,31 @@ class TurnMetrics(BaseModel):
 
 class MetricsCollector:
     def __init__(self) -> None:
-        self._turns: list[TurnMetrics] = []
+        self._turns: deque[TurnMetrics] = deque(maxlen=_MAX_TURN_SAMPLES)
+        self._total_recorded = 0
+        self._total_cancelled = 0
 
     def record(self, metrics: TurnMetrics) -> None:
         self._turns.append(metrics)
+        self._total_recorded += 1
+        if metrics.cancelled:
+            self._total_cancelled += 1
 
     @property
     def turns(self) -> list[TurnMetrics]:
+        """The most recent turns (bounded window). For lifetime counts use
+        `total_recorded` / `non_cancelled_count`, which survive the window."""
         return list(self._turns)
+
+    @property
+    def total_recorded(self) -> int:
+        """Every turn ever recorded this session (not just the window)."""
+        return self._total_recorded
+
+    @property
+    def non_cancelled_count(self) -> int:
+        """Lifetime count of turns that ran to completion (not barged-in)."""
+        return self._total_recorded - self._total_cancelled
 
     def summary(self) -> str:
         completed = [t for t in self._turns if not t.cancelled and t.ttfa_ms > 0]
@@ -51,7 +77,7 @@ class MetricsCollector:
             return int(statistics.median(values))
 
         lines = [
-            f"Turns: {len(self._turns)} ({len(completed)} completed)",
+            f"Turns: {self._total_recorded} ({len(completed)} completed)",
             f"ASR (median):               {med([t.asr_ms for t in completed])} ms",
             f"Time to first token:        {med([t.ttft_ms for t in completed])} ms",
             f"First-sentence TTS:         {med([t.tts_first_ms for t in completed])} ms",
