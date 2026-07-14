@@ -11,6 +11,8 @@ Edge Voice Assistant runs entirely on your computer after the required AI models
 
 Once the required models are installed, the assistant operates completely offline without requiring cloud APIs or Internet connectivity.
 
+<img width="1910" height="932" alt="image" src="https://github.com/user-attachments/assets/c8ece7e8-f14a-47d2-959a-b77834150c80" />
+
 ---
 
 ## Highlights
