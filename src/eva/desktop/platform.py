@@ -91,6 +91,20 @@ class PystrayDesktopPlatform(DesktopPlatform):
         self._thread: threading.Thread | None = None
 
     def start_tray(self, spec: TraySpec) -> None:
+        self._icon = self.build_icon(spec)
+        # pystray's own loop blocks; run it on a daemon thread so it lives
+        # alongside the pywebview main-thread loop and dies with the process.
+        self._thread = threading.Thread(target=self._icon.run, name="eva-tray", daemon=True)
+        self._thread.start()
+
+    def build_icon(self, spec: TraySpec) -> Any:
+        """Construct the pystray Icon (menu + image) WITHOUT running its loop.
+
+        Split out from `start_tray` so the display-independent construction
+        path — the part that raised a ValueError when a menu callback had the
+        wrong arg count — is exercised by an integration test without opening
+        a real tray. Kept an instance method so it shares `_menu_item`/`_image`.
+        """
         import pystray
 
         items: list[Any] = []
@@ -98,16 +112,12 @@ class PystrayDesktopPlatform(DesktopPlatform):
             if entry.separator_before:
                 items.append(pystray.Menu.SEPARATOR)
             items.append(self._menu_item(pystray, entry))
-        self._icon = pystray.Icon(
+        return pystray.Icon(
             "edge-voice-assistant",
             self._image(TrayIconState.STOPPED),
             spec.title,
             pystray.Menu(*items),
         )
-        # pystray's own loop blocks; run it on a daemon thread so it lives
-        # alongside the pywebview main-thread loop and dies with the process.
-        self._thread = threading.Thread(target=self._icon.run, name="eva-tray", daemon=True)
-        self._thread.start()
 
     def set_tray_state(self, icon: TrayIconState, status_text: str) -> None:
         if self._icon is None:
@@ -126,9 +136,16 @@ class PystrayDesktopPlatform(DesktopPlatform):
     @staticmethod
     def _menu_item(pystray: Any, entry: TrayMenuItem) -> Any:
         label = entry.label
-        text: Any = (lambda _item, f=label: f()) if callable(label) else label
         action = entry.on_activate
-        handler = (lambda _icon, _item, a=action: a()) if action is not None else None
+        # pystray calls a callable text as ``text(item)`` (one arg), so wrap
+        # our zero-arg label. It calls an action as ``action(icon, item)`` and
+        # REJECTS any callable whose ``co_argcount`` exceeds 2 — default
+        # parameters count, so `lambda _icon, _item, a=action: ...` (3 params)
+        # raised ValueError. A plain two-parameter handler closing over the
+        # per-item `action` local is correct (this is not a loop body, so no
+        # late-binding guard is needed). None => a non-clickable label.
+        text: Any = (lambda _item: label()) if callable(label) else label
+        handler = (lambda _icon, _item: action()) if action is not None else None
         return pystray.MenuItem(text, handler, enabled=action is not None)
 
     @staticmethod

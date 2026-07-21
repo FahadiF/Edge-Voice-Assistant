@@ -170,7 +170,22 @@ eva stop           # graceful: engine stops, audio released, DB flushed,
 clean path) and only falls back to terminating the process if the API
 doesn't answer.
 
-For the desktop shell: `pip install -e ".[desktop]"` then `eva-desktop`.
+**Native desktop app:**
+
+```bash
+pip install -e ".[desktop]"   # pulls pywebview + the tray libs (pystray, pillow)
+eva-desktop
+```
+
+`eva-desktop` opens the web UI in a native window and supervises the backend
+for you: it starts the server if one isn't already running (and attaches to a
+`eva start` server if one is), restarts it if it crashes, and stops it on quit.
+It adds a **system tray** whose icon tracks engine state (running / starting /
+stopped / error) with Open, Hide, Settings, and Quit — the tray is the
+background control surface for day-to-day use. Window size, position, and the
+last-open page are remembered across launches. Run without the `[desktop]`
+extra and it prints how to install it (never a traceback); the tray degrades
+gracefully to a plain window if only `pywebview` is present.
 
 ---
 

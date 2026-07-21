@@ -146,11 +146,17 @@ def main() -> int:
         logger.debug("Window close-event hook unavailable on this backend", exc_info=True)
 
     # System tray (M6.2): reflects supervisor state and controls the window.
-    # Degrades gracefully to a windowed-only app if the tray libs are absent.
-    tray = _make_tray(window)
-    if tray is not None:
-        supervisor.on_status_change = tray.on_supervisor_status
-        tray.start()
+    # A tray problem must never stop the app opening — degrade to windowed-only
+    # (also true when the tray libs are simply absent). Logged, not silent.
+    tray: TrayController | None = None
+    try:
+        tray = _make_tray(window)
+        if tray is not None:
+            supervisor.on_status_change = tray.on_supervisor_status
+            tray.start()
+    except Exception:
+        logger.warning("System tray unavailable; continuing without it", exc_info=True)
+        tray = None
 
     supervisor_thread = threading.Thread(target=supervisor.run, name="eva-supervisor", daemon=True)
     supervisor_thread.start()

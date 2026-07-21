@@ -16,6 +16,7 @@ from collections.abc import Iterator
 import pytest
 
 from eva.desktop import main
+from eva.desktop.platform import DesktopPlatform, TrayIconState, TraySpec
 from eva.desktop.shell import _initial_url, _route_of, capture_window_state
 from eva.desktop.state import MIN_WIDTH, DesktopState
 
@@ -90,6 +91,12 @@ def fake_webview() -> Iterator[types.SimpleNamespace]:
         def get_current_url(self) -> str:
             return "http://127.0.0.1:8765/"
 
+        # The tray wires callbacks to these; no-ops for the fake.
+        def show(self) -> None: ...
+        def hide(self) -> None: ...
+        def destroy(self) -> None: ...
+        def evaluate_js(self, _script: str) -> None: ...
+
     def create_window(title: str, url: str, **kwargs: object) -> _Window:
         calls["title"] = title
         calls["url"] = url
@@ -124,10 +131,59 @@ def test_main_opens_window_when_server_starts(
     fake_webview: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("eva.desktop.shell.ServerSupervisor", _FakeSupervisor)
+    # Isolate from whether the tray libs happen to be installed in this env —
+    # the tray has its own tests; here we only assert the window opens.
+    monkeypatch.setattr("eva.desktop.shell.create_platform", lambda: None)
     assert main() == 0
     assert fake_webview.calls["title"] == "Edge Voice Assistant"
     assert str(fake_webview.calls["url"]).startswith("http://127.0.0.1:")
     assert fake_webview.calls.get("started") is True
+
+
+class _RecordingPlatform(DesktopPlatform):
+    """Minimal fake platform for the shell's tray-wiring tests."""
+
+    def __init__(self, *, fail_start: bool = False) -> None:
+        self.fail_start = fail_start
+        self.started = False
+        self.stopped = False
+
+    def start_tray(self, spec: TraySpec) -> None:
+        if self.fail_start:
+            raise RuntimeError("no tray backend on this box")
+        self.started = True
+
+    def set_tray_state(self, icon: TrayIconState, status_text: str) -> None: ...
+
+    def stop_tray(self) -> None:
+        self.stopped = True
+
+
+def test_main_wires_tray_when_platform_available(
+    fake_webview: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    supervisor = _FakeSupervisor()
+    supervisor.on_status_change = None  # type: ignore[attr-defined]
+    monkeypatch.setattr("eva.desktop.shell.ServerSupervisor", lambda *a, **k: supervisor)
+    platform = _RecordingPlatform()
+    monkeypatch.setattr("eva.desktop.shell.create_platform", lambda: platform)
+    assert main() == 0
+    assert platform.started is True  # tray was started
+    assert platform.stopped is True  # and stopped on teardown
+    assert supervisor.on_status_change is not None  # tray subscribed to status
+
+
+def test_main_survives_tray_failure(
+    fake_webview: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tray that fails to start must NOT stop the window opening (graceful
+    # degradation) — this softens exactly the class of the M6.2 pystray bug.
+    monkeypatch.setattr("eva.desktop.shell.ServerSupervisor", _FakeSupervisor)
+    monkeypatch.setattr(
+        "eva.desktop.shell.create_platform", lambda: _RecordingPlatform(fail_start=True)
+    )
+    assert main() == 0
+    assert fake_webview.calls.get("started") is True  # window still opened
 
 
 def test_main_returns_error_when_server_never_starts(

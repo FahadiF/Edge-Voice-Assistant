@@ -6,6 +6,27 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-12 — M6.2 fix: tray crashed on launch (pystray arg-count)
+
+**Fixed** — `eva-desktop` crashed at tray construction with
+`ValueError: <function …lambda…>` and the tray never appeared. pystray's
+`MenuItem._assert_action` rejects any action callable whose `co_argcount`
+exceeds 2, and **default parameters count** toward that total: the menu
+handler `lambda _icon, _item, a=action: a()` had three parameters. The
+`a=action` default was a needless late-binding guard (`_menu_item` is called
+once per entry, not inside a loop). Handlers are now plain two-parameter
+closures (`lambda _icon, _item: action()`), and the callable menu-text is a
+one-parameter closure to match pystray's `text(item)` contract. Verified on
+Windows: construction, menu rendering, click dispatch, and a full
+start→update→stop tray cycle all succeed.
+
+**Added** — `tests/test_desktop_tray_pystray.py`: integration tests that build
+the **real** pystray Icon/menu via a new display-independent
+`PystrayDesktopPlatform.build_icon` seam and invoke every menu action. Gated
+with `pytest.importorskip("pystray")` (skip on base CI, run wherever the
+`[desktop]` extra is installed) — this exercises the adapter layer the
+fake-based unit tests deliberately bypass, and would have caught this bug.
+
 ### 2026-07-12 — M6.2: System tray (ADR-027)
 
 Second phase of M6. The desktop app gains a native system tray as its
