@@ -6,6 +6,69 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-22 — Conversation-experience investigation: end-to-end pipeline trace
+
+Instrumented the whole turn pipeline and measured it end-to-end before changing
+anything, per the request.
+
+**Added — opt-in conversation trace (`EVA_CONVERSATION_TRACE=1`)**
+The orchestrator now logs a `CVTRACE` line at every streaming hand-off —
+first token, each sentence available, TTS synth start, first PCM, synth done,
+and the live playback-queue depth — all on one turn-relative clock. Off by
+default (zero cost); a reusable instrument for exactly this kind of latency
+question. A captured full-turn trace is in `MANUAL_TESTING.md`.
+
+**Measured findings (a 7-sentence reply, mic muted, GPU un-throttled this run)**
+- TTFT (first token) = 1653 ms; of that, memory retrieval was only **32 ms** —
+  the rest is LLM prefill.
+- TTFA (first audio) = 3574 ms = TTFT (1653) + first-clause generation (280) +
+  first-clause synthesis (1633). Both large parts are model compute.
+- Orchestration hand-offs are ~**3 ms** (sentence-available→synth-start, and
+  synth-done→next-dequeue). The playback buffer **grows** 2.1 s → 9.9 s across
+  the reply — i.e. **no queue starvation, no artificial inter-sentence gaps,
+  no unnecessary waiting in the pipeline**. The LLM produced all seven
+  sentences within ~1.8 s while sentence 1 was still synthesizing.
+- Per-sentence Kokoro (CPU) synthesis is 1.6–4.0 s, scaling with length; the
+  synth curve has a ~600 ms fixed floor (14-char chunk still ≈ 724 ms).
+
+**Conclusion (Issues 1 & 2 — natural streaming / inter-sentence pauses)**
+The streaming architecture is already correct and efficient: it generates,
+displays, synthesizes, and plays concurrently with millisecond hand-offs. The
+"writes everything then speaks" feel is the inherent mismatch of text streaming
+to the UI ~10× faster than CPU TTS can synthesize speech; the "long pause
+before speaking" is real model compute (LLM prefill + first-clause synth), and
+inter-sentence pauses appear only when the LLM is GPU-throttled enough to
+starve the buffer (the intermittent power-state issue documented earlier). An
+aggressive first-chunk word-split was measured (~600 ms TTFA saving) but
+**not adopted** — the ~600 ms synth floor means the tiny first fragment can
+finish before the next chunk is ready, trading the lower TTFA for a micro-gap.
+No orchestration change is warranted; closing the gap to a cloud-grade realtime
+feel is a models/hardware question (GPU TTS, faster LLM) — recorded as M7
+performance work, plus an optional UX item to pace the on-screen text to speech
+so display and voice stay in step (ROADMAP).
+
+**Verified — Issue 4 (identity consistency) is fixed** (real conversations):
+name stated → consistently used across five turns incl. unrelated ones ("Got
+it, Fahad" → "Your name is Fahad" → "Yes, Fahad"), no contradiction. The
+earlier contradiction was the pre-fix build. (Cross-session recall after a
+`clear` still surfaces the name from long-term memory — the intended memory
+design; deterministic profile-nickname persistence remains the ROADMAP
+follow-up for full cross-session consistency.)
+
+**Status — Issues 3 & 5**
+- ASR (3): the `initial_prompt` proper-noun biasing (previous entry) is in
+  place and measured. The real-mic common-word substitutions
+  ("write random three lines"→"right random freelance", "Bangla"→"bungalow")
+  do not reproduce on synthesizable audio and greedy-vs-beam made no measured
+  difference — an acoustic/model-capacity issue for the M7 ASR-accuracy pass
+  with real recorded fixtures (not blindly changed here).
+- Barge-in (5): deterministic components measured (VAD inference 0.33 ms,
+  playback fade a constant 40 ms, `barge_in_confirm_ms` 200 ms debounce) and
+  all detection/stop code is byte-identical to the pre-M6 baseline. Real
+  multi-interruption latency stats need a live mic — protocol added to
+  `MANUAL_TESTING.md` (run with the trace on and read
+  `last_barge_in_latency_ms`).
+
 ### 2026-07-21 — M6.2 validation fixes: export filter, identity consistency, ASR bias
 
 Three issues from Windows validation.

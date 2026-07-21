@@ -34,6 +34,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -101,6 +102,13 @@ _QUEUE_BACKPRESSURE_TIMEOUT_S = 5.0  # cross-thread put() safety cap; never hit 
 _LEADING_TRIM_MS = 80
 _TRAILING_TRIM_MS = 150
 _RECOVERY_COOLDOWN_S = 30.0  # one component-restart attempt per window (M5.5)
+
+# Opt-in per-sentence conversation trace (set EVA_CONVERSATION_TRACE=1). Logs a
+# `CVTRACE` line at every hand-off — sentence available, TTS synth start, first
+# PCM, first playback enqueue, synth done, playback-queue depth — all on one
+# turn-relative clock, so the streaming timeline is measurable end-to-end
+# without a debugger. Off by default; no cost when disabled.
+_CONV_TRACE = os.environ.get("EVA_CONVERSATION_TRACE") == "1"
 
 
 class _Reloadable(Protocol):
@@ -725,8 +733,16 @@ class Orchestrator:
         first_audio_ms = 0
         tts_first_ms = 0
 
+        speak_n = 0
+        prev_synth_done_ms = 0
+
+        def _queue_depth_s() -> float:
+            playback = getattr(self._audio, "playback", None)
+            depth = getattr(playback, "queued_seconds", None)
+            return round(depth(), 2) if depth is not None else -1.0
+
         async def speak_worker() -> None:
-            nonlocal first_audio_ms, tts_first_ms
+            nonlocal first_audio_ms, tts_first_ms, speak_n, prev_synth_done_ms
             started = False
             # One filter per turn: fence state must survive across sentence
             # segments (a code block's ``` markers arrive in different
@@ -742,11 +758,24 @@ class Orchestrator:
                 spoken_text = speech_filter.convert(sentence)
                 if not spoken_text:
                     continue  # e.g. a segment entirely inside a code fence
+                speak_n += 1
+                if _CONV_TRACE:
+                    dequeue_ms = elapsed_ms()
+                    gap = dequeue_ms - prev_synth_done_ms if prev_synth_done_ms else 0
+                    logger.info(
+                        "CVTRACE t=%dms dequeue n=%d queue_depth_s=%.2f gap_since_prev_done_ms=%d",
+                        dequeue_ms,
+                        speak_n,
+                        _queue_depth_s(),
+                        gap,
+                    )
                 if not started:
                     started = True
                     self._bus.publish(TtsStarted(epoch=epoch))
                     self._set_state("speaking")
                 synth_start = time.perf_counter()
+                if _CONV_TRACE:
+                    logger.info("CVTRACE t=%dms synth_start n=%d", elapsed_ms(), speak_n)
                 # Hold back exactly one chunk so the true LAST chunk of this
                 # sentence (and only that one) gets its trailing silence
                 # trimmed — measured at ~90-100ms per sentence boundary on
@@ -763,11 +792,20 @@ class Orchestrator:
                         speed=self._settings.tts.speed,
                         language=self._language_code,
                     )
+                    first_pcm_traced = False
                     async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
                         async for chunk in chunks:
                             if self._controller.is_stale(epoch):
                                 break  # aclosing() shuts down _drive_stream, which
                                 # closes sync_gen (KokoroTTS: its event loop too)
+                            if _CONV_TRACE and not first_pcm_traced:
+                                first_pcm_traced = True
+                                logger.info(
+                                    "CVTRACE t=%dms first_pcm n=%d synth_ms=%d",
+                                    elapsed_ms(),
+                                    speak_n,
+                                    int((time.perf_counter() - synth_start) * 1000),
+                                )
                             if first_audio_ms == 0:
                                 tts_first_ms = int((time.perf_counter() - synth_start) * 1000)
                                 first_audio_ms = elapsed_ms()
@@ -795,6 +833,15 @@ class Orchestrator:
                                 max_trailing_ms=_TRAILING_TRIM_MS,
                             )
                             self._audio.say(pending)
+                    if _CONV_TRACE:
+                        prev_synth_done_ms = elapsed_ms()
+                        logger.info(
+                            "CVTRACE t=%dms synth_done n=%d total_synth_ms=%d queue_depth_s=%.2f",
+                            prev_synth_done_ms,
+                            speak_n,
+                            int((time.perf_counter() - synth_start) * 1000),
+                            _queue_depth_s(),
+                        )
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -818,6 +865,7 @@ class Orchestrator:
         reply_parts: list[str] = []
         token_count = 0
         ttft_ms = 0
+        produced_n = 0
         llm_start = time.perf_counter()
         try:
             while True:
@@ -828,14 +876,34 @@ class Orchestrator:
                     continue  # keep draining so the producer can finish
                 if ttft_ms == 0:
                     ttft_ms = elapsed_ms()
+                    if _CONV_TRACE:
+                        logger.info("CVTRACE t=%dms first_token", ttft_ms)
                 token_count += 1
                 reply_parts.append(token)
                 self._bus.publish(LlmToken(epoch=epoch, token=token))
                 for sentence in chunker.feed(token):
+                    produced_n += 1
+                    if _CONV_TRACE:
+                        logger.info(
+                            "CVTRACE t=%dms sentence_available n=%d len=%d text=%r",
+                            elapsed_ms(),
+                            produced_n,
+                            len(sentence),
+                            sentence[:48],
+                        )
                     self._bus.publish(LlmSentence(epoch=epoch, text=sentence))
                     await sentences.put(sentence)
             tail = chunker.flush()
             if tail is not None and self._controller.is_current(epoch):
+                produced_n += 1
+                if _CONV_TRACE:
+                    logger.info(
+                        "CVTRACE t=%dms sentence_available n=%d len=%d text=%r (flush)",
+                        elapsed_ms(),
+                        produced_n,
+                        len(tail),
+                        tail[:48],
+                    )
                 self._bus.publish(LlmSentence(epoch=epoch, text=tail))
                 await sentences.put(tail)
         finally:

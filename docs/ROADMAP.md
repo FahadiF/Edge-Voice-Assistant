@@ -292,10 +292,25 @@ sub-milestones (ADR-027):
   autostart/single-instance · **M6.6** Windows installer.
 **Exit:** double-click launch to a working assistant on Windows and Linux dev boxes.
 
-### M6 UX backlog — investigated 2026-07-21 (see CHANGELOG for the measurements)
+### M6 UX backlog — investigated 2026-07-21/22 (see CHANGELOG for the measurements)
 
 - **A/B. Sentence-level speak-while-generating / inter-sentence gaps —
-  investigated, mostly already correct.** Measured with real per-sentence
+  investigated with a full end-to-end trace (`EVA_CONVERSATION_TRACE`),
+  confirmed already correct.** The 2026-07-22 trace showed orchestration
+  hand-offs of ~3 ms and the playback buffer growing 2.1 s → 9.9 s across a
+  reply (no starvation, no artificial gaps). TTFA (3.57 s) decomposes cleanly
+  into LLM prefill (~1.65 s) + first-clause synthesis (~1.63 s) — model
+  compute, not orchestration waiting. Two felt problems remain, neither an
+  orchestration bug: (i) text streams to the UI ~10× faster than CPU TTS
+  synthesizes, so the assistant looks like it "writes everything then speaks" —
+  addressable by a **UX change that paces on-screen text to speech playback**
+  (reveal each sentence as it starts speaking), a deliberate change to the
+  M5.6 streaming-display behavior with a read-speed tradeoff, so left for an
+  explicit decision; (ii) inter-sentence pauses appear only when the LLM is
+  GPU-throttled enough to starve the buffer — the intermittent power-state
+  issue, an M7 hardware/model item. Below is the earlier (still-valid) TTS
+  analysis:
+- Measured with real per-sentence
   timing against the running engine: the orchestrator already runs LLM
   generation, sentence chunking, and TTS synthesis concurrently, and the
   playback buffer's lead *grows* through a reply (proof there's no queueing

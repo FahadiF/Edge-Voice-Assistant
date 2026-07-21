@@ -867,6 +867,73 @@ Barge-in code is byte-identical to the pre-M6 baseline; this confirms the
       is environmental load, not the barge-in path — VAD inference measured at
       ~0.33 ms, the playback fade is a fixed 40 ms).
 
+## 19. Conversation experience (tracing, streaming, identity)
+
+### 19.1 Per-sentence pipeline trace
+
+Start the server with tracing on, then have one multi-sentence turn:
+
+```bash
+EVA_CONVERSATION_TRACE=1 eva start
+# start the engine, then speak/type: "Write three short lines about the ocean,
+# then explain why the sky is blue."
+eva logs --lines 300 | grep CVTRACE
+```
+
+Each `CVTRACE` line is turn-relative: `first_token`, `sentence_available n=…`,
+`synth_start n=…`, `first_pcm n=… synth_ms=…`, `synth_done n=… queue_depth_s=…`,
+`dequeue n=… queue_depth_s=… gap_since_prev_done_ms=…`. What to look for:
+
+- [ ] `gap_since_prev_done_ms` stays near 0 and `queue_depth_s` does **not**
+      hit 0 mid-reply — that means no starvation (speech is continuous). If the
+      queue drains to 0 between sentences, the LLM/TTS isn't keeping up
+      (GPU-throttled or a very slow box), not an orchestration bug.
+- [ ] `first_pcm n=1` (time to first audio) is dominated by first-token time +
+      first-clause `synth_ms`; both are model compute. A reference un-throttled
+      run measured TTFA ≈ 3.5 s (TTFT 1.65 s + first-clause synth 1.63 s).
+
+A captured reference trace (7-sentence reply, un-throttled):
+
+```
+t=1653ms first_token
+t=1932ms sentence_available n=1  "Here are three short lines about the ocean:"
+t=1938ms synth_start n=1
+t=2094..3450ms sentence_available n=2..7   (LLM produced all 7 within ~1.8s)
+t=3571ms first_pcm n=1 synth_ms=1633       ← PLAYBACK STARTS (TTFA 3.57s)
+t=3578ms synth_done n=1 queue_depth_s=2.12
+t=5505ms synth_done n=2 queue_depth_s=3.23
+t=7282ms synth_done n=3 queue_depth_s=4.10
+t=9064ms synth_done n=4 queue_depth_s=4.97
+t=11825ms synth_done n=5 queue_depth_s=6.22
+t=15846ms synth_done n=6 queue_depth_s=8.81   (queue keeps growing — no starvation)
+t=18099ms synth_done n=7 queue_depth_s=9.94
+```
+
+### 19.2 Identity consistency (verify with a real conversation)
+
+- [ ] Fresh conversation (Clear). Say your name, then run several turns
+      including unrelated ones, then ask your name again. The assistant must
+      use it **consistently** and never flip between knowing and not knowing it
+      within the session. (Verified in dev: "My name is Fahad" → later "Your
+      name is Fahad" → later "Yes, Fahad".)
+- [ ] Fresh conversation where you never state a name: the assistant should
+      **consistently** say it doesn't have your name (and can note you can set
+      it in your profile), never invent one. (Note: if you told it your name in
+      a *previous* conversation, long-term memory may still recall it — that is
+      intended cross-session memory, not a contradiction.)
+
+### 19.3 Barge-in latency statistics
+
+With `EVA_CONVERSATION_TRACE=1` and the engine running, interrupt the assistant
+mid-speech ~15 times, varied (early/late in the reply, short/long barge-ins):
+
+- [ ] After each, read Diagnostics **Barge-in → Last latency**
+      (`last_barge_in_latency_ms`, detected→silent). Record the values; expect
+      the vast majority < 150 ms. Note any outliers and whether they correlate
+      with high CPU/GPU load or the assistant's own audio being loud (residual
+      echo can delay VAD detecting your voice). `barge_in_confirm_ms` (200 ms
+      default) is the deliberate debounce before a barge-in fires.
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,
