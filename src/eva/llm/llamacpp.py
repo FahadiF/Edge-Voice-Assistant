@@ -45,12 +45,14 @@ class LlamaCppLLM(LLMEngine):
         gpu_layers: int = -1,
         threads: int = 0,
         batch_size: int = 512,
+        verbose: bool = False,
     ) -> None:
         self._model_path = model_path
         self._context_length = context_length
         self._gpu_layers = gpu_layers
         self._threads = threads
         self._batch_size = batch_size
+        self._verbose = verbose
         self._llama: Any = None
         # llama.cpp contexts are not thread-safe; generation calls are serialized.
         self._infer_lock = threading.Lock()
@@ -72,7 +74,11 @@ class LlamaCppLLM(LLMEngine):
                 n_gpu_layers=self._gpu_layers,
                 n_threads=self._threads or None,
                 n_batch=self._batch_size,
-                verbose=False,
+                # Quiet by default; when developer.debug is on, llama.cpp prints
+                # its load report — including the actual "offloaded N/M layers to
+                # GPU" line, the one datum that tells you if GPU offload really
+                # happened (self.device is only build capability, not proof).
+                verbose=self._verbose,
             )
         except Exception as exc:
             raise ModelError(f"Cannot load LLM '{self._model_path.name}': {exc}") from exc
@@ -81,7 +87,9 @@ class LlamaCppLLM(LLMEngine):
         gpu_active = self._gpu_layers != 0 and bool(llama_cpp.llama_supports_gpu_offload())
         self.device = "cuda" if gpu_active else "cpu"
         logger.info(
-            "llama.cpp loaded %s (ctx=%d, gpu_layers=%d, device=%s)",
+            "llama.cpp loaded %s (ctx=%d, gpu_layers=%d, device=%s; device=cuda means the "
+            "build supports offload, not that layers were offloaded — set developer.debug "
+            "to see the actual offload count)",
             self._model_path.name,
             self._context_length,
             self._gpu_layers,

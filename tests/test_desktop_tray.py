@@ -82,11 +82,22 @@ class TestMenu:
         _controller(platform).start()
         assert platform.spec is not None
         labels = [m.label for m in platform.spec.menu]
-        # Open / Hide are static; the status line is a callable; Settings/Quit static.
-        assert "Open" in labels
+        # Restore Window / Hide are static; the status line is a callable; Settings/Quit static.
+        assert "Restore Window" in labels
         assert "Hide" in labels
         assert "Settings" in labels
         assert "Quit" in labels
+
+    def test_restore_window_is_the_default_activation_item(self) -> None:
+        # Left-clicking the tray icon must restore the window; pystray only fires
+        # a `default` item on activation, so exactly the Restore item carries it.
+        platform = FakeDesktopPlatform()
+        _controller(platform).start()
+        assert platform.spec is not None
+        defaults = [m for m in platform.spec.menu if m.default]
+        assert len(defaults) == 1
+        assert defaults[0].label == "Restore Window"
+        assert defaults[0].on_activate is not None
 
     def test_status_line_is_a_live_callable(self) -> None:
         platform = FakeDesktopPlatform()
@@ -105,7 +116,7 @@ class TestMenu:
         _controller(platform, calls).start()
         assert platform.spec is not None
         by_label = {m.label: m for m in platform.spec.menu if isinstance(m.label, str)}
-        for label in ("Open", "Hide", "Settings", "Quit"):
+        for label in ("Restore Window", "Hide", "Settings", "Quit"):
             action = by_label[label].on_activate
             assert action is not None
             action()

@@ -16,6 +16,8 @@ testable without a real window.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -26,6 +28,7 @@ from eva.desktop.platform import create_platform
 from eva.desktop.state import MIN_HEIGHT, MIN_WIDTH, DesktopState
 from eva.desktop.supervisor import ServerSupervisor
 from eva.desktop.tray import TrayController
+from eva.desktop.window import WindowController, should_start_hidden
 from eva.service import display_host
 
 logger = logging.getLogger(__name__)
@@ -95,6 +98,38 @@ def _initial_url(host: str, port: int, state: DesktopState) -> str:
     return base + state.last_route if state.last_route else base
 
 
+# Chromium backgrounds a hidden/minimized renderer: it clamps JS timers to ~1 Hz
+# and, after a while, freezes the page entirely — which would drop the live
+# WebSocket and stall the UI while EVA sits in the tray, then cost a reconnect on
+# restore. The engine (a separate process, ADR-007) keeps running regardless, but
+# the *window* must too, so minimize-to-tray is "hidden only". These flags — the
+# same ones Electron apps use — keep the renderer full-speed while hidden;
+# measured to hold timers at full rate with the window minimized. WebView2 reads
+# this env var and appends it to pywebview's own arguments.
+_WEBVIEW2_NO_BACKGROUNDING = (
+    "--disable-background-timer-throttling "
+    "--disable-renderer-backgrounding "
+    "--disable-backgrounding-occluded-windows"
+)
+_WEBVIEW2_ARGS_ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+
+
+def _keep_webview_awake_while_hidden() -> None:
+    """Stop Chromium throttling/freezing the WebView2 renderer when the window
+    is hidden to the tray, so streaming and the WebSocket stay live and restore
+    is instant. WebView2/Windows-only; preserves any user-set value. Must run
+    before the window (and thus the WebView2 environment) is created."""
+    if sys.platform == "win32":
+        existing = os.environ.get(_WEBVIEW2_ARGS_ENV, "")
+        if "renderer-backgrounding" in existing:  # already configured (user or us)
+            return
+        os.environ[_WEBVIEW2_ARGS_ENV] = (
+            f"{existing} {_WEBVIEW2_NO_BACKGROUNDING}".strip()
+            if existing
+            else _WEBVIEW2_NO_BACKGROUNDING
+        )
+
+
 def main() -> int:
     try:
         import webview  # optional extra; guarded so the base install never needs it
@@ -121,9 +156,25 @@ def main() -> int:
     if settings.desktop.auto_start_engine:
         DesktopClient(host, port).start_engine()  # best-effort; UI can start it too
 
+    # The tray must exist before the window so we know whether hiding-to-tray
+    # is possible (close/minimize-to-tray, start-minimized). A tray problem
+    # never stops the app — degrade to windowed-only, logged (also the case
+    # when the tray libs are simply absent).
+    platform = None
+    try:
+        platform = create_platform()
+    except Exception:
+        logger.warning("Tray platform unavailable; continuing without a tray", exc_info=True)
+    tray_available = platform is not None
+    start_hidden = should_start_hidden(settings.desktop, tray_available=tray_available)
+
+    # Keep the renderer alive while hidden to the tray (see helper) — must be set
+    # before the window/WebView2 environment is created.
+    _keep_webview_awake_while_hidden()
+
     # Duck-typed: pywebview's Window API varies by version/backend, and the
     # optional dep is absent in CI — we only use a small, stable surface
-    # (show/hide/destroy/events/evaluate_js/geometry), so treat it as Any.
+    # (show/hide/restore/destroy/events/evaluate_js/geometry), so treat as Any.
     window: Any = webview.create_window(
         "Edge Voice Assistant",
         _initial_url(host, port, state),
@@ -132,75 +183,63 @@ def main() -> int:
         x=state.x,
         y=state.y,
         min_size=(MIN_WIDTH, MIN_HEIGHT),
+        hidden=start_hidden,  # start-minimized to the tray
     )
 
-    def _persist_on_close() -> None:
-        capture_window_state(window, state).save(paths)
+    controller = WindowController(
+        window,
+        settings.desktop,
+        on_save=lambda: capture_window_state(window, state).save(paths),
+        tray_available=tray_available,
+    )
 
-    # pywebview exposes window lifecycle events as subscribable callbacks, but
-    # the exact API differs across versions/backends — a missing hook must not
-    # stop the window opening (the finally-block save covers the common case).
-    try:
-        window.events.closing += _persist_on_close
-    except (AttributeError, TypeError):
-        logger.debug("Window close-event hook unavailable on this backend", exc_info=True)
+    # Wire the pywebview lifecycle events to the controller. `closing` is
+    # synchronous and its return value is honored (return False vetoes the
+    # close → close-to-tray); `minimized` is a side-effect hook. Event wiring
+    # is best-effort — a backend that lacks a hook must not stop the launch.
+    _bind_event(window, "closing", controller.on_closing)
+    _bind_event(window, "minimized", controller.on_minimized)
 
-    # System tray (M6.2): reflects supervisor state and controls the window.
-    # A tray problem must never stop the app opening — degrade to windowed-only
-    # (also true when the tray libs are simply absent). Logged, not silent.
     tray: TrayController | None = None
-    try:
-        tray = _make_tray(window)
-        if tray is not None:
+    if platform is not None:
+        try:
+            tray = TrayController(
+                platform,
+                on_open=controller.show,
+                on_hide=controller.hide,
+                on_settings=controller.show_settings,
+                on_quit=controller.request_quit,
+            )
             supervisor.on_status_change = tray.on_supervisor_status
             tray.start()
-    except Exception:
-        logger.warning("System tray unavailable; continuing without it", exc_info=True)
-        tray = None
+        except Exception:
+            logger.warning("System tray unavailable; continuing without it", exc_info=True)
+            tray = None
 
     supervisor_thread = threading.Thread(target=supervisor.run, name="eva-supervisor", daemon=True)
     supervisor_thread.start()
     try:
-        webview.start()  # blocks the main thread until the window closes
+        webview.start()  # blocks the main thread until the window is destroyed
     finally:
-        # Deterministic teardown: no hanging threads, no orphan server.
+        # Deterministic teardown: no hanging threads, no orphan server. Save
+        # again here in case the close bypassed the `closing` handler.
         if tray is not None:
             tray.stop()
-        _persist_on_close()
+        capture_window_state(window, state).save(paths)
         supervisor.stop()
         supervisor_thread.join(timeout=5)
     return 0
 
 
-def _make_tray(window: Any) -> TrayController | None:
-    """Build the tray controller with window-driving callbacks, or None if the
-    tray libraries aren't installed. Menu actions are best-effort (a failing
-    backend call is logged, never propagated into the tray thread)."""
-    platform = create_platform()
-    if platform is None:
-        return None
+def _bind_event(window: Any, name: str, handler: Callable[[], Any]) -> None:
+    """Subscribe a zero-arg controller handler to a pywebview window event.
 
-    def settings() -> None:
-        window.show()
-        window.evaluate_js("window.location.hash = '#/settings'")
-
-    return TrayController(
-        platform,
-        on_open=_safe(window.show),
-        on_hide=_safe(window.hide),
-        on_settings=_safe(settings),
-        on_quit=_safe(window.destroy),
-    )
-
-
-def _safe(action: Callable[[], None]) -> Callable[[], None]:
-    """Wrap a tray-menu action so a backend hiccup is logged, not raised into
-    pystray's thread (which would silently kill the menu)."""
-
-    def wrapped() -> None:
-        try:
-            action()
-        except Exception:  # broad by design: a tray click must never crash the tray
-            logger.debug("Tray action failed", exc_info=True)
-
-    return wrapped
+    pywebview's Event calls a zero-parameter callable with no args and honors
+    its return value (for the synchronous `closing` event). Best-effort: a
+    backend missing the event must not prevent the window opening.
+    """
+    try:
+        event = getattr(window.events, name)
+        event += handler
+    except (AttributeError, TypeError):
+        logger.debug("Window event %r unavailable on this backend", name, exc_info=True)

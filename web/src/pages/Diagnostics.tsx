@@ -9,8 +9,18 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { diagnostics, system } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
-import { Card, EmptyState, Meter } from "../components/common";
+import type { EventLogEntry } from "../ws/store";
+import { Card, EmptyState, Meter, downloadText, toast } from "../components/common";
 import "./diagnostics.css";
+
+export function formatEventLog(entries: EventLogEntry[]): string {
+  return entries
+    .map((e) => {
+      const time = new Date(e.at).toISOString();
+      return e.summary ? `${time}  ${e.type}  ${e.summary}` : `${time}  ${e.type}`;
+    })
+    .join("\n");
+}
 
 const SPARKLINE_POINTS = 40;
 
@@ -34,6 +44,7 @@ function Sparkline({ values, max }: { values: number[]; max: number }) {
 export function Diagnostics() {
   const snapshot = useWsStore((s) => s.snapshot);
   const eventLog = useWsStore((s) => s.eventLog);
+  const clearEventLog = useWsStore((s) => s.clearEventLog);
   const poll = useQuery({
     queryKey: ["diagnostics"],
     queryFn: diagnostics.snapshot,
@@ -163,7 +174,48 @@ export function Diagnostics() {
         </Card>
       </div>
 
-      <Card title="Event log">
+      <Card
+        title="Event log"
+        actions={
+          <>
+            <button
+              disabled={eventLog.length === 0}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(formatEventLog(eventLog));
+                  toast("success", "Event log copied");
+                } catch {
+                  toast("error", "Copy failed — clipboard access was denied");
+                }
+              }}
+            >
+              Copy all
+            </button>
+            <button
+              disabled={eventLog.length === 0}
+              onClick={() => downloadText(formatEventLog(eventLog), "eva-event-log.txt")}
+            >
+              Export .txt
+            </button>
+            <button
+              disabled={eventLog.length === 0}
+              onClick={() => downloadText(formatEventLog(eventLog), "eva-event-log.log")}
+            >
+              Export .log
+            </button>
+            <button
+              className="danger"
+              disabled={eventLog.length === 0}
+              onClick={() => {
+                clearEventLog();
+                toast("info", "Event log cleared");
+              }}
+            >
+              Clear log
+            </button>
+          </>
+        }
+      >
         {eventLog.length === 0 ? (
           <EmptyState>No events yet this session.</EmptyState>
         ) : (
@@ -172,7 +224,9 @@ export function Diagnostics() {
               <div key={i} className="event-row">
                 <span className="event-time">{new Date(e.at).toLocaleTimeString()}</span>
                 <span className="chip">{e.type}</span>
-                <span className="event-summary">{e.summary}</span>
+                <span className="event-summary" title={e.summary}>
+                  {e.summary}
+                </span>
               </div>
             ))}
           </div>

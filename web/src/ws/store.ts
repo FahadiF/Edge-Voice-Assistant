@@ -86,6 +86,7 @@ export interface WsState {
   seedTranscript: (turns: ConversationTurn[]) => void;
   clearTranscript: () => void;
   clearDownload: (modelId: string) => void;
+  clearEventLog: () => void;
 }
 
 function summarize(type: string, data: Record<string, unknown>): string {
@@ -147,6 +148,8 @@ export const useWsStore = create<WsState>((set, get) => ({
       delete downloads[modelId];
       return { downloads };
     }),
+
+  clearEventLog: () => set({ eventLog: [] }),
 
   handleMessage: (envelope) => {
     const { type, data } = envelope;

@@ -6,6 +6,262 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-21 — Investigated: possible TTS cleanup race on rapid barge-in
+
+Follow-up from the streaming-pipeline investigation (below): running two
+`KokoroTTS.synthesize_stream()` calls concurrently was measured to crash
+(shared, non-thread-safe phonemizer state). This raised a follow-up question:
+could `_cancel_turn`'s old-turn cleanup and a new turn's TTS call ever
+overlap on a rapid barge-in, given `_drive_stream`'s close path does
+`with contextlib.suppress(BaseException): await asyncio.wrap_future(close_future)`?
+
+**Conclusion: not reachable — verified by code tracing and reproduction, not
+just reasoning.**
+- Code tracing: `Orchestrator.run()`'s event-dispatch loop is strictly
+  sequential (`await self._dispatch(event)` fully completes, including any
+  nested `await self._cancel_turn(...)`, before the next queued event is even
+  looked at) — so two barge-ins can never have overlapping `_cancel_turn`
+  calls. `_cancel_turn` also clears `self._turn_task` to `None`
+  *synchronously*, before its first `await`, so the API's `interrupt()` (a
+  second, independent entry point into `_cancel_turn` on the same event
+  loop) sees "nothing to cancel" if it overlaps rather than double-cancelling.
+  `task.cancel()` is called at most once per genuine cancellation (the only
+  call site in the file), so asyncio's cancellation propagates cleanly through
+  every nested `finally`/`aclose()` in one pass — including the
+  `wrap_future(close_future)` await — without being re-interrupted mid-unwind.
+- Reproduction: added a `SlowCleanupTTS` test fake shaped like Kokoro's timing
+  profile (real per-chunk delay; a `finally` block that takes real wall-clock
+  time to close, simulating phonemizer/session teardown) and drove it through
+  rapid double barge-in *and* a genuinely-concurrently-scheduled API
+  `interrupt()` call, across two close-delay values (150ms, 500ms) — 4
+  adversarial configurations, 0 overlaps detected in every run.
+- No evidence in `MANUAL_TESTING.md` or its barge-in stress checklist (§16.4)
+  of a related intermittent glitch ever being observed.
+
+**Added**
+- `tests/test_orchestrator.py::TestTtsCleanupSerialization` — permanent
+  regression guard using the new `SlowCleanupTTS` fake, so a future change to
+  the cancellation sequencing that reopens this window would be caught.
+
+No code fix needed — the investigation's own ask ("small and surgical if the
+race is confirmed") does not apply, since the race did not confirm.
+
+### 2026-07-21 — M6 polish: status-indicator flicker fixed; streaming pipeline investigated; Event Log tooling
+
+Four items from a Windows validation pass, all measured before any change.
+
+**Fixed — status indicator "blinks rapidly"**
+Root-caused via live browser instrumentation (`getComputedStyle` sampling on
+`.status-dot`), not guessed: the global `prefers-reduced-motion` CSS override
+in `theme/tokens.css` set only `animation-duration: 0.01ms !important`, which
+does **not** stop an `infinite` animation — it makes it loop ~100,000
+times/second, which renders as rapid, erratic flicker instead of "no motion".
+Confirmed active in the test environment (`animation-duration` measured at
+`1e-05s` with `animation-iteration-count` still `infinite`) independent of
+EVA's own `ui.reduced_motion` setting (which was `false`), meaning any user
+with OS-level "reduce motion" enabled hit this. Fixed to `animation: none
+!important`, which genuinely stops the animation (verified: duration `0s`,
+iteration-count `1` after the fix, rebuilt and reloaded). This has been in the
+CSS since the first commit — a latent bug, not a new regression, that only
+manifests under reduced-motion.
+
+**Investigated — "generate → wait → speak" / inter-sentence pauses**
+Measured with real instrumentation against the running engine (per-sentence
+timing logs) and standalone Kokoro benchmarks:
+- The orchestrator's pipelining is already correct: LLM generation, sentence
+  chunking, and TTS synthesis run concurrently (three asyncio tasks), and the
+  playback queue's buffered lead *grows* throughout a reply (measured
+  4.36s → 13.19s of buffered audio across a 6-sentence turn) — confirming
+  sentence N keeps sounding while N+1 synthesizes, no queueing bug.
+- The dominant real cost is Kokoro's per-sentence synthesis time: ~2.5-3.2s
+  for a typical 70-95 char sentence, scaling roughly linearly with text length
+  (measured 73→3023ms, 89→3098ms, 461→15501ms chars→ms) — CPU-bound inference
+  time, not a fixed per-call overhead (ruling out "coalesce sentences" as a
+  free win), and inherent to Kokoro's deliberately CPU-only design (ADR-004,
+  ADR-012, ADR-018 — keeps torch out of the product).
+- Tested whether prefetching sentence N+1's synthesis while N is still being
+  computed (true parallelism) would help: **it crashes.** Two concurrent
+  `synthesize_stream()` calls on the same `KokoroTTS` instance corrupt the
+  shared phonemizer state (`RuntimeError: number of lines in input and output
+  must be equal`). This is not a missed optimization — the sequential design
+  is a correctness requirement given Kokoro's current thread-safety, so it was
+  not implemented. See `spawn_task` follow-up on a related barge-in cleanup
+  race this surfaced.
+- One genuine, safe win was implemented (below); the rest is inherent
+  CPU-inference latency, environmentally bound like the earlier LLM
+  GPU-throttling finding, not a code defect.
+
+**Changed**
+- `speak_worker` now trims Kokoro's measured ~40-100ms of genuine leading/
+  trailing silence per sentence boundary (`eva.audio.frames.trim_edge_silence`,
+  bounded — only real silence is ever cut, capped well under the measured
+  amount so real speech is never at risk). The turn's very first sentence also
+  gets its leading edge trimmed (shaves the initial before-any-speech wait);
+  later sentences keep their natural lead-in, preserving the between-sentence
+  pause as normal prosody.
+
+**Added — Event Log tooling (Diagnostics page)**
+The event log could not be copied or exported. Added: **Copy all** (clipboard),
+**Export .txt** / **Export .log** (file download), **Clear log** — all backed
+by a plain `formatEventLog()` text formatter. Individual rows were already
+selectable (no `user-select` restriction existed); the missing piece was these
+explicit actions.
+
+**Added (tests)**
+- `tests/test_audio_frames_trim.py` — bounded silence-trim contract (9 cases).
+- `web/src/theme/tokens.reduced-motion.test.ts` — regression guard against the
+  broken `animation-duration`-only reduced-motion pattern (imports the CSS
+  source via Vite's `?raw`, so it needed `test.css: true` in `vite.config.ts`
+  and a standard `vite-env.d.ts` — vitest otherwise stubs CSS imports,
+  including `?raw` ones, to an empty string).
+- `web/src/pages/Diagnostics.test.tsx` — event-log formatting + Copy/Export/
+  Clear toolbar behavior.
+- Orchestrator's existing test suite re-verified green against the
+  `speak_worker` restructuring (25 tests, no changes needed — the trim is
+  purely additive to the chunk-emission path).
+
+**Recorded**
+- `ROADMAP.md`: the sentence-streaming architecture is confirmed already
+  correct; Kokoro's CPU-bound speed and non-thread-safety are documented as
+  known constraints for any future TTS work.
+
+### 2026-07-21 — M6.2 fix: minimize-to-tray no longer stalls the assistant
+
+Windows validation found the assistant felt unresponsive while minimized to the
+tray, with a delay after restore. Investigated by measurement (a headless
+pywebview + FastAPI/uvicorn probe driving the real minimize→hide→restore
+sequence and logging WebSocket liveness on a timeline), not by guessing.
+
+**Findings (measured)**
+- The engine was never the problem: it runs in a separate process (ADR-007) with
+  Python-side audio and a non-blocking, drop-oldest event bus, so a slow/hidden
+  client cannot stall it.
+- The WebSocket stays connected while hidden and `onmessage` fires at full rate.
+- The actual bottleneck is **Chromium backgrounding the hidden renderer**: the
+  probe showed a 250 ms `setInterval` collapse from 4/s to ~1/s once the window
+  is minimized (and WebView2 freezes the page entirely on prolonged hiding →
+  dropped WS → reconnect delay on restore).
+
+**Fixed**
+- The desktop shell now sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` with
+  `--disable-background-timer-throttling --disable-renderer-backgrounding
+  --disable-backgrounding-occluded-windows` before the window is created
+  (Windows-only; preserves any user-set value). The same probe confirmed timers
+  then hold full rate while minimized — so minimize-to-tray keeps the engine,
+  streaming, and WebSocket live, and restore is instant ("hidden only").
+- Web client: on `visibilitychange` → visible, the WebSocket force-reconnects
+  immediately (backoff reset) if it isn't open — belt-and-suspenders for very
+  long hides or the plain-browser (`eva serve --open`) case where the WebView2
+  flag doesn't apply.
+
+**Added**
+- Shell tests for the env-var helper (Windows-only, user-override preserved,
+  idempotent) and web tests for the visibility-triggered reconnect;
+  `MANUAL_TESTING.md §18.2` gains a "stays live while minimized" check.
+
+**Notes**
+- Recorded three deferred UX items surfaced during validation in `ROADMAP.md`
+  (speak-while-generating, inter-sentence gap reduction, event-log
+  copy/export) — not implemented now.
+
+### 2026-07-21 — M6.2 fix: restore-from-tray & tray-icon activation
+
+Manual Windows validation found the window could be hidden to the tray but not
+brought back. Root causes were **measured** against pywebview 6.2.1 (winforms)
+and pystray 0.19.5 with a headless probe, not guessed:
+
+**Fixed**
+- **Restore from tray now works.** A window hidden while minimized is at
+  `Visible=False, WindowState=Minimized`; `Form.Show()` re-applies the last
+  *shown* state, so the previous `restore()`→`show()` order was clobbered back
+  to `Minimized` — the window became visible-but-minimized and never appeared.
+  `WindowController.show()` now uses the verified `show()` → `restore()` →
+  `show()` sequence (make visible, un-minimize, re-activate for focus). The
+  cross-thread call was never the problem: pywebview self-marshals window ops
+  onto the GUI thread via `Control.Invoke`.
+- **Left-clicking the tray icon restores the window.** pystray only fires a
+  menu item on plain activation if it is the `default`; none was set, so
+  left-click did nothing. `TrayMenuItem` gained a `default` flag and the restore
+  item carries it.
+- **Renamed tray "Open" → "Restore Window"** (clearer intent; also the
+  left-click default action).
+
+**Changed**
+- Streaming caret blink is now a smooth `1.2s ease-in-out` fade (was a hard
+  `steps(1)` on/off that read as a harsh, too-fast flicker while tokens stream,
+  notably in WebView2); honors `prefers-reduced-motion`.
+
+**Added**
+- Unit tests lock the `show()`→`restore()`→`show()` call order and the single
+  `default` restore item (both fake-platform and real-pystray legs);
+  `MANUAL_TESTING.md §18.2/18.3` now cover left-click activation and
+  "restored normal and focused, not visible-but-minimized".
+
+### 2026-07-21 — Performance investigation: LLM offload made observable
+
+A post-M6 report of a "slower pipeline" was investigated by measuring each
+stage. Root cause was **not** an EVA code regression:
+
+- The engine pipeline code is byte-identical between "Finalized M5" and M6
+  (only `metrics/turn.py` counters, `metrics/diagnostics.py`, and the additive
+  `DesktopSettings` section changed — none on the per-turn hot path).
+- Per-stage timing showed ASR/VAD/TTFT/TTS-first/playback all at M5.7 levels;
+  only LLM token-generation throughput was low (~5 tok/s), and it was low
+  *equally* under both the M5.7 and M6 runtimes on the reference laptop.
+- A cuBLAS/CUDA-runtime version-mismatch hypothesis was tested by pinning the
+  runtime to the `cu124`-matched build and re-measuring — throughput was
+  unchanged, ruling it out. The GPU is genuinely engaged (>80% util); the
+  remaining gap is the laptop GPU's power/clock state, which EVA code does not
+  control.
+
+The investigation was slow because GPU-offload reality was invisible.
+
+**Changed**
+- `LlamaCppLLM` now takes a `verbose` flag, threaded from `developer.debug`.
+  When debug is on, llama.cpp prints its load report — including the actual
+  "offloaded N/M layers to GPU" line — so whether offload really happened is a
+  one-line `eva logs` check instead of a guess. Quiet by default (preserves the
+  M5.7 clean-output behavior).
+- The LLM load log now states plainly that `device=cuda` reflects the *build's*
+  offload capability, not proof that layers were offloaded, and points to
+  `developer.debug` for the real count.
+
+**Added**
+- `tests/test_llm_registry.py`: the factory threads engine settings and
+  `developer.debug` → `verbose` through to the adapter (headless — no native
+  runtime needed).
+
+### 2026-07-12 — M6.2 fix: window lifecycle (close/minimize to tray) & label
+
+Manual Windows validation found three M6.2 features that never worked — the
+shell only *saved* state on close; it never intercepted the window lifecycle
+or read the relevant `DesktopSettings`.
+
+**Fixed**
+- **Close to Tray** and **Minimize to Tray** now work. New `WindowController`
+  (`eva/desktop/window.py`) handles pywebview's lifecycle events: the
+  synchronous `closing` handler returns `False` to veto the X-button close and
+  hides the window to the tray (when `close_to_tray` is set and a tray exists);
+  the `minimized` handler hides to the tray when `minimize_to_tray` is set.
+  Tray **Quit** sets a quitting flag so it always exits — close-to-tray never
+  traps it. **Start Minimized** creates the window `hidden=True` (only with a
+  tray to hide into). Bringing the window back does `restore()` + `show()` so a
+  minimized-then-hidden window returns correctly.
+- Settings category displayed as lowercase **"desktop"** → now **"Desktop"**
+  (added to the UI's `SECTION_LABELS`).
+
+**Added**
+- 20 headless `WindowController` tests (close/minimize-to-tray on/off and with/
+  without a tray, tray-quit-vs-close, show/restore/settings navigation,
+  start-hidden decision) — the exact logic whose absence caused the bug —
+  plus shell wiring/graceful-degradation tests. `MANUAL_TESTING.md §18.3`
+  covers the full window-lifecycle + desktop-settings checklist on Windows.
+
+**Notes**
+- The tray must exist for hide-to-tray to make sense; all three behaviors are
+  no-ops without a tray (the window keeps normal OS behavior), so the desktop
+  remains usable window-only.
+
 ### 2026-07-12 — M6.2 fix: tray crashed on launch (pystray arg-count)
 
 **Fixed** — `eva-desktop` crashed at tray construction with

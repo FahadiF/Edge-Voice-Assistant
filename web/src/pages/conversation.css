@@ -64,11 +64,23 @@
 }
 
 .cursor {
-  animation: blink 1s steps(1) infinite;
+  /* A smooth, natural caret blink. The previous `steps(1)` was a hard on/off
+     toggle that reads as a harsh, too-fast flicker (notably in WebView2) while
+     tokens stream; a gentle fade with a visible hold looks like a text caret. */
+  animation: blink 1.2s ease-in-out infinite;
 }
 
 @keyframes blink {
-  50% { opacity: 0; }
+  0%,
+  40% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .interrupted-marker {

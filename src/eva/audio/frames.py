@@ -43,3 +43,32 @@ def rms_dbfs(samples: npt.NDArray[np.int16]) -> float:
     if rms <= 1e-6:
         return -120.0
     return float(20.0 * np.log10(rms))
+
+
+_SILENCE_AMPLITUDE = 200  # int16 units; well below speech, above quantization noise
+
+
+def trim_edge_silence(
+    samples: Frame, *, max_leading_ms: int = 0, max_trailing_ms: int = 0
+) -> Frame:
+    """Trim near-silence from a clip's start/end, bounded by max_*_ms.
+
+    Bounded rather than exact: caps how much can be cut from each edge so a
+    quiet leading/trailing consonant is never mistaken for silence and
+    clipped — this only removes genuine dead air, up to the cap. A `0` cap
+    (the default) disables trimming that edge. All-silence input is returned
+    unchanged (nothing meaningful to trim around).
+    """
+    if samples.size == 0 or (max_leading_ms <= 0 and max_trailing_ms <= 0):
+        return samples
+    nonsilent = np.flatnonzero(np.abs(samples) > _SILENCE_AMPLITUDE)
+    if nonsilent.size == 0:
+        return samples
+    start = 0
+    if max_leading_ms > 0:
+        start = min(int(nonsilent[0]), int(max_leading_ms * SAMPLE_RATE / 1000))
+    end = samples.size
+    if max_trailing_ms > 0:
+        trailing_silence = samples.size - 1 - int(nonsilent[-1])
+        end = samples.size - min(trailing_silence, int(max_trailing_ms * SAMPLE_RATE / 1000))
+    return samples[start:end]

@@ -23,6 +23,7 @@ def _make_llamacpp(settings: Settings, model_path: Path) -> LLMEngine:
         gpu_layers=settings.llm.gpu_layers,
         threads=settings.llm.threads,
         batch_size=settings.llm.batch_size,
+        verbose=settings.developer.debug,
     )
 
 

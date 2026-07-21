@@ -162,3 +162,40 @@ The tray drives the window and quit through the shell's callbacks and the
 engine only through the existing supervisor/API — no desktop-specific business
 logic was introduced. `[desktop]` now includes `pystray` (LGPL-3.0, as flagged
 in Consequences) and `pillow`.
+
+### Amendment (M6.2, cont.) — Window lifecycle controller
+
+Close-to-tray, minimize-to-tray, and start-minimized are realized by a
+`WindowController` (`window.py`), separated from pywebview event plumbing so
+the decisions are unit-tested against a fake window (the first M6.2 pass
+shipped these settings without the interception glue, so they silently did
+nothing — the missing tests are why). It relies on pywebview's synchronous
+`closing` event (a handler returning `False` vetoes the close → hide-to-tray)
+and the side-effect `minimized` event (hide-to-tray). Tray **Quit** sets a
+quitting flag so it always exits regardless of close-to-tray; all three
+hide behaviors are no-ops without a tray (nowhere to hide → normal OS
+behavior).
+
+### Amendment (M6.2, cont.) — Restore path fixed (measured), tray activation
+
+The first lifecycle pass could hide the window but not reliably bring it back.
+Two causes, both **measured** against pywebview 6.2.1 (winforms/EdgeChromium)
+and pystray 0.19.5, not guessed:
+
+- **Restore order.** A window hidden while minimized sits at
+  `Visible=False, WindowState=Minimized`. `Form.Show()` re-applies the *last
+  shown* window state, so the old `restore()`→`show()` order set `Normal` and
+  then `Show()` clobbered it back to `Minimized` — the window became
+  visible-but-minimized and never appeared. The correct, verified sequence is
+  `show()` → `restore()` → `show()` (make visible, un-minimize, then re-activate
+  for focus — the trailing `show()` is safe once the state is `Normal`). The
+  cross-thread call itself is fine: pywebview's window methods self-marshal onto
+  the GUI thread via `Control.Invoke`, so no manual thread hop is needed.
+- **Tray activation.** pystray fires a menu item on plain left-click only if it
+  is the `default` item; with none set, clicking the icon did nothing. The
+  "Restore Window" item (renamed from "Open") is now the `default`, so both
+  left-click and the menu entry restore the window.
+
+The restore sequence is asserted in `WindowController` unit tests (call order)
+and the `default`-item wiring in both the fake-platform and real-pystray tests;
+the visible outcome stays on the `MANUAL_TESTING.md` Windows checklist.

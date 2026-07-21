@@ -25,6 +25,7 @@ const SECTION_LABELS: Record<string, string> = {
   server: "Server",
   ui: "Appearance",
   developer: "Developer",
+  desktop: "Desktop",
 };
 
 export function SettingsPage() {

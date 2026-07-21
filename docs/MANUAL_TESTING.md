@@ -398,6 +398,14 @@ seconds, queue depths and dropped-frame counters match
 assistant (excluding the high-frequency `LlmToken` stream, which is
 intentionally not logged here).
 
+**Event Log tooling (M6 polish):** with a few events logged, confirm **Copy
+all** puts a plain-text line-per-event log on the clipboard (paste somewhere
+to check), **Export .txt** and **Export .log** each download a file with the
+same content, and **Clear log** empties the list (and the empty-state message
+reappears). All four buttons should be disabled when the log is empty. You
+should also be able to click-drag to select an individual row's text and copy
+it with the OS copy shortcut.
+
 ### 14.10 Plugins
 
 If no plugins are installed, confirm the empty-state explanation appears
@@ -421,7 +429,13 @@ sidebar collapses to a horizontal scrollable bar rather than overlapping
 content. Tab through a page using only the keyboard and confirm every
 interactive element shows a visible focus ring. Toggle your OS's
 "prefers-reduced-motion" setting (or the Settings page's "Reduced Motion")
-and confirm the state-pill pulse animation stops.
+and confirm the header status pill's dot goes **static** (a fixed color, no
+motion at all) rather than pulsing *or* flickering. (Bug history: the
+previous CSS here set only `animation-duration: 0.01ms`, which does not stop
+an `infinite` animation — it loops it ~100,000×/sec, which rendered as rapid,
+erratic flicker instead of no motion. Fixed to `animation: none`.) With
+reduced motion off, confirm the dot pulses smoothly (no flicker) at a
+noticeably different speed for Idle/Listening/Thinking/Speaking.
 
 ---
 
@@ -593,6 +607,14 @@ Privacy):
       shows; tokens then stream into the reply progressively (not one blob
       at the end), and TTS starts speaking after the first sentence, while
       later text is still streaming.
+- [ ] For a multi-sentence reply, the pause between spoken sentences is a
+      brief, natural beat, not a dead-air gap. (Investigated 2026-07-21: this
+      is bound by Kokoro's per-sentence CPU synthesis time — ~2.5-3.2s for a
+      typical sentence on the reference machine — not a queueing bug; a small
+      silence-trim was added to shave the measured ~40-100ms of genuine dead
+      air at each boundary. If gaps feel large here, that's a TTS-speed
+      question for M7's benchmarking pass, not something this checklist item
+      can fix.)
 - [ ] The mic button starts the engine when stopped, and interrupts the
       assistant when it is speaking.
 
@@ -768,13 +790,54 @@ pieces only.)
 - [ ] A tray icon appears; hovering shows "Edge Voice Assistant — <status>".
 - [ ] The icon color tracks server state: green (Running), amber (Starting…),
       grey (Stopped), red (Error).
-- [ ] Right-click menu: **Open** shows the window; **Hide** hides it;
+- [ ] Right-click menu: **Restore Window** shows the window; **Hide** hides it;
       **Settings** shows the window on the Settings page; the "Engine: <status>"
       line reflects the current state each time the menu opens; **Quit** exits
       the app cleanly (window closes, the owned server stops, no orphan process
       in Task Manager, no console traceback).
+- [ ] **Left-click / activate the tray icon** (single click on Windows) — the
+      window is restored (this is the `default` menu item). Minimize to tray,
+      then left-click the icon: the window must come back **normal and focused**,
+      not visible-but-minimized.
 - [ ] Start/stop the engine from the web UI while watching the tray — the icon
       updates without any perceptible polling delay.
+- [ ] **Assistant stays live while minimized to the tray.** With the engine
+      running, minimize to the tray, speak a full turn (or send a typed message
+      from another client), wait ~20–30 s, then restore: the conversation must
+      have progressed normally while hidden (streaming continued, no stall), the
+      WebSocket must still be connected (the header shows connected, not
+      reconnecting), and the UI must be current **immediately** on restore — no
+      multi-second catch-up. This verifies the renderer was not backgrounded
+      while hidden.
+
+### 18.3 Window lifecycle & desktop settings (M6.2)
+
+Set these on the **Desktop** settings page (verify the category is titled
+"Desktop", not "desktop"), Save, then exercise each:
+
+- [ ] **Close to Tray ON:** clicking the window's **X** hides the window to the
+      tray (app keeps running, tray icon stays); tray **Restore Window** (or a
+      left-click on the icon) brings it back **normal and focused**.
+      Clicking **X** with the setting OFF quits the app.
+- [ ] **Close to Tray ON but tray Quit still exits:** with the window hidden or
+      shown, tray **Quit** exits fully — X-vetoing must not trap Quit.
+- [ ] **Minimize to Tray ON:** minimizing the window hides it to the tray (no
+      taskbar button); tray **Restore Window** (or left-click) restores it
+      **normal and focused** (not visible-but-minimized). With the setting OFF,
+      minimize behaves normally (stays on the taskbar).
+- [ ] **Start Minimized ON:** relaunch `eva-desktop` → it starts hidden in the
+      tray (no window shown); tray **Restore Window** reveals it. (With no tray
+      available it starts normally — nowhere to hide.)
+- [ ] **Auto Start Engine ON:** relaunch → the engine starts on its own (the
+      tray turns green / the web UI shows it running) without clicking Start.
+      With it OFF, the engine stays stopped until you start it.
+- [ ] **Settings persistence:** change several Desktop settings, quit fully
+      (tray Quit), relaunch → the settings are retained (persisted in
+      `settings.json`). Window size/position/last-page are retained too
+      (`desktop_state.json`).
+- [ ] **No orphans / no tracebacks** across all of the above: after a full
+      Quit, no `eva`/python server process remains in Task Manager, and the
+      console/logs show no traceback.
 
 ## Naming note
 

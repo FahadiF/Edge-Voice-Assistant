@@ -201,6 +201,15 @@ export function downloadJson(data: unknown, filename: string): void {
   URL.revokeObjectURL(a.href);
 }
 
+export function downloadText(text: string, filename: string): void {
+  const blob = new Blob([text], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

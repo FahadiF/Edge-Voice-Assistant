@@ -40,11 +40,15 @@ class TrayIconState(StrEnum):
 class TrayMenuItem:
     """One tray menu entry. `label` may be a callable so a live value (e.g. the
     engine-status line) re-renders each time the menu opens. `on_activate` None
-    means a non-clickable label; `separator_before` inserts a divider above."""
+    means a non-clickable label; `separator_before` inserts a divider above.
+    `default` marks the item invoked on a plain left-click / activation of the
+    tray icon (pystray only fires a default item on left-click; without one, a
+    left-click does nothing) — at most one item should set it."""
 
     label: str | Callable[[], str]
     on_activate: Callable[[], None] | None = None
     separator_before: bool = False
+    default: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,7 +150,9 @@ class PystrayDesktopPlatform(DesktopPlatform):
         # late-binding guard is needed). None => a non-clickable label.
         text: Any = (lambda _item: label()) if callable(label) else label
         handler = (lambda _icon, _item: action()) if action is not None else None
-        return pystray.MenuItem(text, handler, enabled=action is not None)
+        # `default=True` makes this the icon's left-click / activation action;
+        # pystray invokes it via the same 2-arg (icon, item) handler.
+        return pystray.MenuItem(text, handler, enabled=action is not None, default=entry.default)
 
     @staticmethod
     def _image(state: TrayIconState) -> Any:

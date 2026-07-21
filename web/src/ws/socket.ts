@@ -52,10 +52,40 @@ function connect(): void {
   };
 }
 
+/**
+ * When the page becomes visible again (window restored from the tray / tab
+ * refocused), reconnect immediately if the socket isn't open. A renderer that
+ * was frozen while hidden can have a dropped or half-open socket with a pending
+ * backoff timer; on restore we want the live stream back at once, not after a
+ * multi-second backoff. No-op when the socket is already open.
+ */
+function onVisibilityChange(): void {
+  if (!started || document.visibilityState !== "visible") return;
+  if (socket && socket.readyState === WebSocket.OPEN) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  backoff = INITIAL_BACKOFF_MS; // restore should feel instant
+  if (socket) {
+    socket.onclose = null; // don't let the old socket schedule a competing reconnect
+    socket.onerror = null;
+    socket.onmessage = null;
+    try {
+      socket.close();
+    } catch {
+      // already closing/closed
+    }
+    socket = null;
+  }
+  connect();
+}
+
 /** Idempotent: called once from App mount. */
 export function startWebSocket(): void {
   if (started) return;
   started = true;
+  document.addEventListener("visibilitychange", onVisibilityChange);
   connect();
 }
 
@@ -64,6 +94,7 @@ export function startWebSocket(): void {
 export function stopWebSocket(): void {
   started = false;
   backoff = INITIAL_BACKOFF_MS;
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;

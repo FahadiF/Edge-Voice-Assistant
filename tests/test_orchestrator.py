@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Iterator
+from typing import overload
 
 import numpy as np
 import pytest
@@ -100,6 +101,51 @@ class FakeTTS(TTSEngine):
         return ["test-voice"]
 
 
+class SlowCleanupTTS(TTSEngine):
+    """Shaped like KokoroTTS's timing profile (not its API): multi-chunk
+    streaming synthesis with a real per-chunk delay, and a slow `finally`
+    block on close — simulating real, non-trivial phonemizer/session
+    teardown cost on the stream's dedicated owner thread. Used to check
+    whether a NEW turn's `synthesize_stream()` call can ever start while an
+    OLD turn's cleanup is still in flight — real KokoroTTS's shared,
+    non-thread-safe phonemizer state corrupts under exactly that overlap
+    (measured separately, outside this suite, against the real engine)."""
+
+    def __init__(self, chunk_delay_s: float = 0.03, close_delay_s: float = 0.1) -> None:
+        self.chunk_delay_s = chunk_delay_s
+        self.close_delay_s = close_delay_s
+        self.close_in_progress = False
+        self.overlap_detected = False
+        self.calls = 0
+
+    def load(self) -> None: ...
+
+    def unload(self) -> None: ...
+
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
+        return np.ones(1600, dtype=np.int16)
+
+    def synthesize_stream(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Iterator[Frame]:
+        self.calls += 1
+        if self.close_in_progress:
+            self.overlap_detected = True
+        try:
+            for _ in range(4):
+                time.sleep(self.chunk_delay_s)
+                yield np.ones(160, dtype=np.int16)
+        finally:
+            self.close_in_progress = True
+            time.sleep(self.close_delay_s)
+            self.close_in_progress = False
+
+    def voices(self) -> list[str]:
+        return ["test-voice"]
+
+
 class FakeAudioOut:
     def __init__(self) -> None:
         self.spoken: list[Frame] = []
@@ -119,20 +165,28 @@ class FakeAudioOut:
         return False  # playback drains instantly in tests
 
 
+@overload
+def make_orchestrator(
+    asr: FakeASR | None = None, llm: FakeLLM | None = None, tts: None = None
+) -> tuple[Orchestrator, EventBus, FakeAudioOut, FakeTTS]: ...
+@overload
+def make_orchestrator(
+    asr: FakeASR | None = None, llm: FakeLLM | None = None, *, tts: TTSEngine
+) -> tuple[Orchestrator, EventBus, FakeAudioOut, TTSEngine]: ...
 def make_orchestrator(
     asr: FakeASR | None = None,
     llm: FakeLLM | None = None,
-    tts: FakeTTS | None = None,
-) -> tuple[Orchestrator, EventBus, FakeAudioOut, FakeTTS]:
+    tts: TTSEngine | None = None,
+) -> tuple[Orchestrator, EventBus, FakeAudioOut, TTSEngine]:
     settings = Settings()
     settings.conversation.system_prompt = "test"
     bus = EventBus()
     audio = FakeAudioOut()
-    tts = tts or FakeTTS()
+    tts_engine = tts or FakeTTS()
     orch = Orchestrator(
-        settings, bus, audio, asr or FakeASR(), llm or FakeLLM(), tts, FakeMemoryStore()
+        settings, bus, audio, asr or FakeASR(), llm or FakeLLM(), tts_engine, FakeMemoryStore()
     )
-    return orch, bus, audio, tts
+    return orch, bus, audio, tts_engine
 
 
 async def drive(
@@ -758,5 +812,60 @@ class TestMetrics:
             assert turns[0].tokens == 4
             assert turns[0].ttfa_ms > 0
             assert not turns[0].cancelled
+
+        asyncio.run(scenario())
+
+
+class TestTtsCleanupSerialization:
+    """A TTS engine that holds shared, non-thread-safe state (real KokoroTTS:
+    one phonemizer/session instance) must never have two synthesize_stream()
+    calls in flight at once — measured separately to corrupt/crash real
+    Kokoro. `FakeTTS` completes instantly, so it can't expose whether a NEW
+    turn's TTS call could start while an OLD turn's cleanup (a slow `finally`
+    on `_drive_stream`'s dedicated owner thread) is still running;
+    `SlowCleanupTTS` gives that cleanup real wall-clock duration so an
+    overlap — if the orchestrator's cancellation sequencing had a hole in
+    it — would actually be observable."""
+
+    def test_no_overlap_across_rapid_double_barge_in_and_concurrent_interrupt(self) -> None:
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["word "] * 60, delay_s=0.005)
+            tts = SlowCleanupTTS(chunk_delay_s=0.03, close_delay_s=0.15)
+            orch, bus, _, _ = make_orchestrator(llm=llm, tts=tts)
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                deadline = time.monotonic() + 5.0
+                while tts.calls == 0 and time.monotonic() < deadline:
+                    await asyncio.sleep(0.005)
+                await asyncio.sleep(0.01)  # ensure we're mid-chunk, not already done
+
+                # Rapid double barge-in, back-to-back with zero gap — the
+                # exact adversarial shape `test_rapid_double_barge_in_stays_
+                # clean` covers for event ordering; here it's covered for TTS
+                # cleanup overlap instead.
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+
+                # The API's interrupt() is a second, independent entry point
+                # into _cancel_turn (same event loop, different call path) —
+                # schedule it as its own task so it is genuinely interleaved
+                # by the loop with the barge-ins' in-flight cancellation,
+                # not just sequentially awaited after them.
+                interrupt_task = asyncio.create_task(orch.interrupt())
+                await asyncio.sleep(0.2)
+                await interrupt_task
+
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.5)
+
+            await drive(orch, bus, script, timeout=15)
+
+            assert tts.calls >= 2  # the second UtteranceEnd's turn did reach TTS
+            assert not tts.overlap_detected, (
+                "a new synthesize_stream() call started while a previous "
+                "call's cleanup was still running — this would corrupt a "
+                "real, non-thread-safe TTS engine like KokoroTTS"
+            )
 
         asyncio.run(scenario())

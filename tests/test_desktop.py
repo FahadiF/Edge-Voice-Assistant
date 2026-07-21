@@ -17,7 +17,12 @@ import pytest
 
 from eva.desktop import main
 from eva.desktop.platform import DesktopPlatform, TrayIconState, TraySpec
-from eva.desktop.shell import _initial_url, _route_of, capture_window_state
+from eva.desktop.shell import (
+    _initial_url,
+    _keep_webview_awake_while_hidden,
+    _route_of,
+    capture_window_state,
+)
 from eva.desktop.state import MIN_WIDTH, DesktopState
 
 
@@ -70,18 +75,64 @@ class TestCaptureWindowState:
         assert state.last_route == "#/memory"  # kept the previous route
 
 
+class TestKeepWebviewAwake:
+    """The renderer must not be backgrounded while hidden to the tray, or the
+    live WebSocket/UI would stall while minimized (measured Chromium throttling).
+    Windows-only; user overrides are preserved."""
+
+    ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+
+    def test_sets_anti_backgrounding_flags_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("eva.desktop.shell.sys.platform", "win32")
+        monkeypatch.delenv(self.ENV, raising=False)
+        _keep_webview_awake_while_hidden()
+        import os
+
+        assert "--disable-renderer-backgrounding" in os.environ[self.ENV]
+        assert "--disable-background-timer-throttling" in os.environ[self.ENV]
+
+    def test_noop_off_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("eva.desktop.shell.sys.platform", "linux")
+        monkeypatch.delenv(self.ENV, raising=False)
+        _keep_webview_awake_while_hidden()
+        import os
+
+        assert self.ENV not in os.environ
+
+    def test_preserves_existing_user_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("eva.desktop.shell.sys.platform", "win32")
+        monkeypatch.setenv(self.ENV, "--my-flag")
+        _keep_webview_awake_while_hidden()
+        import os
+
+        value = os.environ[self.ENV]
+        assert "--my-flag" in value
+        assert "--disable-renderer-backgrounding" in value
+
+    def test_idempotent_when_already_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("eva.desktop.shell.sys.platform", "win32")
+        monkeypatch.setenv(self.ENV, "--disable-renderer-backgrounding")
+        _keep_webview_awake_while_hidden()
+        import os
+
+        # Left as-is (our marker already present) — not doubled up.
+        assert os.environ[self.ENV].count("--disable-renderer-backgrounding") == 1
+
+
 @pytest.fixture
 def fake_webview() -> Iterator[types.SimpleNamespace]:
     calls: dict[str, object] = {}
 
+    class _Signal:
+        def __iadd__(self, handler: object) -> _Signal:
+            return self
+
     class _Events:
         def __init__(self) -> None:
             self.closing = _Signal()
-
-    class _Signal:
-        def __iadd__(self, handler: object) -> _Signal:
-            calls["closing_handler"] = handler
-            return self
+            self.minimized = _Signal()
 
     class _Window:
         def __init__(self) -> None:
@@ -91,9 +142,10 @@ def fake_webview() -> Iterator[types.SimpleNamespace]:
         def get_current_url(self) -> str:
             return "http://127.0.0.1:8765/"
 
-        # The tray wires callbacks to these; no-ops for the fake.
+        # The tray/window controller wires callbacks to these; no-ops here.
         def show(self) -> None: ...
         def hide(self) -> None: ...
+        def restore(self) -> None: ...
         def destroy(self) -> None: ...
         def evaluate_js(self, _script: str) -> None: ...
 

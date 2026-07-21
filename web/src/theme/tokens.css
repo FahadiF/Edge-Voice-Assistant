@@ -71,11 +71,22 @@ body {
   line-height: 1.45;
 }
 
+/* BUG (measured): `animation-duration: 0.01ms !important` alone does not stop
+   an `infinite` animation — it makes it loop ~100,000 times/second, which
+   browsers render as rapid, erratic flicker instead of "no motion" (confirmed
+   via getComputedStyle: animation-duration 1e-05s, animation-iteration-count
+   still infinite, on .status-dot with prefers-reduced-motion active). This is
+   exactly the reported "status indicator blinks rapidly" regression — it is
+   not new code, it is a long-standing bug in this reduced-motion override that
+   only bites elements with `infinite` keyframe animations (the status dot,
+   the thinking-dots ellipsis). `animation: none !important` genuinely stops
+   them; `transition-duration` is left as a fast (not zero) duration so
+   discrete transitions still complete instead of jumping instantaneously. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    animation: none !important;
     transition-duration: 0.01ms !important;
   }
 }
@@ -83,7 +94,7 @@ body {
 [data-reduced-motion="true"] *,
 [data-reduced-motion="true"] *::before,
 [data-reduced-motion="true"] *::after {
-  animation-duration: 0.01ms !important;
+  animation: none !important;
   transition-duration: 0.01ms !important;
 }
 

@@ -58,11 +58,21 @@ def test_menu_texts_render() -> None:
     spec, _ = _spec_and_calls()
     icon = PystrayDesktopPlatform().build_icon(spec)
     texts = [item.text for item in icon.menu]  # triggers callable text(item)
-    assert "Open" in texts
+    assert "Restore Window" in texts
     assert "Hide" in texts
     assert "Settings" in texts
     assert "Quit" in texts
     assert any(t.startswith("Engine:") for t in texts)
+
+
+def test_restore_item_is_the_real_pystray_default() -> None:
+    # Left-click activation depends on pystray seeing exactly one `default`
+    # MenuItem — assert against the REAL constructed menu, not just our spec.
+    spec, _ = _spec_and_calls()
+    icon = PystrayDesktopPlatform().build_icon(spec)
+    defaults = [item for item in icon.menu if item.default]
+    assert len(defaults) == 1
+    assert defaults[0].text == "Restore Window"
 
 
 def test_menu_actions_invoke_the_shell_callbacks() -> None:

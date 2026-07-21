@@ -268,11 +268,43 @@ sub-milestones (ADR-027):
 - **M6.1 ✅** server supervision (attach-or-spawn + bounded-backoff restart),
   window-state persistence, `DesktopSettings` section.
 - **M6.2 ✅** system tray (`DesktopPlatform` port + pystray adapter;
-  supervisor-state icon/menu; push-not-poll status).
+  supervisor-state icon/menu; push-not-poll status), window lifecycle
+  (close/minimize-to-tray, restore, left-click activation), and
+  **background-safe minimize**: the WebView2 renderer is kept unthrottled while
+  hidden (measured — Chromium otherwise clamps hidden-tab timers to ~1 Hz and
+  eventually freezes the page, stalling the live UI/WebSocket in the tray) so
+  minimizing is "hidden only" — engine, streaming, and WS continue and restore
+  is instant. Belt-and-suspenders: the web client force-reconnects the WS on
+  becoming visible.
 - **M6.3** global hotkey · **M6.4** first-run wizard
   (React `/welcome`, ADR-028) · **M6.5** notifications + crash recovery +
   autostart/single-instance · **M6.6** Windows installer.
 **Exit:** double-click launch to a working assistant on Windows and Linux dev boxes.
+
+### M6 UX backlog — investigated 2026-07-21 (see CHANGELOG for the measurements)
+
+- **A/B. Sentence-level speak-while-generating / inter-sentence gaps —
+  investigated, mostly already correct.** Measured with real per-sentence
+  timing against the running engine: the orchestrator already runs LLM
+  generation, sentence chunking, and TTS synthesis concurrently, and the
+  playback buffer's lead *grows* through a reply (proof there's no queueing
+  stall). The remaining, real cost is Kokoro's per-sentence CPU synthesis time
+  (~2.5-3.2s for a typical sentence, linear in text length — not a fixed
+  per-call overhead, so coalescing sentences would not help and would delay
+  first audio). A small, safe win (trimming ~40-100ms of measured genuine
+  edge-silence per sentence boundary) was implemented. **True TTS-call
+  parallelism (synthesizing N+1 while N is still being computed) was tested
+  and crashes** — `KokoroTTS` holds one shared, non-thread-safe
+  kokoro-onnx/phonemizer instance; two concurrent `synthesize_stream()` calls
+  corrupt it. Any future work to overlap synthesis calls needs either (a) a
+  small pool of independent `KokoroTTS`/model instances (real memory/load-time
+  cost, needs its own design) or (b) revisiting the CPU-only TTS decision
+  (ADR-004/012/018) — neither undertaken here without that trade-off being
+  explicitly chosen. Remaining latency is CPU-inference-speed-bound, the same
+  class of environmental constraint as the earlier LLM GPU-throttling finding
+  — a candidate for M7's benchmarking/optimization pass, not a code defect.
+- **C. Event Log copy/export — done.** Copy all / Export .txt / Export .log /
+  Clear log added to the Diagnostics page.
 
 ## M7 — Benchmarking & performance engineering
 Benchmark harness: ASR (WER + latency on recorded fixtures), LLM (tokens/s, TTFT),

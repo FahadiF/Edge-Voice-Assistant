@@ -80,7 +80,8 @@ class TrayController:
 
     def _menu(self) -> tuple[TrayMenuItem, ...]:
         return (
-            TrayMenuItem("Open", self._on_open),
+            # `default=True` → also the left-click / icon-activation action.
+            TrayMenuItem("Restore Window", self._on_open, default=True),
             TrayMenuItem("Hide", self._on_hide),
             # Live, non-clickable status line (re-rendered when the menu opens).
             TrayMenuItem(self._status_line, separator_before=True),

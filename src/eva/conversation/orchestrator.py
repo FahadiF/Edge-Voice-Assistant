@@ -14,6 +14,14 @@ Inside a turn, three concurrent units pipeline the response:
   speak worker      synthesizes sentences sequentially and queues playback —
                     sentence N plays while N+1 synthesizes while tokens arrive.
 
+Synthesis calls stay sequential (never two in flight at once) by necessity,
+not by missed optimization: `KokoroTTS` holds one shared, stateful
+kokoro-onnx/phonemizer instance, and driving two `synthesize_stream()` calls
+against it concurrently corrupts/crashes (measured — a concurrent second call
+raises inside the phonemizer). Playback still overlaps generation because
+`AudioOutput.say()` only enqueues (non-blocking); the queue's buffered lead is
+what lets sentence N keep sounding while N+1's synthesis runs.
+
 Every hand-off point checks the turn epoch; a stale turn stops at the next
 boundary and its artifacts are never spoken. The orchestrator holds no model
 code: engines are ports, audio out is a three-method protocol, so the entire
@@ -32,7 +40,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from eva.asr.base import ASREngine
-from eva.audio.frames import Frame
+from eva.audio.frames import Frame, trim_edge_silence
 from eva.audio.segmenter import (
     BargeIn,
     SegmenterEvent,
@@ -85,6 +93,11 @@ _BARGE_IN_LATENCY_TIMEOUT_S = 1.0  # safety cap; a hit means "unmeasured", not "
 _TOKEN_QUEUE_MAXSIZE = 256  # bounds memory on a pathological long reply
 _SENTENCE_QUEUE_MAXSIZE = 32
 _QUEUE_BACKPRESSURE_TIMEOUT_S = 5.0  # cross-thread put() safety cap; never hit in practice
+# Bounded trims of Kokoro's per-utterance dead air (measured ~40-100ms per
+# edge) — small and safe: only genuine trailing/leading silence is ever cut,
+# capped well under what was measured so real speech is never at risk.
+_LEADING_TRIM_MS = 80
+_TRAILING_TRIM_MS = 150
 _RECOVERY_COOLDOWN_S = 30.0  # one component-restart attempt per window (M5.5)
 
 
@@ -684,6 +697,15 @@ class Orchestrator:
                     self._bus.publish(TtsStarted(epoch=epoch))
                     self._set_state("speaking")
                 synth_start = time.perf_counter()
+                # Hold back exactly one chunk so the true LAST chunk of this
+                # sentence (and only that one) gets its trailing silence
+                # trimmed — measured at ~90-100ms per sentence boundary on
+                # Kokoro's output, unnecessary dead air now that the next
+                # sentence's own natural lead-in silence follows immediately.
+                # Mid-utterance chunk boundaries are never trimmed: a pause
+                # there would be an artifact of chunking, not real silence.
+                pending: Frame | None = None
+                is_first_chunk_ever = first_audio_ms == 0
                 try:
                     sync_gen = self._tts.synthesize_stream(
                         spoken_text,
@@ -702,7 +724,22 @@ class Orchestrator:
                                 self._bus.publish(
                                     TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms)
                                 )
-                            self._audio.say(chunk)
+                            if pending is not None:
+                                self._audio.say(pending)  # not the last chunk: untouched
+                            pending = chunk
+                        if pending is not None:
+                            # This IS the last chunk of the sentence: trim its
+                            # trailing silence, and its leading silence too if
+                            # it is also the very first sound of the whole
+                            # turn (shaves the initial "before any speech"
+                            # wait; later sentences keep their natural
+                            # lead-in, which is the between-sentence pause).
+                            pending = trim_edge_silence(
+                                pending,
+                                max_leading_ms=_LEADING_TRIM_MS if is_first_chunk_ever else 0,
+                                max_trailing_ms=_TRAILING_TRIM_MS,
+                            )
+                            self._audio.say(pending)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
