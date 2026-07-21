@@ -150,6 +150,33 @@ class TestSupervisionLoop:
         assert service.spawns == 0  # we never restart a server we didn't start
 
 
+class TestStatusChangeCallback:
+    """M6.2: the tray subscribes to on_status_change so it reflects server
+    state without polling — the callback must fire only on transitions."""
+
+    def test_callback_fires_on_transitions_only(self, tmp_path: Path) -> None:
+        service = FakeService(spawn_ok=True)
+        service.probe_results = [False]  # spawn → RUNNING
+        sup = _supervisor(tmp_path, service)
+        seen: list[SupervisorStatus] = []
+        sup.on_status_change = seen.append
+        sup.ensure_running()  # STOPPED → RUNNING (one transition)
+        assert seen == [SupervisorStatus.RUNNING]
+        # A healthy re-check does not re-fire (no transition).
+        service.probe_results = [True]
+        sup.check()
+        assert seen == [SupervisorStatus.RUNNING]
+
+    def test_callback_reports_failure_transition(self, tmp_path: Path) -> None:
+        service = FakeService(spawn_ok=False)
+        service.probe_results = [False]
+        sup = _supervisor(tmp_path, service)
+        seen: list[SupervisorStatus] = []
+        sup.on_status_change = seen.append
+        sup.ensure_running()  # → FAILED
+        assert seen[-1] is SupervisorStatus.FAILED
+
+
 class TestStop:
     def test_stop_terminates_owned_server(self, tmp_path: Path) -> None:
         service = FakeService()

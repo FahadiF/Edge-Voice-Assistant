@@ -6,6 +6,38 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-12 — M6.2: System tray (ADR-027)
+
+Second phase of M6. The desktop app gains a native system tray as its
+background control surface — a thin UI layer, no engine logic.
+
+**Added**
+- `DesktopPlatform` port (`eva/desktop/platform.py`) with a `pystray`+`pillow`
+  adapter (`PystrayDesktopPlatform`, lazily imported, runtime-drawn status
+  icons — no binary assets) and a `create_platform()` factory that returns
+  `None` when the desktop extra is absent (window runs tray-less, graceful
+  degradation).
+- `TrayController` (`eva/desktop/tray.py`) — pure logic mapping
+  `SupervisorStatus` → tray icon + status text and a menu (Open · Hide · live
+  "Engine: <status>" · Settings · Quit) whose clicks route to shell callbacks
+  (window show/hide, navigate to Settings, graceful quit). Holds no engine
+  logic; drives the engine only via the existing supervisor/API.
+- `ServerSupervisor.on_status_change` — fires on state transitions only, so
+  the tray reflects server state **pushed, not polled** (the supervisor's
+  existing health loop is the sole checker).
+- `[desktop]` extra now includes `pystray` (LGPL-3.0 — optional, dynamically
+  imported, replaceable; see ADR-027) and `pillow`.
+- ADR-027 amended (tray realization); 12 new headless tests
+  (TrayController state-mapping / menu / click-dispatch against a
+  `FakeDesktopPlatform`; supervisor status-change callback) and a
+  `MANUAL_TESTING.md` §18 native-tray checklist.
+
+**Notes**
+- The pystray adapter and live tray rendering are validated by the manual
+  checklist (no interactive desktop session in CI). Global hotkeys,
+  notifications, wizard, autostart, single-instance, and the installer remain
+  later M6 phases.
+
 ### 2026-07-12 — M6.1: Desktop server supervision & window state (ADR-027)
 
 First phase of M6 (native desktop). No engine features — the desktop shell

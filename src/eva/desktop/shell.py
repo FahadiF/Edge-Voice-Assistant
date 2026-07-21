@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from eva.config import get_app_paths, load_settings
 from eva.desktop.client import DesktopClient
+from eva.desktop.platform import create_platform
 from eva.desktop.state import MIN_HEIGHT, MIN_WIDTH, DesktopState
 from eva.desktop.supervisor import ServerSupervisor
+from eva.desktop.tray import TrayController
 from eva.service import display_host
 
 logger = logging.getLogger(__name__)
@@ -118,7 +121,10 @@ def main() -> int:
     if settings.desktop.auto_start_engine:
         DesktopClient(host, port).start_engine()  # best-effort; UI can start it too
 
-    window = webview.create_window(
+    # Duck-typed: pywebview's Window API varies by version/backend, and the
+    # optional dep is absent in CI — we only use a small, stable surface
+    # (show/hide/destroy/events/evaluate_js/geometry), so treat it as Any.
+    window: Any = webview.create_window(
         "Edge Voice Assistant",
         _initial_url(host, port, state),
         width=state.width,
@@ -139,13 +145,56 @@ def main() -> int:
     except (AttributeError, TypeError):
         logger.debug("Window close-event hook unavailable on this backend", exc_info=True)
 
+    # System tray (M6.2): reflects supervisor state and controls the window.
+    # Degrades gracefully to a windowed-only app if the tray libs are absent.
+    tray = _make_tray(window)
+    if tray is not None:
+        supervisor.on_status_change = tray.on_supervisor_status
+        tray.start()
+
     supervisor_thread = threading.Thread(target=supervisor.run, name="eva-supervisor", daemon=True)
     supervisor_thread.start()
     try:
         webview.start()  # blocks the main thread until the window closes
     finally:
         # Deterministic teardown: no hanging threads, no orphan server.
+        if tray is not None:
+            tray.stop()
         _persist_on_close()
         supervisor.stop()
         supervisor_thread.join(timeout=5)
     return 0
+
+
+def _make_tray(window: Any) -> TrayController | None:
+    """Build the tray controller with window-driving callbacks, or None if the
+    tray libraries aren't installed. Menu actions are best-effort (a failing
+    backend call is logged, never propagated into the tray thread)."""
+    platform = create_platform()
+    if platform is None:
+        return None
+
+    def settings() -> None:
+        window.show()
+        window.evaluate_js("window.location.hash = '#/settings'")
+
+    return TrayController(
+        platform,
+        on_open=_safe(window.show),
+        on_hide=_safe(window.hide),
+        on_settings=_safe(settings),
+        on_quit=_safe(window.destroy),
+    )
+
+
+def _safe(action: Callable[[], None]) -> Callable[[], None]:
+    """Wrap a tray-menu action so a backend hiccup is logged, not raised into
+    pystray's thread (which would silently kill the menu)."""
+
+    def wrapped() -> None:
+        try:
+            action()
+        except Exception:  # broad by design: a tray click must never crash the tray
+            logger.debug("Tray action failed", exc_info=True)
+
+    return wrapped

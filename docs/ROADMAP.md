@@ -267,7 +267,9 @@ remaining desktop-specific polish around that shell. Delivered as gated
 sub-milestones (ADR-027):
 - **M6.1 ✅** server supervision (attach-or-spawn + bounded-backoff restart),
   window-state persistence, `DesktopSettings` section.
-- **M6.2** system tray · **M6.3** global hotkey · **M6.4** first-run wizard
+- **M6.2 ✅** system tray (`DesktopPlatform` port + pystray adapter;
+  supervisor-state icon/menu; push-not-poll status).
+- **M6.3** global hotkey · **M6.4** first-run wizard
   (React `/welcome`, ADR-028) · **M6.5** notifications + crash recovery +
   autostart/single-instance · **M6.6** Windows installer.
 **Exit:** double-click launch to a working assistant on Windows and Linux dev boxes.

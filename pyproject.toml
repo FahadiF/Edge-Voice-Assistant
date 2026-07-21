@@ -66,9 +66,11 @@ cuda = [
     "nvidia-cuda-runtime-cu12",  # cudart — required by the CUDA llama.cpp wheel
     "nvidia-cublas-cu12",        # cuBLAS  — required by the CUDA llama.cpp wheel
 ]
-# Minimal desktop shell (M5, ADR-007/ADR-023) — a native window hosting the
-# built web UI. Optional: the base CLI/server never imports pywebview.
-desktop = ["pywebview>=5"]
+# Native desktop shell (M5–M6, ADR-007/ADR-023/ADR-027) — a native window
+# hosting the built web UI, plus the system tray (M6.2). Optional: the base
+# CLI/server never imports these. pystray is LGPL-3.0 (dynamically imported,
+# replaceable — see ADR-027); pillow renders the tray status icon.
+desktop = ["pywebview>=5", "pystray>=0.19", "pillow>=10"]
 
 [project.scripts]
 eva = "eva.cli:main"
@@ -135,6 +137,8 @@ module = [
     "kokoro_onnx.*",
     "onnxruntime.*",
     "tokenizers.*",
+    "pystray.*",
+    "PIL.*",
 ]
 ignore_missing_imports = true
 

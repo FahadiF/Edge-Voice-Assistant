@@ -131,3 +131,34 @@ action the *shell* performs via `POST /engine/start`, not a server behavior.
   licensing of EVA itself — but the choice is flagged deliberately per ADR-004's
   license discipline and revisited if a permissively-licensed equivalent proves
   viable.
+
+## Amendment (M6.2) — System tray realized
+
+The `DesktopPlatform` seam anticipated in Decision 4 is now concrete for the
+tray:
+
+- **Port:** `DesktopPlatform` (`platform.py`) with `start_tray` /
+  `set_tray_state` / `stop_tray` over `TraySpec` / `TrayMenuItem` /
+  `TrayIconState` data types. One real adapter (`PystrayDesktopPlatform`, all
+  pystray/PIL use lazily imported and confined to it) and a `FakeDesktopPlatform`
+  in the tests.
+- **Controller:** `TrayController` (`tray.py`) is pure logic — it maps
+  `SupervisorStatus` → icon + status text (a data table, no branching in the
+  render path), builds the menu (Open / Hide / live "Engine: <status>" line /
+  Settings / Quit), and routes clicks to injected shell callbacks
+  (window show/hide, navigate-to-settings, quit). It holds no engine logic and
+  never touches anything native directly.
+- **State source:** the tray reflects *supervisor* state (is the backend up),
+  which the supervisor already computes. `ServerSupervisor` gained an
+  `on_status_change` callback fired only on transitions; the tray subscribes to
+  it, so state is **pushed, never polled** (the supervisor's existing health
+  loop is the only thing checking).
+- **Icons:** drawn at runtime with PIL (a colored status dot) — no binary
+  assets are shipped, keeping the repo source-only.
+- **Graceful degradation:** `create_platform()` returns `None` when the desktop
+  extra is absent; the window then runs tray-less rather than failing.
+
+The tray drives the window and quit through the shell's callbacks and the
+engine only through the existing supervisor/API — no desktop-specific business
+logic was introduced. `[desktop]` now includes `pystray` (LGPL-3.0, as flagged
+in Consequences) and `pillow`.

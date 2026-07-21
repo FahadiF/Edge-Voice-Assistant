@@ -82,7 +82,22 @@ class ServerSupervisor:
         self._owned = False
         self._failures = 0
         self._stop = threading.Event()
-        self.status = SupervisorStatus.STOPPED
+        self._status = SupervisorStatus.STOPPED
+        # Fired whenever the status changes (M6.2) — lets the tray reflect
+        # server state without polling: the existing poll loop is the only
+        # thing checking health, and it pushes changes here. Set by the shell.
+        self.on_status_change: Callable[[SupervisorStatus], None] | None = None
+
+    @property
+    def status(self) -> SupervisorStatus:
+        return self._status
+
+    def _set_status(self, status: SupervisorStatus) -> None:
+        if status == self._status:
+            return
+        self._status = status
+        if self.on_status_change is not None:
+            self.on_status_change(status)
 
     @property
     def health_url(self) -> str:
@@ -98,17 +113,17 @@ class ServerSupervisor:
         Returns True when a server is up and reachable."""
         if self._service.probe_health(self.health_url):
             self._owned = False
-            self.status = SupervisorStatus.ATTACHED
+            self._set_status(SupervisorStatus.ATTACHED)
             logger.info("Attached to an already-running server at %s", self.health_url)
             return True
         logger.info("Starting the EVA server (%s)", self.health_url)
         self._service.spawn_server(self._paths, self._host, self._port)
         self._owned = True
         if self._service.wait_until_healthy(self.health_url, self._startup_timeout_s):
-            self.status = SupervisorStatus.RUNNING
+            self._set_status(SupervisorStatus.RUNNING)
             self._failures = 0
             return True
-        self.status = SupervisorStatus.FAILED
+        self._set_status(SupervisorStatus.FAILED)
         logger.error("Server did not become healthy within %.0fs", self._startup_timeout_s)
         return False
 
@@ -127,17 +142,17 @@ class ServerSupervisor:
             return self.status
         if self._service.probe_health(self.health_url):
             self._failures = 0
-            self.status = SupervisorStatus.RUNNING if self._owned else SupervisorStatus.ATTACHED
+            self._set_status(SupervisorStatus.RUNNING if self._owned else SupervisorStatus.ATTACHED)
             return self.status
         if not self._owned:
-            self.status = SupervisorStatus.STOPPED
+            self._set_status(SupervisorStatus.STOPPED)
             return self.status
         if self._failures >= self._max_failures:
-            self.status = SupervisorStatus.FAILED
+            self._set_status(SupervisorStatus.FAILED)
             logger.error("Server failed %d times in a row — not restarting again", self._failures)
             return self.status
         self._failures += 1
-        self.status = SupervisorStatus.RESTARTING
+        self._set_status(SupervisorStatus.RESTARTING)
         delay = min(self._backoff_max_s, self._backoff_base_s * (2 ** (self._failures - 1)))
         logger.warning(
             "Server is down — restart attempt %d/%d after %.1fs",
@@ -150,9 +165,9 @@ class ServerSupervisor:
             return self.status
         self._service.spawn_server(self._paths, self._host, self._port)
         if self._service.wait_until_healthy(self.health_url, self._startup_timeout_s):
-            self.status = SupervisorStatus.RUNNING
+            self._set_status(SupervisorStatus.RUNNING)
         else:
-            self.status = (
+            self._set_status(
                 SupervisorStatus.FAILED
                 if self._failures >= self._max_failures
                 else SupervisorStatus.RESTARTING
@@ -177,4 +192,4 @@ class ServerSupervisor:
         if pid is not None:
             self._service.terminate_server(self._paths, pid, host=self._host, port=self._port)
         self._owned = False
-        self.status = SupervisorStatus.STOPPED
+        self._set_status(SupervisorStatus.STOPPED)

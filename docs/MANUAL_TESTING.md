@@ -740,6 +740,42 @@ eva status         # "not running", exit code 1
 
 ---
 
+## 18. Desktop shell & system tray (M6.1–M6.2)
+
+Requires the desktop extra and a real desktop session:
+`pip install -e ".[desktop]"` then `eva-desktop`. (Headless CI cannot
+exercise the window/tray; the supervisor, window-state, tray-controller, and
+client logic are unit-tested with fakes — this checklist covers the native
+pieces only.)
+
+### 18.1 Launch & supervision (M6.1)
+- [ ] `eva-desktop` opens a native window showing the web UI. With no server
+      running, it starts one; run `eva status` in a terminal — it reports the
+      same server (shared PID/port).
+- [ ] Start `eva start` FIRST, then `eva-desktop`: the app **attaches** (logs
+      "Attached to an already-running server"); closing the app leaves that
+      server running (it only stops servers it started).
+- [ ] Kill the shell-owned server process (Task Manager); within a few seconds
+      the tray shows "Starting…" then "Running" as it restarts (bounded
+      backoff). Kill it repeatedly and fast — after the cap it shows "Error"
+      and stops retrying (no CPU-spinning restart loop).
+- [ ] Resize/move the window, quit, relaunch → it reopens at the same size and
+      position, on the last page you were viewing.
+- [ ] Without the extra, `eva-desktop` prints the "install the desktop extra"
+      remedy and exits — no traceback.
+
+### 18.2 System tray (M6.2)
+- [ ] A tray icon appears; hovering shows "Edge Voice Assistant — <status>".
+- [ ] The icon color tracks server state: green (Running), amber (Starting…),
+      grey (Stopped), red (Error).
+- [ ] Right-click menu: **Open** shows the window; **Hide** hides it;
+      **Settings** shows the window on the Settings page; the "Engine: <status>"
+      line reflects the current state each time the menu opens; **Quit** exits
+      the app cleanly (window closes, the owned server stops, no orphan process
+      in Task Manager, no console traceback).
+- [ ] Start/stop the engine from the web UI while watching the tray — the icon
+      updates without any perceptible polling delay.
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,
