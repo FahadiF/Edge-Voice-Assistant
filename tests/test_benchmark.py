@@ -21,7 +21,9 @@ class _FakeASR(ASREngine):
     def load(self) -> None: ...
     def unload(self) -> None: ...
 
-    def transcribe(self, audio: Frame, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio: Frame, language: str | None = None, *, prompt: str | None = None
+    ) -> TranscriptionResult:
         return TranscriptionResult(text="what is the weather today")
 
 

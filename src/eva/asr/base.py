@@ -38,5 +38,14 @@ class ASREngine(ABC):
         """Release model resources (hot-swap support)."""
 
     @abstractmethod
-    def transcribe(self, audio: Frame, language: str | None = None) -> TranscriptionResult:
-        """Transcribe one utterance. `audio` may be partial (for live partials)."""
+    def transcribe(
+        self, audio: Frame, language: str | None = None, *, prompt: str | None = None
+    ) -> TranscriptionResult:
+        """Transcribe one utterance. `audio` may be partial (for live partials).
+
+        `prompt` is optional decoding context (Whisper's `initial_prompt`): a
+        short factual hint — the speaker's name, domain vocabulary — that biases
+        spelling of proper nouns and jargon without forcing them (measured to
+        fix e.g. a name mis-transcription without injecting unspoken words).
+        Engines without such a mechanism ignore it.
+        """

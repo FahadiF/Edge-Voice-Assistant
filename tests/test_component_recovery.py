@@ -31,7 +31,7 @@ class _FlakyASR(FakeASR):
     def load(self) -> None:
         self.loads += 1
 
-    def transcribe(self, audio, language=None):  # type: ignore[no-untyped-def]
+    def transcribe(self, audio, language=None, *, prompt=None):  # type: ignore[no-untyped-def]
         if self.failures > 0:
             self.failures -= 1
             raise RuntimeError("asr driver crashed")

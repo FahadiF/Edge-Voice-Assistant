@@ -181,11 +181,18 @@ eva-desktop
 for you: it starts the server if one isn't already running (and attaches to a
 `eva start` server if one is), restarts it if it crashes, and stops it on quit.
 It adds a **system tray** whose icon tracks engine state (running / starting /
-stopped / error) with Open, Hide, Settings, and Quit — the tray is the
-background control surface for day-to-day use. Window size, position, and the
-last-open page are remembered across launches. Run without the `[desktop]`
-extra and it prints how to install it (never a traceback); the tray degrades
-gracefully to a plain window if only `pywebview` is present.
+stopped / error) with Restore Window, Hide, Settings, and Quit — the tray is
+the background control surface for day-to-day use, and a left-click on the icon
+restores the window. Close/minimize-to-tray, start-minimized, and auto-start
+are opt-in Desktop settings. Minimizing to the tray keeps the assistant fully
+live (streaming and the live connection continue; restore is instant) rather
+than backgrounding it. Window size, position, and the last-open page are
+remembered across launches. Where the browser UI downloads a file (e.g.
+exporting the Diagnostics event log), the desktop app instead opens a **native
+Save-As dialog** and confirms the saved path, so you always know where an
+export went. Run without the `[desktop]` extra and it prints how to install it
+(never a traceback); the tray degrades gracefully to a plain window if only
+`pywebview` is present.
 
 ---
 

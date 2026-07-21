@@ -76,7 +76,12 @@ _CAPABILITY_GUIDANCE = (
     "than claiming it is impossible. The user also controls permissions in "
     "Settings: if a local fact (like the time or hardware details) is not "
     "listed in your system information below, the user has not granted "
-    "that permission — say so, rather than saying you can never know it."
+    "that permission — say so, rather than saying you can never know it. "
+    "Never state a personal detail about the user — their name above all — "
+    "unless it is given to you here or earlier in this conversation; if you "
+    "do not have it, say so plainly and ask, rather than guessing or "
+    "inventing one. Do not contradict something you already established this "
+    "conversation."
 )
 
 
@@ -135,7 +140,9 @@ class ContextBuilder:
         nothing was retrieved (no retriever configured, or no matches)."""
         return self._last_retrieval_top_score
 
-    def build(self, conversation_id: str, user_text: str) -> BuiltContext:
+    def build(
+        self, conversation_id: str, user_text: str, *, session_name: str | None = None
+    ) -> BuiltContext:
         language = resolve_language(self._settings)
         persona = resolve_persona(self._settings)
         profile = self._profile_store.active() if self._profile_store is not None else None
@@ -144,6 +151,15 @@ class ContextBuilder:
         system_prompt = self._compose_system_prompt(persona.system_prompt, language.prompt_note)
         if profile is not None:
             system_prompt = self._apply_profile_preferences(system_prompt, profile)
+        # The user's name is a durable fact, so it goes in the always-present
+        # system prompt rather than being left to the recent-turn window or
+        # query-dependent retrieval (which is what made the assistant know the
+        # name for some questions but not others within one session). A name
+        # the user stated this session takes precedence over a stored nickname
+        # — it is the most current thing they told us.
+        known_name = session_name or (profile.nickname if profile and profile.nickname else None)
+        if known_name:
+            system_prompt = f"{system_prompt} The user's name is {known_name}."
 
         results, memory_trace = self._retrieve_memories(user_text)
         memory_block, memory_trimmed = self._format_memory_block(results)
@@ -264,14 +280,13 @@ class ContextBuilder:
         )
 
     def _apply_profile_preferences(self, system_prompt: str, profile: UserProfile) -> str:
+        # The name is handled centrally in build() (a session-stated name takes
+        # precedence over the stored nickname), so it is intentionally not added
+        # here — only the non-identity preferences are.
         preferences: list[str] = []
-        if profile.nickname:
-            preferences.append(f"The user's name is {profile.nickname}.")
         if profile.conversation_style:
             preferences.append(f"Preferred conversation style: {profile.conversation_style}.")
         preferences.append(f"Use {profile.units} units.")
-        if not preferences:
-            return system_prompt
         return f"{system_prompt} {' '.join(preferences)}"
 
     def _retrieve_memories(

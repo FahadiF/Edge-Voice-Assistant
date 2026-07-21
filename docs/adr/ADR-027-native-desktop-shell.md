@@ -199,3 +199,26 @@ and pystray 0.19.5, not guessed:
 The restore sequence is asserted in `WindowController` unit tests (call order)
 and the `default`-item wiring in both the fake-platform and real-pystray tests;
 the visible outcome stays on the `MANUAL_TESTING.md` Windows checklist.
+
+### Amendment (M6.2, cont.) — A minimal native bridge for file export
+
+The web UI's "Export" flow (blob + `<a download>`) is right for a browser but
+opaque in WebView2: the user can't tell where — or whether — the file was
+written. Decision 4 kept native OS calls behind ports/adapters; this adds one
+carefully-bounded exception for a browser-impossible affordance.
+
+- **`DesktopBridge`** (`shell.py`) is passed as pywebview's `js_api`, exposing
+  exactly one method, `save_text_file(suggested_name, content)`, as
+  `window.pywebview.api.save_text_file`. It opens a **native Save-As dialog**
+  (`window.create_file_dialog(FileDialog.SAVE, …)`), writes the file, and
+  returns a status dict (`saved` + path / `cancelled` / `error` + message) —
+  never raising across the JS boundary, so an export can't fail silently.
+- **This does not widen ADR-007.** The web UI still drives the *engine* only
+  over HTTP/WS; the bridge is a host-capability seam for something the engine
+  has no part in (where a user's local file goes). The web UI **feature-detects
+  `window.pywebview`** and falls back to the browser download, so the single
+  bundle serves browser and desktop unchanged. The bridge surface is
+  deliberately one method; anything larger would reconsider this boundary.
+- **Tested:** `saveTextFile` (web) covers the native path + browser fallback;
+  `DesktopBridge` (Python) covers write / cancel / not-ready / write-error.
+  The real native dialog stays a `MANUAL_TESTING.md` item.

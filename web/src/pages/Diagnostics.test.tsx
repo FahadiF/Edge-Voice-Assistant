@@ -95,7 +95,7 @@ describe("Diagnostics event log toolbar", () => {
     );
   });
 
-  it("exports the log as a downloaded file", () => {
+  it("exports the log as a browser download when there is no native bridge", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const createUrl = vi.fn(() => "blob:fake");
     vi.stubGlobal("URL", { createObjectURL: createUrl, revokeObjectURL: vi.fn() });
@@ -106,6 +106,21 @@ describe("Diagnostics event log toolbar", () => {
     expect(clickSpy).toHaveBeenCalled();
     expect(createUrl).toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+
+  it("exports via the native Save-As dialog and toasts the saved path on desktop", async () => {
+    const save = vi.fn(() =>
+      Promise.resolve({ status: "saved" as const, path: "C:\\Users\\me\\eva-event-log.txt" }),
+    );
+    (window as { pywebview?: unknown }).pywebview = { api: { save_text_file: save } };
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Export .txt" }));
+
+    expect(save).toHaveBeenCalledWith("eva-event-log.txt", expect.stringContaining("FinalTranscript"));
+    // The success toast names the exact path the file went to.
+    expect(await screen.findByText(/Event log saved to C:\\Users\\me\\eva-event-log\.txt/)).toBeInTheDocument();
+    delete (window as { pywebview?: unknown }).pywebview;
   });
 
   it("clears the event log", () => {

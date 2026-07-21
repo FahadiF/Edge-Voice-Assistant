@@ -234,6 +234,46 @@ class TestUserProfile:
         assert result.trace.profile_id is None
 
 
+class TestSessionName:
+    """A name stated during the session is a durable fact in the system prompt,
+    so the assistant stays consistent about it regardless of query or history
+    depth (the within-session contradiction this fixes)."""
+
+    def test_session_name_added_to_system_prompt(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        builder = ContextBuilder(Settings(), store)
+        result = builder.build(conv.id, "anything", session_name="Fahad")
+        assert "The user's name is Fahad." in result.messages[0].content
+
+    def test_session_name_takes_precedence_over_profile_nickname(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        profile = UserProfile(
+            id="u1", nickname="OldName", created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+        )
+        builder = ContextBuilder(Settings(), store, profile_store=_FixedProfileStore(profile))
+        result = builder.build(conv.id, "hi", session_name="NewName")
+        system = result.messages[0].content
+        assert "The user's name is NewName." in system
+        assert "OldName" not in system
+
+    def test_profile_nickname_used_when_no_session_name(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        profile = UserProfile(
+            id="u1", nickname="Fahad", created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+        )
+        builder = ContextBuilder(Settings(), store, profile_store=_FixedProfileStore(profile))
+        result = builder.build(conv.id, "hi")  # no session_name
+        assert "The user's name is Fahad." in result.messages[0].content
+
+    def test_no_name_line_when_neither_present(self, store: SQLiteMemoryStore) -> None:
+        conv = store.start_conversation()
+        builder = ContextBuilder(Settings(), store)
+        result = builder.build(conv.id, "hi")
+        assert "The user's name is" not in result.messages[0].content
+
+
 class TestRetrievalGating:
     def test_missing_retriever_or_embedding_provider_skips_retrieval_silently(
         self, store: SQLiteMemoryStore

@@ -44,13 +44,17 @@ class FakeASR(ASREngine):
         self.text = text
         self.fail = fail
         self.calls = 0
+        self.prompts: list[str | None] = []  # records the bias prompt per call
 
     def load(self) -> None: ...
 
     def unload(self) -> None: ...
 
-    def transcribe(self, audio: Frame, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio: Frame, language: str | None = None, *, prompt: str | None = None
+    ) -> TranscriptionResult:
         self.calls += 1
+        self.prompts.append(prompt)
         if self.fail:
             raise RuntimeError("asr broken")
         return TranscriptionResult(text=self.text)
@@ -331,6 +335,81 @@ class TestNormalTurn:
             assert audio.spoken  # reply was synthesized and played
             stored = orch.memory.recent_turns(orch.conversation_id, 10)
             assert any(t.text == "Hello from the composer" for t in stored)
+
+        asyncio.run(scenario())
+
+    def test_stated_name_persists_across_the_session(self) -> None:
+        """The identity fix: once the user states their name, it stays in the
+        prompt for every later turn — so the assistant can't know it for one
+        question and forget it for the next (the reported contradiction)."""
+
+        async def scenario() -> None:
+            orch, bus, _audio, _tts = make_orchestrator()
+            built_prompts: list[str] = []
+            original_build = orch._context_builder.build
+
+            def spy_build(conv_id: str, text: str, **kwargs: object) -> object:
+                result = original_build(conv_id, text, **kwargs)
+                built_prompts.append(result.messages[0].content)
+                return result
+
+            orch._context_builder.build = spy_build  # type: ignore[method-assign]
+
+            async def wait_idle() -> None:
+                for _ in range(300):
+                    if orch._turn_task is not None and orch._turn_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            async def script() -> None:
+                orch.submit_text("Hi, my name is Fahad")
+                await wait_idle()
+                # A later, unrelated turn — the kind that used to lose the name.
+                orch.submit_text("What is the weather like?")
+                await wait_idle()
+
+            await drive(orch, bus, script)
+            assert orch._session_name == "Fahad"
+            # The second (unrelated) turn's system prompt still carries the name.
+            assert built_prompts, "no prompts captured"
+            assert "The user's name is Fahad." in built_prompts[-1]
+
+        asyncio.run(scenario())
+
+    def test_asr_prompt_biases_with_the_stated_name(self) -> None:
+        """The ASR fix: once the user's name is known this session, later
+        transcriptions are given it as decoding context (measured to fix
+        proper-noun mis-spelling like Fahad→Fahed) — via a spoken turn so the
+        ASR path (not just typed) is exercised."""
+
+        async def scenario() -> None:
+            asr = FakeASR(text="my name is Fahad")
+            orch, bus, _audio, _tts = make_orchestrator(asr=asr)
+
+            async def wait_calls(n: int) -> None:
+                # Wait until the ASR has been invoked n times AND that turn has
+                # settled (a bare _turn_task.done() check races: it still points
+                # at the previous, already-done turn right after feeding a new
+                # utterance).
+                for _ in range(500):
+                    if asr.calls >= n and orch._turn_task is not None and orch._turn_task.done():
+                        return
+                    await asyncio.sleep(0.01)
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await wait_calls(1)
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await wait_calls(2)
+
+            await drive(orch, bus, script)
+            assert orch._session_name == "Fahad"
+            assert asr.calls >= 2
+            # The domain hint is always present; the name appears once captured
+            # (turn 1 transcribed without it, turn 2 with it).
+            assert all("Edge Voice Assistant" in (p or "") for p in asr.prompts)
+            assert asr.prompts[0] is not None and "Fahad" not in asr.prompts[0]
+            assert asr.prompts[-1] is not None and "Fahad" in asr.prompts[-1]
 
         asyncio.run(scenario())
 

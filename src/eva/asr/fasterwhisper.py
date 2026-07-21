@@ -81,16 +81,21 @@ class FasterWhisperASR(ASREngine):
     def unload(self) -> None:
         self._model = None
 
-    def transcribe(self, audio: Frame, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio: Frame, language: str | None = None, *, prompt: str | None = None
+    ) -> TranscriptionResult:
         if self._model is None:
             self.load()
         assert self._model is not None
         segments, info = self._model.transcribe(
             int16_to_float(audio),
             language=language,
-            beam_size=1,  # greedy: ~2x faster than default beam 5; quality parity on clean speech
+            beam_size=1,  # greedy: ~2x faster than default beam 5; measured quality parity
             condition_on_previous_text=False,  # avoids repetition loops on short utterances
             vad_filter=False,  # VAD already applied upstream
+            # Context bias (measured to fix proper-noun spelling — e.g. a name —
+            # with no spurious injection of unspoken words). None → no prompt.
+            initial_prompt=prompt or None,
         )
         text = "".join(segment.text for segment in segments).strip()
         return TranscriptionResult(text=text, language=getattr(info, "language", None))

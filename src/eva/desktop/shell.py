@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 from eva.config import get_app_paths, load_settings
@@ -130,6 +131,65 @@ def _keep_webview_awake_while_hidden() -> None:
         )
 
 
+# pywebview's file-dialog filter grammar is 'Description (*.ext;*.ext)', where
+# the description is validated against `[\w ]+` — words and spaces only. A '/'
+# (the earlier "Text/log files") fails with "is not a valid file filter". Keep
+# descriptions to words/spaces; a test validates these against pywebview's own
+# parser so this can't regress.
+_SAVE_FILE_TYPES = ("Log files (*.txt;*.log)", "All files (*.*)")
+
+
+class DesktopBridge:
+    """The small, native-only capability the desktop shell exposes to the web
+    UI over pywebview's JS bridge (`window.pywebview.api.*`).
+
+    Kept deliberately tiny: the web UI is still an HTTP/WS client of the engine
+    (ADR-007) — this bridge is only for things a browser genuinely cannot do,
+    like a native Save-As dialog for an export. The browser build never sees
+    `window.pywebview`, so it feature-detects this and falls back to a normal
+    download; nothing here is required for the app to work.
+
+    Public method names are exposed verbatim as `window.pywebview.api.<name>`;
+    the leading-underscore `_window` is not exposed (pywebview skips it).
+    """
+
+    def __init__(self) -> None:
+        self._window: Any = None
+
+    def save_text_file(self, suggested_name: str, content: str) -> dict[str, str]:
+        """Show a native Save-As dialog and write `content` to the chosen path.
+
+        Returns a small status dict the UI turns into a toast:
+        ``{"status": "saved", "path": ...}`` / ``{"status": "cancelled"}`` /
+        ``{"status": "error", "message": ...}``. Never raises across the
+        bridge — a failure becomes a reported error, not a silent no-op (the
+        whole point: the user must always know where the export went)."""
+        import webview
+
+        window = self._window
+        if window is None:  # bridge called before the window bound itself
+            return {"status": "error", "message": "desktop window not ready"}
+        try:
+            result = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=suggested_name,
+                file_types=_SAVE_FILE_TYPES,
+            )
+        except Exception as exc:  # broad by design: report, never crash the bridge
+            logger.warning("Save dialog failed", exc_info=True)
+            return {"status": "error", "message": str(exc)}
+        if not result:
+            return {"status": "cancelled"}
+        path = result[0] if isinstance(result, list | tuple) else result
+        try:
+            Path(path).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Writing exported file failed", exc_info=True)
+            return {"status": "error", "message": str(exc)}
+        logger.info("Exported file written to %s", path)
+        return {"status": "saved", "path": str(path)}
+
+
 def main() -> int:
     try:
         import webview  # optional extra; guarded so the base install never needs it
@@ -172,6 +232,10 @@ def main() -> int:
     # before the window/WebView2 environment is created.
     _keep_webview_awake_while_hidden()
 
+    # Native-only capability bridge for the web UI (Save-As dialog). Bound to
+    # the window right after creation; the browser build never sees it.
+    bridge = DesktopBridge()
+
     # Duck-typed: pywebview's Window API varies by version/backend, and the
     # optional dep is absent in CI — we only use a small, stable surface
     # (show/hide/restore/destroy/events/evaluate_js/geometry), so treat as Any.
@@ -184,7 +248,9 @@ def main() -> int:
         y=state.y,
         min_size=(MIN_WIDTH, MIN_HEIGHT),
         hidden=start_hidden,  # start-minimized to the tray
+        js_api=bridge,
     )
+    bridge._window = window  # the bridge needs the window for the Save dialog
 
     controller = WindowController(
         window,

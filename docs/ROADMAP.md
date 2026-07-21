@@ -275,7 +275,18 @@ sub-milestones (ADR-027):
   eventually freezes the page, stalling the live UI/WebSocket in the tray) so
   minimizing is "hidden only" — engine, streaming, and WS continue and restore
   is instant. Belt-and-suspenders: the web client force-reconnects the WS on
-  becoming visible.
+  becoming visible. Also: a **native Save-As dialog** for the desktop Event Log
+  export (a one-method `window.pywebview.api` bridge, feature-detected so the
+  browser keeps its download flow) so a desktop export always reports where the
+  file went; and a measured confirmation that barge-in has **no latency
+  regression** (all detection/stop code byte-identical to the pre-M6 baseline;
+  VAD 0.33ms, playback fade a constant 40ms). Validation-round fixes: the export
+  file-filter crash (invalid pywebview filter grammar); **within-session
+  identity consistency** — a name the user states is captured into a session
+  fact and kept in the system prompt every turn (the assistant no longer knows
+  the name for one question and forgets it for the next); and **ASR context
+  biasing** — a Whisper `initial_prompt` built from the stated name + app jargon
+  that fixes proper-noun mis-spelling with no spurious injection (measured).
 - **M6.3** global hotkey · **M6.4** first-run wizard
   (React `/welcome`, ADR-028) · **M6.5** notifications + crash recovery +
   autostart/single-instance · **M6.6** Windows installer.
@@ -304,13 +315,33 @@ sub-milestones (ADR-027):
   class of environmental constraint as the earlier LLM GPU-throttling finding
   — a candidate for M7's benchmarking/optimization pass, not a code defect.
 - **C. Event Log copy/export — done.** Copy all / Export .txt / Export .log /
-  Clear log added to the Diagnostics page.
+  Clear log added to the Diagnostics page; the desktop export uses a native
+  Save-As dialog and reports the saved path. (The same native-save treatment
+  could later extend to the Conversation/Memory/Users JSON exports, which still
+  use the browser download flow — deferred, as those weren't reported.)
+- **D. ASR common-word accuracy (deferred to M7).** Validation found real-mic
+  word substitutions (paper→table, event log→event love) that do NOT reproduce
+  on synthesizable audio, and greedy vs beam-5 made no measured difference on
+  what could be synthesized. Materially improving these needs real recorded
+  fixtures + a model/compute-type evaluation (small→medium, int8→int8_float16/
+  float16 on GPU, beam size) — squarely M7 benchmarking work, not a blind
+  parameter change here. The proper-noun case was fixed now via `initial_prompt`
+  biasing (measured, no latency cost).
+- **E. Auto-summarization not wired (memory follow-up).** `summarize_after_turns`
+  + `LLMSummarizer` exist but nothing triggers summarization during a live
+  conversation (only the CLI / a REST endpoint do), so older turns are never
+  condensed into the always-present summary. Wiring it into the orchestrator
+  (off the hot path, epoch-safe, summarizer told to preserve durable facts)
+  would let long conversations retain context beyond the recent-turn window —
+  its own small design with an ADR, not folded into M6.2.
 
 ## M7 — Benchmarking & performance engineering
 Benchmark harness: ASR (WER + latency on recorded fixtures), LLM (tokens/s, TTFT),
 TTS (RTF, TTFA), end-to-end turn latency, memory/VRAM/CPU sampling; HTML/Markdown
 report generator; profile-based optimization pass; re-validate default model picks
-(Parakeet/Moonshine adapters land here if data justifies them).
+(Parakeet/Moonshine adapters land here if data justifies them). Includes the
+deferred ASR common-word accuracy evaluation (backlog D): recorded fixtures +
+model-size / compute-type / beam-size sweep against measured WER.
 **Exit:** reproducible benchmark reports; documented per-profile defaults; startup
 time and interaction latency targets met or consciously re-set.
 

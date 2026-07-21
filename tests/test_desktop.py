@@ -18,6 +18,7 @@ import pytest
 from eva.desktop import main
 from eva.desktop.platform import DesktopPlatform, TrayIconState, TraySpec
 from eva.desktop.shell import (
+    DesktopBridge,
     _initial_url,
     _keep_webview_awake_while_hidden,
     _route_of,
@@ -119,6 +120,75 @@ class TestKeepWebviewAwake:
 
         # Left as-is (our marker already present) — not doubled up.
         assert os.environ[self.ENV].count("--disable-renderer-backgrounding") == 1
+
+
+class TestDesktopBridge:
+    """The native Save-As bridge exposed to the web UI. `webview` is absent in
+    CI, so inject a fake module with the `FileDialog` enum and a fake window
+    whose `create_file_dialog` returns the chosen path (or None to cancel)."""
+
+    def _install_fake_webview(
+        self, monkeypatch: pytest.MonkeyPatch, dialog_result: object
+    ) -> tuple[DesktopBridge, dict[str, object]]:
+        calls: dict[str, object] = {}
+
+        class _FileDialog:
+            SAVE = 30
+
+        def create_file_dialog(dialog_type: int, **kwargs: object) -> object:
+            calls["dialog_type"] = dialog_type
+            calls["kwargs"] = kwargs
+            return dialog_result
+
+        fake = types.SimpleNamespace(FileDialog=_FileDialog)
+        monkeypatch.setitem(sys.modules, "webview", fake)  # type: ignore[arg-type]
+        bridge = DesktopBridge()
+        bridge._window = types.SimpleNamespace(create_file_dialog=create_file_dialog)
+        return bridge, calls
+
+    def test_writes_content_to_the_chosen_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    ) -> None:
+        target = tmp_path / "eva-event-log.txt"  # type: ignore[operator]
+        bridge, calls = self._install_fake_webview(monkeypatch, [str(target)])
+
+        result = bridge.save_text_file("eva-event-log.txt", "line one\nline two")
+
+        assert result == {"status": "saved", "path": str(target)}
+        assert target.read_text(encoding="utf-8") == "line one\nline two"
+        assert calls["dialog_type"] == 30  # FileDialog.SAVE
+        assert calls["kwargs"]["save_filename"] == "eva-event-log.txt"  # type: ignore[index]
+
+    def test_cancelled_dialog_reports_cancelled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bridge, _ = self._install_fake_webview(monkeypatch, None)  # user cancelled
+        assert bridge.save_text_file("x.txt", "body") == {"status": "cancelled"}
+
+    def test_bridge_before_window_ready_reports_error(self) -> None:
+        bridge = DesktopBridge()  # no window bound yet
+        result = bridge.save_text_file("x.txt", "body")
+        assert result["status"] == "error"
+
+    def test_write_failure_reports_error_not_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A non-existent directory makes write_text raise OSError — the bridge
+        # must report it, never let it escape across the JS boundary.
+        bridge, _ = self._install_fake_webview(monkeypatch, ["/no/such/dir/deeper/eva.txt"])
+        result = bridge.save_text_file("eva.txt", "body")
+        assert result["status"] == "error"
+        assert "message" in result
+
+    def test_save_file_types_are_valid_pywebview_filters(self) -> None:
+        # The exact bug Windows hit: a '/' in the description ("Text/log files")
+        # is rejected by pywebview's filter grammar. Validate our filters
+        # against pywebview's OWN parser (not a copy of its regex), so a future
+        # edit that reintroduces an invalid character fails here, not on a user's
+        # machine. Skipped when the desktop extra is absent (base CI).
+        from eva.desktop.shell import _SAVE_FILE_TYPES
+
+        parse_file_type = pytest.importorskip("webview.util").parse_file_type
+        for file_type in _SAVE_FILE_TYPES:
+            description, extensions = parse_file_type(file_type)  # raises if invalid
+            assert description  # non-empty description survived parsing
+            assert extensions
 
 
 @pytest.fixture

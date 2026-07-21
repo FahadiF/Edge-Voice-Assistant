@@ -6,6 +6,126 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-21 — M6.2 validation fixes: export filter, identity consistency, ASR bias
+
+Three issues from Windows validation.
+
+**Fixed — desktop Event Log export crashed ("… is not a valid file filter")**
+`DesktopBridge.save_text_file` passed a file-type filter whose description
+contained a `/` ("Text/log files (*.txt;*.log)"). pywebview's filter grammar
+validates the description against `[\w ]+` (words and spaces only), so
+`create_file_dialog` raised `ValueError` before the dialog opened. Corrected to
+"Log files (*.txt;*.log)"; extracted to `_SAVE_FILE_TYPES` with a test that
+validates it against pywebview's own `parse_file_type` (skipped when the extra
+is absent), so an invalid filter fails in CI, not on a user's machine.
+
+**Fixed — assistant contradicted itself about the user's name**
+Root-caused by measurement (a context-assembly probe at increasing history
+depth). The name reaches the prompt via three paths with different lifetimes:
+an authoritative system-prompt line **only if a profile nickname is set**; the
+`recent_turns` window (bounded by `max_history_turns`, default 20); and
+query-dependent memory retrieval. Findings:
+- The name is **never** auto-persisted to the profile (nickname is set only via
+  `eva profile` / the Users UI).
+- Auto-summarization is defined (`summarize_after_turns` setting, `LLMSummarizer`)
+  but **never wired into the conversation loop** — it runs only from the CLI /
+  a REST endpoint — so no summary carries the name past the recent window
+  during a live session.
+- Result: once the naming turn scrolls out of the last 20 turns, the model
+  "knows" the name for name-related questions (retrieval matches) but not for
+  unrelated ones (retrieval misses) — the exact within-session contradiction.
+
+  Fix: the orchestrator captures an explicitly-stated name
+  (`identity.extract_stated_name`, conservative — clear self-naming phrases
+  only, with a false-positive block-list) into a **session fact**, which the
+  ContextBuilder injects into the always-present system prompt every subsequent
+  turn (a session-stated name takes precedence over a stored nickname). This is
+  deterministic within the session and safe (no permanent/global profile write;
+  reset when the active conversation changes). A prompt directive was also added
+  so the assistant says it doesn't have a personal detail rather than guessing,
+  and doesn't contradict something already established. Measured: with capture,
+  the name is present for an unrelated query 60 turns deep; without it, absent.
+
+**Fixed / investigated — ASR word substitutions**
+Measured via a TTS→ASR round-trip on the reported words, not guessed:
+- **Decoding params:** greedy (`beam_size=1`) vs `beam_size=5` made **no
+  difference** on synthesizable audio (clean or white-noise) — so beam size is
+  not the cause and was left at 1 (raising it would cost ~2× latency for no
+  measured gain). The reported common-word errors (paper→table, log→love)
+  reproduce only under real-mic acoustics this environment can't synthesize;
+  materially improving those is a model/compute-type question for M7's
+  benchmarking pass with real audio fixtures (documented, not guessed at here).
+- **Proper nouns** are the one reproducible weak spot even on clean audio
+  ("Fahad"→"Fahed"), and a Whisper `initial_prompt` biasing the decoder with
+  the name **reliably fixes it** — with **zero** spurious injection of unspoken
+  words (measured on control phrases). The ASR port gained an optional `prompt`;
+  the orchestrator builds it from the session-stated name plus a short app-jargon
+  hint ("event log", "settings", "diagnostics"), so once the user says their
+  name, later transcriptions spell it consistently. This composes with the
+  identity fix (same captured name) and costs no latency.
+
+**Added (tests)**
+- `tests/test_identity.py` — name extraction (positives + false-positive
+  rejection).
+- `tests/test_context_builder.py::TestSessionName` — session-name injection and
+  precedence over profile nickname.
+- `tests/test_orchestrator.py` — stated name persists across the session; the
+  ASR bias prompt carries the name once captured.
+- `tests/test_desktop.py` — the save-file filter validates against pywebview's
+  own parser.
+
+### 2026-07-21 — M6.2 polish: native desktop export; barge-in measured (no regression)
+
+**Added — native Save-As for the desktop Event Log export**
+In the browser, "Export .txt/.log" uses the normal download flow (the browser
+owns the location). On the desktop shell that flow was unclear — a WebView2
+blob download gives no visible confirmation of where (or whether) the file was
+written. The shell now exposes a tiny native bridge (`DesktopBridge`,
+`window.pywebview.api.save_text_file`) that opens a **native Save-As dialog**
+and returns the chosen path; the UI then toasts **"Event log saved to
+<path>"**. This is the only native capability the web UI reaches for — it
+stays an HTTP/WS client of the engine (ADR-007) otherwise, and feature-detects
+`window.pywebview` so the same bundle still downloads normally in a browser.
+The bridge reports cancelled / error outcomes explicitly, so an export never
+fails silently — the user always knows where the log went (or that it didn't).
+
+**Investigated — barge-in responsiveness (measured; no code regression)**
+Manual testing suggested barge-in felt slightly worse. Measured, per the
+requested sequence, rather than guessed:
+- **All barge-in code is byte-identical to the pre-M6 baseline** (`git diff`
+  vs `1b16a8e`): `audio/playback.py`, `audio/segmenter.py`, `audio/capture.py`,
+  `audio/duplex.py`, and every `vad/*.py` are unchanged, and the orchestrator's
+  `_cancel_turn` / `_measure_barge_in_latency` cancellation path is unchanged.
+  The only orchestrator change is the M6 `speak_worker` silence-trim, which
+  does not touch the stop path.
+- **Component measurements:** Silero VAD inference (the *detection* step)
+  p50 = 0.33 ms / p95 = 0.41 ms; playback fade-to-silent (the *interrupt* step)
+  a constant **40 ms** independent of queued-audio depth (measured at 0.5s,
+  2s, 8s, 15s queued) — so the trim's change to buffer depth provably cannot
+  affect barge-in stop latency.
+- **Conclusion:** no measurable regression. The perceived difference is most
+  consistent with the environmental GPU/CPU load already documented (which
+  affects overall responsiveness), not the barge-in path.
+
+**Fixed (hardening)**
+- `speak_worker`'s post-loop "last chunk" `say()` (added with the M6 silence-
+  trim) now checks `is_stale(epoch)` before enqueuing, restoring the baseline
+  invariant that a barge-in never lets a held chunk reach playback after
+  `stop_speaking()` flushed it. An empirical probe (rapid double barge-in +
+  concurrent `interrupt()`, 10-point timing sweep) found **0** such enqueues
+  today — the `CancelledError` beats the post-loop path — so this is
+  defense-in-depth against a future refactor reopening the window, not a fix
+  for an observed failure.
+
+**Added (tests)**
+- `web/src/components/saveFile.test.ts` — `saveTextFile` native-bridge path
+  (saved/cancelled/error) and browser fallback.
+- `web/src/pages/Diagnostics.test.tsx` — export via the native dialog toasts
+  the saved path.
+- `tests/test_desktop.py::TestDesktopBridge` — the bridge writes to the chosen
+  path, and reports cancelled / not-ready / write-error without raising across
+  the JS boundary.
+
 ### 2026-07-21 — Investigated: possible TTS cleanup race on rapid barge-in
 
 Follow-up from the streaming-pipeline investigation (below): running two

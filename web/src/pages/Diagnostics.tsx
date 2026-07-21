@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { diagnostics, system } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import type { EventLogEntry } from "../ws/store";
-import { Card, EmptyState, Meter, downloadText, toast } from "../components/common";
+import { Card, EmptyState, Meter, saveTextFile, toast } from "../components/common";
 import "./diagnostics.css";
 
 export function formatEventLog(entries: EventLogEntry[]): string {
@@ -58,6 +58,19 @@ export function Diagnostics() {
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [ramHistory, setRamHistory] = useState<number[]>([]);
   const lastSampledAt = useRef(0);
+
+  // Export the event log, telling the user exactly where it went. On desktop
+  // this pops a native Save-As dialog and reports the chosen path; in a
+  // browser it downloads and reports that (the browser owns the location).
+  const exportLog = async (filename: string) => {
+    const result = await saveTextFile(formatEventLog(eventLog), filename);
+    if (result.outcome === "saved") {
+      toast("success", result.path ? `Event log saved to ${result.path}` : "Event log downloaded");
+    } else if (result.outcome === "error") {
+      toast("error", `Export failed: ${result.message}`);
+    }
+    // "cancelled" (native dialog dismissed): stay silent, nothing went wrong.
+  };
 
   useEffect(() => {
     if (!data) return;
@@ -193,13 +206,13 @@ export function Diagnostics() {
             </button>
             <button
               disabled={eventLog.length === 0}
-              onClick={() => downloadText(formatEventLog(eventLog), "eva-event-log.txt")}
+              onClick={() => void exportLog("eva-event-log.txt")}
             >
               Export .txt
             </button>
             <button
               disabled={eventLog.length === 0}
-              onClick={() => downloadText(formatEventLog(eventLog), "eva-event-log.log")}
+              onClick={() => void exportLog("eva-event-log.log")}
             >
               Export .log
             </button>

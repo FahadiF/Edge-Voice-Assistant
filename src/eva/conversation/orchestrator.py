@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import time
 from collections.abc import AsyncGenerator, Iterator
@@ -53,6 +54,7 @@ from eva.config.settings import Settings
 from eva.conversation.chunker import SentenceChunker
 from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.history import ConversationTurn, pair_turns
+from eva.conversation.identity import extract_stated_name
 from eva.conversation.language import effective_asr_language, effective_voice, resolve_language
 from eva.conversation.markdown import MarkdownSpeechFilter
 from eva.core.events import (
@@ -229,6 +231,10 @@ class Orchestrator:
         self._current_tokens_queue: asyncio.Queue[str | None] | None = None
         self._current_sentences_queue: asyncio.Queue[str | None] | None = None
         self._microphone_muted = False
+        # A name the user stated this session (identity.extract_stated_name),
+        # injected into every subsequent prompt so the assistant stays
+        # consistent about it. Reset when the active conversation changes.
+        self._session_name: str | None = None
 
     @property
     def metrics(self) -> MetricsCollector:
@@ -307,6 +313,7 @@ class Orchestrator:
         of resetting the *active* session, now that conversations persist."""
         self._conversation = self._memory.start_conversation(language=self._language_code)
         self._conversation_titled = False  # the new conversation gets its own title
+        self._session_name = None  # a fresh conversation forgets the stated name
 
     def resume_conversation(self, conversation_id: str) -> MemoryConversation:
         """Continue a stored conversation exactly where it ended (M5.6) —
@@ -322,6 +329,9 @@ class Orchestrator:
         # An untitled conversation (e.g. cleared before its first exchange
         # completed) still gets one title attempt on its next exchange.
         self._conversation_titled = bool(conversation.title)
+        # Switching conversations drops the previous session's stated name; the
+        # resumed conversation re-establishes it from its own turns/profile.
+        self._session_name = None
         return conversation
 
     def load_conversation_turns(self, turns: list[ConversationTurn]) -> None:
@@ -338,6 +348,24 @@ class Orchestrator:
     def _set_state(self, state: str) -> None:
         self._state = state
         self._bus.publish(StateChanged(state=state))
+
+    def _asr_prompt(self) -> str | None:
+        """Context bias for Whisper decoding (`initial_prompt`).
+
+        Measured to fix proper-noun spelling (e.g. a name mis-transcription)
+        with no spurious injection of unspoken words. Includes the name the
+        user stated this session (so once they say it, later mentions are
+        spelled consistently — this also feeds the identity fix) plus a short
+        hint of the app's own jargon. Returns None before anything is known,
+        so a fresh session adds no bias."""
+        parts = []
+        if self._session_name:
+            parts.append(f"The speaker's name is {self._session_name}.")
+        parts.append(
+            "This is a conversation with Edge Voice Assistant about the "
+            "event log, settings, and diagnostics."
+        )
+        return " ".join(parts)
 
     # ── external control (platform API — same event loop as run()) ──
 
@@ -571,7 +599,11 @@ class Orchestrator:
         self._partial_busy = True
         try:
             epoch = self._controller.epoch
-            result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
+            result = await asyncio.to_thread(
+                functools.partial(
+                    self._asr.transcribe, audio, self._asr_language, prompt=self._asr_prompt()
+                )
+            )
             if result.text and self._controller.is_current(epoch):
                 self._bus.publish(PartialTranscript(epoch=epoch, text=result.text))
         except Exception:
@@ -617,7 +649,11 @@ class Orchestrator:
         else:
             assert audio is not None  # exactly one of audio/text is set
             try:
-                result = await asyncio.to_thread(self._asr.transcribe, audio, self._asr_language)
+                result = await asyncio.to_thread(
+                    functools.partial(
+                        self._asr.transcribe, audio, self._asr_language, prompt=self._asr_prompt()
+                    )
+                )
             except Exception:
                 # Supervised recovery (M5.5, ADR-026): this turn errors, but
                 # the engine is reloaded in the background so the NEXT turn
@@ -632,6 +668,15 @@ class Orchestrator:
         if not user_text:
             return TurnMetrics(epoch=epoch, asr_ms=asr_ms)
 
+        # Capture a name the user states about themselves, so it becomes a
+        # durable session fact in the system prompt from now on (see
+        # `identity.extract_stated_name`). Deterministic-within-session: once
+        # captured, every later turn's prompt carries it, so the assistant
+        # can't know the name for one question and forget it for the next.
+        stated_name = extract_stated_name(user_text)
+        if stated_name:
+            self._session_name = stated_name
+
         # ── LLM producer thread → token queue ──
         self._bus.publish(LlmStarted(epoch=epoch))
         loop = asyncio.get_running_loop()
@@ -640,7 +685,12 @@ class Orchestrator:
         # Context building can embed the query + hit SQLite (ADR-021); run it
         # off the event loop like every other blocking pipeline stage.
         built_context = await asyncio.to_thread(
-            self._context_builder.build, self._conversation.id, user_text
+            functools.partial(
+                self._context_builder.build,
+                self._conversation.id,
+                user_text,
+                session_name=self._session_name,
+            )
         )
         messages = built_context.messages
 
@@ -727,13 +777,18 @@ class Orchestrator:
                             if pending is not None:
                                 self._audio.say(pending)  # not the last chunk: untouched
                             pending = chunk
-                        if pending is not None:
+                        if pending is not None and not self._controller.is_stale(epoch):
                             # This IS the last chunk of the sentence: trim its
                             # trailing silence, and its leading silence too if
                             # it is also the very first sound of the whole
                             # turn (shaves the initial "before any speech"
                             # wait; later sentences keep their natural
                             # lead-in, which is the between-sentence pause).
+                            # The is_stale guard restores the baseline
+                            # invariant that a barge-in never lets a held chunk
+                            # reach playback after stop_speaking() flushed it —
+                            # the per-chunk say() above is guarded by the same
+                            # check, and this last-chunk say() must be too.
                             pending = trim_edge_silence(
                                 pending,
                                 max_leading_ms=_LEADING_TRIM_MS if is_first_chunk_ever else 0,

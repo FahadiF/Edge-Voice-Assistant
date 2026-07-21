@@ -839,6 +839,34 @@ Set these on the **Desktop** settings page (verify the category is titled
       Quit, no `eva`/python server process remains in Task Manager, and the
       console/logs show no traceback.
 
+### 18.4 Event Log export — native Save-As (M6.2)
+
+On the **desktop** app (`eva-desktop`), interact so the Diagnostics Event Log
+has a few entries, then:
+
+- [ ] **Export .txt / Export .log** each open a **native Save-As dialog** with
+      the suggested filename pre-filled. After choosing a location and saving,
+      a toast reads **"Event log saved to <full path>"** — and the file exists
+      at that path with the expected line-per-event text.
+- [ ] **Cancel** the Save-As dialog → no error toast, nothing written (a
+      cancel is not a failure).
+- [ ] For contrast, the **browser** UI (`eva serve --open`) still downloads the
+      file through the browser's normal download flow (no native dialog) — the
+      same build, feature-detected.
+
+### 18.5 Barge-in responsiveness (M6.2 — regression check)
+
+Barge-in code is byte-identical to the pre-M6 baseline; this confirms the
+*felt* behavior on your hardware:
+
+- [ ] While the assistant is speaking, barge in (speak over it, or press the
+      composer's ⏹ Stop) — playback stops promptly (well under the < 150 ms
+      target) and it returns to listening. Repeat a dozen times; each stop is
+      prompt, `eva logs` shows no error. If it feels sluggish, check the
+      Diagnostics "Barge-in → Last latency" value and CPU/GPU load (the cause
+      is environmental load, not the barge-in path — VAD inference measured at
+      ~0.33 ms, the playback fade is a fixed 40 ms).
+
 ## Naming note
 
 `eva profiles` (plural) is the **hardware/model preset** command (Balanced,

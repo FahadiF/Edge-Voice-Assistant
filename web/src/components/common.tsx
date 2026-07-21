@@ -210,6 +210,50 @@ export function downloadText(text: string, filename: string): void {
   URL.revokeObjectURL(a.href);
 }
 
+/** The native capability bridge the desktop shell (pywebview) injects; absent
+ * in a plain browser. Only what the web UI actually calls is typed here. */
+interface PywebviewBridge {
+  api?: {
+    save_text_file?: (
+      suggestedName: string,
+      content: string,
+    ) => Promise<{ status: "saved" | "cancelled" | "error"; path?: string; message?: string }>;
+  };
+}
+declare global {
+  interface Window {
+    pywebview?: PywebviewBridge;
+  }
+}
+
+export type SaveResult =
+  | { outcome: "saved"; path?: string } // path present only on desktop (native Save-As)
+  | { outcome: "cancelled" }
+  | { outcome: "error"; message: string };
+
+/**
+ * Save text to a file the way each host does best:
+ * - Desktop (pywebview): a NATIVE Save-As dialog, then the chosen path is
+ *   returned so the UI can tell the user exactly where it went.
+ * - Browser: the normal download flow (the browser owns the location/UI).
+ * Feature-detected on `window.pywebview` so the same bundle serves both.
+ */
+export async function saveTextFile(content: string, filename: string): Promise<SaveResult> {
+  const nativeSave = window.pywebview?.api?.save_text_file;
+  if (nativeSave) {
+    try {
+      const res = await nativeSave(filename, content);
+      if (res.status === "saved") return { outcome: "saved", path: res.path };
+      if (res.status === "cancelled") return { outcome: "cancelled" };
+      return { outcome: "error", message: res.message ?? "unknown error" };
+    } catch (e) {
+      return { outcome: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  downloadText(content, filename);
+  return { outcome: "saved" }; // browser handled it via its download UI
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
