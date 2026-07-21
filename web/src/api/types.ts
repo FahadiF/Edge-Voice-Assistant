@@ -131,6 +131,18 @@ export interface DeveloperSettings {
   metrics_enabled: boolean;
 }
 
+export interface DesktopSettings {
+  close_to_tray: boolean;
+  minimize_to_tray: boolean;
+  start_minimized: boolean;
+  start_with_os: boolean;
+  auto_start_engine: boolean;
+  notifications_enabled: boolean;
+  hotkey_enabled: boolean;
+  hotkey_binding: string;
+  hotkey_mode: "push-to-talk" | "push-to-mute" | "toggle";
+}
+
 export interface Settings {
   schema_version: number;
   profile: string;
@@ -145,6 +157,7 @@ export interface Settings {
   server: ServerSettings;
   ui: UISettings;
   developer: DeveloperSettings;
+  desktop: DesktopSettings;
 }
 
 export interface ValidationErrorDetail {

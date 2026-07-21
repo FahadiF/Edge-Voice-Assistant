@@ -6,6 +6,46 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-12 — M6.1: Desktop server supervision & window state (ADR-027)
+
+First phase of M6 (native desktop). No engine features — the desktop shell
+becomes a proper client that supervises the backend instead of hosting it.
+
+**Changed**
+- `src/eva/desktop.py` promoted to a `src/eva/desktop/` package (it now spans
+  supervision, window state, and the client boundary). The `eva-desktop`
+  entry point is unchanged (`eva.desktop:main` re-exports the shell's `main`).
+- The desktop shell no longer hosts the server in-thread. It runs the same
+  `eva serve` as a **separate process** and talks to it only over HTTP/WS
+  (ADR-007), reusing every `eva.service` primitive — no lifecycle logic is
+  duplicated.
+
+**Added**
+- `ServerSupervisor` — **attach-or-spawn** (attaches to an already-running
+  `eva start` server and leaves it alone; otherwise spawns, owns, and stops it
+  gracefully on quit) with health-polling and **bounded exponential-backoff
+  restart** for an owned server that crashes. A consecutive-failure cap turns a
+  crash-on-boot server into a reported `FAILED` state instead of an infinite
+  restart loop (extends ADR-026's recovery model to the server-process layer).
+- `DesktopState` — remembers window size/position and the last-open route
+  across launches (`desktop_state.json`, forgiving load like `SetupState`).
+- `DesktopClient` — the single tested HTTP boundary the shell uses to drive the
+  engine (auto-start on launch → `POST /engine/start`); grown by later phases.
+- `DesktopSettings` schema section (`close_to_tray`, `minimize_to_tray`,
+  `start_minimized`, `start_with_os`, `auto_start_engine`,
+  `notifications_enabled`, `hotkey_enabled`, `hotkey_binding`, `hotkey_mode`).
+  Rendered automatically by the schema-driven Settings UI; `auto_start_engine`
+  is wired now, the tray/hotkey/notification/autostart fields activate in
+  M6.2–M6.5. `ui.theme` is reused (not duplicated).
+- **ADR-027** (native desktop shell) and 27 new headless tests (supervisor
+  attach/spawn/backoff/stop with a fake service + clock; window-state
+  round-trip; client action-mapping; shell wiring against a fake webview).
+
+**Notes**
+- Live tray/hotkey/window chrome and the installer arrive in later M6 phases;
+  window-maximized restore is best-effort (pywebview exposes no portable
+  geometry-on-close), to be covered by the M6 manual-test checklist.
+
 ### 2026-07-12 — Architecture cleanup
 
 A structural pass, no features. **Fixed** a slow memory leak:

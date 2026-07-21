@@ -382,6 +382,43 @@ class DeveloperSettings(_Section):
     metrics_enabled: bool = Field(True, description="Collect per-turn latency metrics")
 
 
+class DesktopSettings(_Section):
+    """Native desktop-shell behavior (M6, ADR-027). These only take effect
+    when running through `eva-desktop`; the CLI/server ignore them. The
+    window theme is not here — it reuses `ui.theme` (no duplication)."""
+
+    close_to_tray: bool = Field(
+        True, description="Closing the window hides it to the tray instead of quitting"
+    )
+    minimize_to_tray: bool = Field(False, description="Minimizing the window hides it to the tray")
+    start_minimized: bool = Field(
+        False, description="Launch hidden to the tray instead of showing the window"
+    )
+    start_with_os: bool = Field(
+        False,
+        description="Launch EVA automatically when you sign in (registers an OS start-up entry)",
+    )
+    auto_start_engine: bool = Field(
+        False,
+        description="Start the engine automatically once the desktop app launches",
+    )
+    notifications_enabled: bool = Field(
+        True, description="Show desktop notifications for downloads, engine state, and errors"
+    )
+    hotkey_enabled: bool = Field(True, description="Enable the global push-to-talk / mute hotkey")
+    hotkey_binding: str = Field(
+        "ctrl+space",
+        description="Global hotkey combination (e.g. 'ctrl+space', 'alt+space')",
+    )
+    hotkey_mode: Literal["push-to-talk", "push-to-mute", "toggle"] = Field(
+        "push-to-talk",
+        description=(
+            "push-to-talk: listen only while held; push-to-mute: mute only while held; "
+            "toggle: each press flips listening"
+        ),
+    )
+
+
 # ──────────────────────── Root ────────────────────────
 
 
@@ -407,6 +444,7 @@ class Settings(_Section):
     server: ServerSettings = Field(default_factory=ServerSettings)
     ui: UISettings = Field(default_factory=UISettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
+    desktop: DesktopSettings = Field(default_factory=DesktopSettings)
 
 
 def _migrate_raw(raw: Any) -> Any:

@@ -1,65 +1,100 @@
-"""Desktop shell tests (ADR-023) — `pywebview` is an optional extra not
-installed in the test environment, so `main()`'s window/event-loop call is
-exercised against a fake module injected into `sys.modules` rather than the
-real package. `find_free_port`/`wait_for_health` need no mocking."""
+"""Desktop shell tests (M6.1, ADR-027).
+
+`pywebview` is an optional extra not installed in the test environment, so
+`main()`'s window/event-loop calls are exercised against a fake `webview`
+module injected into `sys.modules`. The reusable logic (supervisor, state) is
+tested in `test_desktop_supervisor.py` / `test_desktop_state.py`; here we cover
+the entry point, the geometry→state mapping, and `main()`'s wiring.
+"""
 
 from __future__ import annotations
 
 import sys
-import threading
 import types
 from collections.abc import Iterator
 
 import pytest
 
-from eva.desktop import find_free_port, main, wait_for_health
+from eva.desktop import main
+from eva.desktop.shell import _initial_url, _route_of, capture_window_state
+from eva.desktop.state import MIN_WIDTH, DesktopState
 
 
-def test_find_free_port_returns_a_bindable_port() -> None:
-    import socket
-
-    port = find_free_port()
-    assert 0 < port < 65536
-    # Immediately bindable — proves it was actually free, not just a guess.
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", port))
+def test_entry_point_main_is_the_shell_main() -> None:
+    # The console script `eva-desktop = "eva.desktop:main"` must keep resolving
+    # after the module → package promotion.
+    assert main.__module__ == "eva.desktop.shell"
 
 
-def test_wait_for_health_returns_true_once_server_responds() -> None:
-    import http.server
+class TestRouteAndUrl:
+    def test_route_of_extracts_hash(self) -> None:
+        assert _route_of("http://127.0.0.1:8765/#/memory") == "#/memory"
+        assert _route_of("http://127.0.0.1:8765/") == ""
 
-    port = find_free_port()
+    def test_initial_url_appends_saved_route(self) -> None:
+        state = DesktopState(last_route="#/settings")
+        assert _initial_url("127.0.0.1", 8765, state) == "http://127.0.0.1:8765/#/settings"
 
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(200)
-            self.end_headers()
-
-        def log_message(self, *_a: object) -> None:  # silence default logging
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", port), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        assert wait_for_health(f"http://127.0.0.1:{port}/", timeout_s=5) is True
-    finally:
-        server.shutdown()
+    def test_initial_url_wildcard_host_becomes_localhost(self) -> None:
+        assert _initial_url("0.0.0.0", 8765, DesktopState()).startswith("http://127.0.0.1:8765/")
 
 
-def test_wait_for_health_times_out_when_nothing_listens() -> None:
-    port = find_free_port()  # guaranteed free -> nothing answers
-    assert wait_for_health(f"http://127.0.0.1:{port}/", timeout_s=0.3) is False
+class TestCaptureWindowState:
+    def test_reads_geometry_and_route(self) -> None:
+        window = types.SimpleNamespace(
+            width=1024,
+            height=768,
+            x=30,
+            y=40,
+            get_current_url=lambda: "http://127.0.0.1:8765/#/models",
+        )
+        state = capture_window_state(window, DesktopState())
+        assert (state.width, state.height, state.x, state.y) == (1024, 768, 30, 40)
+        assert state.last_route == "#/models"
+
+    def test_falls_back_to_previous_on_bad_window(self) -> None:
+        previous = DesktopState(width=900, height=700, last_route="#/memory")
+
+        class _BadWindow:
+            width = "nope"  # not an int
+            height = 700
+            x = None
+            y = None
+
+            def get_current_url(self) -> str:
+                raise RuntimeError("window went away")
+
+        state = capture_window_state(_BadWindow(), previous)
+        assert state.width >= MIN_WIDTH
+        assert state.last_route == "#/memory"  # kept the previous route
 
 
 @pytest.fixture
 def fake_webview() -> Iterator[types.SimpleNamespace]:
     calls: dict[str, object] = {}
 
-    def create_window(title: str, url: str, **kwargs: object) -> None:
+    class _Events:
+        def __init__(self) -> None:
+            self.closing = _Signal()
+
+    class _Signal:
+        def __iadd__(self, handler: object) -> _Signal:
+            calls["closing_handler"] = handler
+            return self
+
+    class _Window:
+        def __init__(self) -> None:
+            self.events = _Events()
+            self.width, self.height, self.x, self.y = 1200, 800, None, None
+
+        def get_current_url(self) -> str:
+            return "http://127.0.0.1:8765/"
+
+    def create_window(title: str, url: str, **kwargs: object) -> _Window:
         calls["title"] = title
         calls["url"] = url
         calls["kwargs"] = kwargs
+        return _Window()
 
     def start() -> None:
         calls["started"] = True
@@ -70,23 +105,48 @@ def fake_webview() -> Iterator[types.SimpleNamespace]:
     del sys.modules["webview"]
 
 
-def test_main_opens_a_window_at_the_health_checked_url(
-    fake_webview: types.SimpleNamespace,
-    monkeypatch: pytest.MonkeyPatch,
+class _FakeSupervisor:
+    def __init__(self, *_a: object, healthy: bool = True, **_k: object) -> None:
+        self._healthy = healthy
+        self.stopped = False
+
+    def ensure_running(self) -> bool:
+        return self._healthy
+
+    def run(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_main_opens_window_when_server_starts(
+    fake_webview: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("eva.desktop._run_server", lambda host, port: None)
-    monkeypatch.setattr("eva.desktop.wait_for_health", lambda url, timeout_s=30.0: True)
+    monkeypatch.setattr("eva.desktop.shell.ServerSupervisor", _FakeSupervisor)
     assert main() == 0
     assert fake_webview.calls["title"] == "Edge Voice Assistant"
-    assert fake_webview.calls["url"].startswith("http://127.0.0.1:")
+    assert str(fake_webview.calls["url"]).startswith("http://127.0.0.1:")
     assert fake_webview.calls.get("started") is True
 
 
-def test_main_returns_error_code_when_backend_never_becomes_healthy(
-    fake_webview: types.SimpleNamespace,
-    monkeypatch: pytest.MonkeyPatch,
+def test_main_returns_error_when_server_never_starts(
+    fake_webview: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("eva.desktop._run_server", lambda host, port: None)
-    monkeypatch.setattr("eva.desktop.wait_for_health", lambda url, timeout_s=30.0: False)
+    monkeypatch.setattr(
+        "eva.desktop.shell.ServerSupervisor",
+        lambda *a, **k: _FakeSupervisor(healthy=False),
+    )
     assert main() == 1
-    assert "started" not in fake_webview.calls
+    assert "started" not in fake_webview.calls  # window never opened
+
+
+def test_main_reports_missing_desktop_extra_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # pywebview absent → a friendly remedy, never a bare ModuleNotFoundError.
+    monkeypatch.setitem(sys.modules, "webview", None)  # forces ImportError on `import webview`
+    assert main() == 1
+    out = capsys.readouterr().out
+    assert 'pip install -e ".[desktop]"' in out
+    assert "Traceback" not in out

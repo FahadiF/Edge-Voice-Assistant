@@ -257,13 +257,19 @@ production-quality before M6 begins:
 - Hardening: SQLite shared-connection locking, download size/SHA-256
   verification, WebSocket Origin validation, documentation sync.
 
-## M6 — Desktop polish
+## M6 — Desktop polish (in progress)
 Tray icon, global push-to-talk hotkey, engine process supervision (auto-
 restart on crash, single-instance lock), first-run setup wizard as a native
 window (profile pick + model download), and installers (PyInstaller +
 Inno Setup / AppImage, per ADR-008). The window-hosting mechanics
 themselves (`eva-desktop`, `pywebview`) already shipped in M5 — M6 is the
-remaining desktop-specific polish around that shell.
+remaining desktop-specific polish around that shell. Delivered as gated
+sub-milestones (ADR-027):
+- **M6.1 ✅** server supervision (attach-or-spawn + bounded-backoff restart),
+  window-state persistence, `DesktopSettings` section.
+- **M6.2** system tray · **M6.3** global hotkey · **M6.4** first-run wizard
+  (React `/welcome`, ADR-028) · **M6.5** notifications + crash recovery +
+  autostart/single-instance · **M6.6** Windows installer.
 **Exit:** double-click launch to a working assistant on Windows and Linux dev boxes.
 
 ## M7 — Benchmarking & performance engineering
