@@ -12,7 +12,7 @@ Talk to EVA and it listens, thinks, and answers out loud — with no cloud servi
 Speech recognition, the language model, and speech synthesis all run locally. Once the
 models are downloaded you can unplug the network and nothing changes.
 
-<img width="1910" height="932" alt="EVA desktop application" src="https://github.com/user-attachments/assets/c8ece7e8-f14a-47d2-959a-b77834150c80" />
+<img width="1915" height="1031" alt="image" src="https://github.com/user-attachments/assets/39099375-a7c9-4c5f-bbd3-8e0c44de43e9" />
 
 > **Status: alpha (v0.6.0-alpha).** Everything described below is implemented and tested.
 > Known limitations are listed [plainly, further down](#limitations). Interfaces may still
