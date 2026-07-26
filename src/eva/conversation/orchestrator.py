@@ -24,8 +24,15 @@ what lets sentence N keep sounding while N+1's synthesis runs.
 
 Every hand-off point checks the turn epoch; a stale turn stops at the next
 boundary and its artifacts are never spoken. The orchestrator holds no model
-code: engines are ports, audio out is a three-method protocol, so the entire
-control flow is unit-testable with fakes.
+code: engines are ports, audio out is a small protocol, so the entire control
+flow is unit-testable with fakes.
+
+Each sentence also carries a playback marker (M7.1, ADR-028), so the audio
+layer can report the moment that sentence starts *sounding* — the event
+display surfaces use to reveal text at speaking pace. It has to come from the
+playback clock rather than from this pipeline: the queue deliberately runs
+seconds of synthesized lead ahead of the speaker, so "queued" says nothing
+about "heard".
 """
 
 from __future__ import annotations
@@ -36,7 +43,7 @@ import functools
 import logging
 import os
 import time
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
@@ -74,6 +81,7 @@ from eva.core.events import (
     StateChanged,
     TtsAudioReady,
     TtsFinished,
+    TtsSentenceStarted,
     TtsStarted,
     TurnCancelled,
     TurnFinished,
@@ -127,14 +135,27 @@ class _TextInput:
     text: str
 
 
+@dataclass(frozen=True)
+class _SpeechMark:
+    """Rides along with a sentence's audio so playback can report the moment
+    that sentence becomes audible (M7.1, ADR-028). Opaque to the audio layer,
+    which only hands it back."""
+
+    epoch: int
+    index: int
+    text: str
+
+
 class AudioOutput(Protocol):
     """The only audio surface the orchestrator needs."""
 
-    def say(self, pcm: Frame) -> None: ...
+    def say(self, pcm: Frame, *, marker: object | None = None) -> None: ...
 
     def finish_utterance(self) -> None: ...
 
     def stop_speaking(self) -> None: ...
+
+    def set_marker_handler(self, handler: Callable[[object], None] | None) -> None: ...
 
     @property
     def is_speaking(self) -> bool: ...
@@ -237,12 +258,14 @@ class Orchestrator:
         self._tasks = TaskManager("orchestrator")
         self._recovery_at: dict[str, float] = {}
         self._current_tokens_queue: asyncio.Queue[str | None] | None = None
-        self._current_sentences_queue: asyncio.Queue[str | None] | None = None
+        self._current_sentences_queue: asyncio.Queue[tuple[int, str] | None] | None = None
         self._microphone_muted = False
         # A name the user stated this session (identity.extract_stated_name),
         # injected into every subsequent prompt so the assistant stays
         # consistent about it. Reset when the active conversation changes.
         self._session_name: str | None = None
+        # Playback tells us when each sentence becomes audible (M7.1, ADR-028).
+        audio_out.set_marker_handler(self._on_speech_mark)
 
     @property
     def metrics(self) -> MetricsCollector:
@@ -356,6 +379,21 @@ class Orchestrator:
     def _set_state(self, state: str) -> None:
         self._state = state
         self._bus.publish(StateChanged(state=state))
+
+    def _on_speech_mark(self, mark: object) -> None:
+        """Playback reached the first frame of a sentence's audio (M7.1).
+
+        Runs on the audio callback thread, so it does exactly one thing: hand
+        the event to the bus (a threadsafe loop hand-off). A cancelled turn's
+        audio is dropped from the playback queue together with its markers, so
+        a stale mark should never arrive here — the epoch check makes that a
+        guarantee rather than a consequence.
+        """
+        if not isinstance(mark, _SpeechMark) or self._controller.is_stale(mark.epoch):
+            return
+        self._bus.publish_threadsafe(
+            TtsSentenceStarted(epoch=mark.epoch, index=mark.index, text=mark.text)
+        )
 
     def _asr_prompt(self) -> str | None:
         """Context bias for Whisper decoding (`initial_prompt`).
@@ -728,7 +766,11 @@ class Orchestrator:
         producer = asyncio.create_task(asyncio.to_thread(produce))
 
         # ── speak worker: sentences → TTS → playback ──
-        sentences: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_SENTENCE_QUEUE_MAXSIZE)
+        # Each item is (1-based index, raw segment): the index travels with the
+        # audio so playback can report *which* sentence became audible (M7.1).
+        sentences: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue(
+            maxsize=_SENTENCE_QUEUE_MAXSIZE
+        )
         self._current_sentences_queue = sentences
         first_audio_ms = 0
         tts_first_ms = 0
@@ -750,9 +792,10 @@ class Orchestrator:
             # only what reaches the TTS engine is converted.
             speech_filter = MarkdownSpeechFilter()
             while True:
-                sentence = await sentences.get()
-                if sentence is None:
+                item = await sentences.get()
+                if item is None:
                     break
+                index, sentence = item
                 if self._controller.is_stale(epoch):
                     continue  # drain without speaking
                 spoken_text = speech_filter.convert(sentence)
@@ -785,6 +828,11 @@ class Orchestrator:
                 # there would be an artifact of chunking, not real silence.
                 pending: Frame | None = None
                 is_first_chunk_ever = first_audio_ms == 0
+                # Rides on whichever chunk reaches playback first, so display
+                # surfaces learn when THIS sentence starts sounding (M7.1).
+                # The raw segment travels, not `spoken_text`: the speech filter
+                # exists for the TTS engine, not for what the user reads.
+                mark: _SpeechMark | None = _SpeechMark(epoch=epoch, index=index, text=sentence)
                 try:
                     sync_gen = self._tts.synthesize_stream(
                         spoken_text,
@@ -813,7 +861,9 @@ class Orchestrator:
                                     TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms)
                                 )
                             if pending is not None:
-                                self._audio.say(pending)  # not the last chunk: untouched
+                                # Not the last chunk: untouched.
+                                self._audio.say(pending, marker=mark)
+                                mark = None  # only the first chunk carries it
                             pending = chunk
                         if pending is not None and not self._controller.is_stale(epoch):
                             # This IS the last chunk of the sentence: trim its
@@ -832,7 +882,10 @@ class Orchestrator:
                                 max_leading_ms=_LEADING_TRIM_MS if is_first_chunk_ever else 0,
                                 max_trailing_ms=_TRAILING_TRIM_MS,
                             )
-                            self._audio.say(pending)
+                            # `mark` is still set when the sentence rendered as
+                            # a single chunk — the common case on Kokoro, whose
+                            # phoneme batching yields one chunk per sentence.
+                            self._audio.say(pending, marker=mark)
                     if _CONV_TRACE:
                         prev_synth_done_ms = elapsed_ms()
                         logger.info(
@@ -892,7 +945,7 @@ class Orchestrator:
                             sentence[:48],
                         )
                     self._bus.publish(LlmSentence(epoch=epoch, text=sentence))
-                    await sentences.put(sentence)
+                    await sentences.put((produced_n, sentence))
             tail = chunker.flush()
             if tail is not None and self._controller.is_current(epoch):
                 produced_n += 1
@@ -905,7 +958,7 @@ class Orchestrator:
                         tail[:48],
                     )
                 self._bus.publish(LlmSentence(epoch=epoch, text=tail))
-                await sentences.put(tail)
+                await sentences.put((produced_n, tail))
         finally:
             await sentences.put(None)
             await asyncio.gather(producer, speaker)

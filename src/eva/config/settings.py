@@ -371,6 +371,14 @@ class UISettings(_Section):
     theme: Literal["dark", "light", "system"] = Field("system", description="Color theme")
     scale: Annotated[float, Field(ge=0.75, le=2.0)] = Field(1.0, description="UI scale factor")
     reduced_motion: bool = Field(False, description="Disable non-essential animations")
+    sync_text_to_speech: bool = Field(
+        True,
+        description=(
+            "Reveal each sentence of a reply as it starts being spoken, so the text on "
+            "screen stays in step with the voice (M7.1). Turn off to show text as soon as "
+            "the model generates it — faster to read, but it runs ahead of the speech"
+        ),
+    )
 
 
 class DeveloperSettings(_Section):

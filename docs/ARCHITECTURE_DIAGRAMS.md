@@ -226,12 +226,16 @@ sequenceDiagram
             Orch->>Bus: publish LlmSentence(N, segment)
             Orch->>TTS: synthesize(segment)  [worker thread]
             TTS-->>Orch: pcm
-            Orch->>Audio: say(pcm)
+            Orch->>Audio: say(pcm, marker=segment N)
             Orch->>Bus: publish TtsAudioReady(N) [first segment only]
         end
     end
     Orch->>Bus: publish LlmFinished(N)
-    Audio-->>User: hears reply (streaming, overlapped with generation)
+    loop per segment, on the playback clock
+        Audio-->>User: hears segment (queue holds seconds of lead)
+        Audio->>Orch: marker played
+        Orch->>Bus: publish TtsSentenceStarted(N, index, text)
+    end
     Orch->>Bus: publish TtsFinished(N), TurnFinished(N)
 ```
 

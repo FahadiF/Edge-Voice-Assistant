@@ -215,7 +215,8 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
 - **WebSocket** `/api/v1/ws`: server → client event stream — the same typed
   events the orchestrator has always published (`eva/core/events.py`):
   `StateChanged`, `SpeechStarted`, `PartialTranscript`, `FinalTranscript`,
-  `LlmStarted/Token/Sentence/Finished`, `TtsStarted/AudioReady/Finished`,
+  `LlmStarted/Token/Sentence/Finished`,
+  `TtsStarted/AudioReady/SentenceStarted/Finished`,
   `TurnStarted/Finished/Cancelled`, `BargeInDetected`, plus
   `ModelDownloadProgress/Completed/Failed` and `EngineStarted/Stopped`. An
   initial `snapshot` message on connect means clients never poll for state.

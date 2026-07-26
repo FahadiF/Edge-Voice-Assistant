@@ -306,7 +306,9 @@ sub-milestones (ADR-027):
   addressable by a **UX change that paces on-screen text to speech playback**
   (reveal each sentence as it starts speaking), a deliberate change to the
   M5.6 streaming-display behavior with a read-speed tradeoff, so left for an
-  explicit decision; (ii) inter-sentence pauses appear only when the LLM is
+  explicit decision → **decided and implemented in M7.1** (ADR-028), keyed off
+  the playback clock rather than the pipeline, with `ui.sync_text_to_speech` to
+  opt back out; (ii) inter-sentence pauses appear only when the LLM is
   GPU-throttled enough to starve the buffer — the intermittent power-state
   issue, an M7 hardware/model item. Below is the earlier (still-valid) TTS
   analysis:
@@ -350,7 +352,43 @@ sub-milestones (ADR-027):
   would let long conversations retain context beyond the recent-turn window —
   its own small design with an ADR, not folded into M6.2.
 
-## M7 — Benchmarking & performance engineering
+## M7 — Conversation Experience (in progress)
+Not a feature milestone: the architecture, diagnostics, and regression suite are
+in place, and what remains between EVA and a world-class local assistant is how
+the conversation *feels*. Items are scoped and signed off one at a time.
+
+### M7.1 — Speech-synchronized text display ✅ (completed 2026-07-26)
+The highest-priority UX defect: the reply appeared on screen at generation pace
+while the voice delivered it at synthesis pace — measured an order of magnitude
+apart — so the user finished reading before EVA was a third of the way through
+and the voice became redundant. Root cause was the display layer itself, not the
+pipeline (every `LlmToken` went straight to the live bubble and to stdout).
+
+ADR-028 makes the **playback clock** the synchronization source: `PlaybackQueue`
+carries opaque markers bound to specific frames and reports them when the audio
+callback pulls them, the orchestrator publishes `TtsSentenceStarted(epoch,
+index, text)` from that callback, and each display surface reveals text up to
+the sentence that is actually being spoken (`ui.sync_text_to_speech`, default
+on; off restores pre-M7.1 behavior). "Sentence queued" was rejected as the
+synchronization point — the playback queue holds 2–10 s of synthesized lead by
+design (ADR-018), so it would still run ahead — and timer-based pacing was
+rejected for drift. One generation, one synthesis pass, no added latency.
+**Exit met:** text and voice stay in step by construction on the web UI and
+`eva run`; cut-off audio reveals nothing; a reply that is never spoken still
+appears in full; 808 tests green (18 new, covering the audio-clock deferral in
+`test_playback.py` where it lives). Awaiting manual validation (§20).
+
+### Remaining M7 items — not yet scoped
+The conversation-experience design review (2026-07-26) enumerated candidates
+across quick wins, medium projects, and architecture — prompt-prefix stability
+for KV-cache reuse, GPU execution provider for TTS, filler/acknowledgement
+audio, spoken reply-length control, barge-in detection under double-talk, ASR
+input-path and model evaluation, adaptive endpointing, a voice-first UI surface,
+streaming ASR with speculative prefill. Each needs its own scoping pass and ADR;
+none are started. The performance-engineering scope previously labelled "M7"
+folds in here (below) — renumber once the milestone plan is confirmed.
+
+### Benchmarking & performance engineering (previously all of M7)
 Benchmark harness: ASR (WER + latency on recorded fixtures), LLM (tokens/s, TTFT),
 TTS (RTF, TTFA), end-to-end turn latency, memory/VRAM/CPU sampling; HTML/Markdown
 report generator; profile-based optimization pass; re-validate default model picks

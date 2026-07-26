@@ -108,6 +108,106 @@ def test_flush_between_chunks_would_insert_a_gap() -> None:
     assert played[FRAME_SAMPLES * 2] == 1000  # chunk2 only starts on the next frame
 
 
+def test_marker_fires_on_the_audio_clock_not_on_enqueue() -> None:
+    """M7.1/ADR-028: the point of markers is that queued ≠ heard. Sentence 2's
+    audio is enqueued while sentence 1 is still playing, so its marker must
+    stay silent until playback actually reaches it — otherwise a display
+    following markers would run ahead by the whole buffered lead."""
+    fired: list[object] = []
+    q = PlaybackQueue(on_marker=fired.append)
+
+    q.enqueue(_pcm(3), marker="one")
+    q.enqueue(_pcm(2), marker="two")  # queued early, must not fire early
+    assert fired == []
+
+    assert q.queued_seconds() == 0.05  # a full 50 ms of lead is buffered
+    q.next_frame()  # frame 0: sentence one becomes audible
+    assert fired == ["one"]
+    q.next_frame()
+    q.next_frame()
+    assert fired == ["one"]  # still inside sentence one
+    q.next_frame()  # frame 3: sentence two becomes audible
+    assert fired == ["one", "two"]
+
+
+def test_marker_survives_a_partial_tail_boundary() -> None:
+    """Sentences are flushed with `finish_utterance()`, so the next sentence's
+    marker lands on a frame boundary — but a marker registered while a partial
+    tail is still pending must fire too, on the frame that carries it."""
+    fired: list[object] = []
+    q = PlaybackQueue(on_marker=fired.append)
+
+    q.enqueue(np.full(FRAME_SAMPLES + 10, 500, dtype=np.int16), marker="one")
+    q.next_frame()
+    assert fired == ["one"]
+    q.enqueue(_pcm(1), marker="two")  # merges with the 10-sample pending tail
+    assert fired == ["one"]
+    q.next_frame()
+    assert fired == ["one", "two"]
+
+
+def test_markers_are_dropped_for_audio_a_barge_in_cut_off() -> None:
+    """A cancelled turn must never announce speech the user never heard."""
+    fired: list[object] = []
+    q = PlaybackQueue(fade_ms=20, on_marker=fired.append)
+
+    q.enqueue(_pcm(2), marker="heard")
+    q.enqueue(_pcm(10), marker="cut-off")
+    q.next_frame()  # "heard" becomes audible
+    q.stop()  # barge-in
+    while q.is_active:
+        q.next_frame()
+    assert fired == ["heard"]
+
+
+def test_marker_index_stays_aligned_after_a_flush() -> None:
+    """Dropped frames are accounted for, so the *next* turn's marker fires on
+    its own first frame — not immediately, and not never."""
+    fired: list[object] = []
+    q = PlaybackQueue(fade_ms=20, on_marker=fired.append)
+
+    q.enqueue(_pcm(10), marker="old")
+    q.stop()
+    while q.is_active:
+        q.next_frame()  # fade completes, the rest of the queue is discarded
+    fired.clear()
+
+    q.enqueue(_pcm(2), marker="new")
+    assert fired == []  # not yet audible
+    q.next_frame()
+    assert fired == ["new"]
+
+
+def test_stop_on_an_empty_queue_discards_a_stranded_marker() -> None:
+    """A sentence whose audio never materialized leaves a marker with no frame
+    to ride on; stopping the turn must clear it so it cannot later fire
+    against the next turn's audio."""
+    fired: list[object] = []
+    q = PlaybackQueue(on_marker=fired.append)
+
+    q.enqueue(np.zeros(0, dtype=np.int16), marker="stranded")
+    q.stop()  # nothing queued: the early-return path
+    q.enqueue(_pcm(1), marker="next-turn")
+    q.next_frame()
+    assert fired == ["next-turn"]
+
+
+def test_marker_handler_failure_never_breaks_playback() -> None:
+    def boom(_marker: object) -> None:
+        raise RuntimeError("consumer is broken")
+
+    q = PlaybackQueue(on_marker=boom)
+    q.enqueue(_pcm(2), marker="x")
+    assert q.next_frame()[0] == 1000  # audio keeps flowing
+    assert q.next_frame()[0] == 1000
+
+
+def test_unmarked_audio_needs_no_handler() -> None:
+    q = PlaybackQueue()  # no on_marker configured
+    q.enqueue(_pcm(1), marker="ignored")
+    assert q.next_frame()[0] == 1000
+
+
 def test_rejects_non_mono() -> None:
     q = PlaybackQueue()
     try:

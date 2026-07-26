@@ -3,14 +3,20 @@
  * Assistant text renders as Markdown (ADR-024); user text stays plain.
  * Auto-scroll sticks to the bottom only while the user is already there —
  * scrolling up to re-read pauses following until they return to the bottom.
+ *
+ * Display pace (M7.1, ADR-028): with `ui.sync_text_to_speech` on (default) the
+ * live reply is revealed one sentence at a time as each one starts being
+ * spoken, so reading and listening stay in step. The store tracks both the full
+ * streamed text and how much of it has been spoken; choosing between them is
+ * this view's job, not the store's.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { conversation, engine } from "../api/endpoints";
+import { conversation, engine, settings } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
-import type { TranscriptEntry } from "../ws/store";
+import type { LiveTurn, TranscriptEntry } from "../ws/store";
 import { Card, EmptyState, downloadJson, toast } from "../components/common";
 import { Composer } from "../components/Composer";
 import { Markdown } from "../components/Markdown";
@@ -21,6 +27,12 @@ const NEAR_BOTTOM_PX = 80;
 function timestamp(at: number): string {
   if (!at) return "";
   return new Date(at).toLocaleTimeString();
+}
+
+/** What of the live reply the user may see right now (M7.1, ADR-028). */
+export function visibleAssistantText(turn: LiveTurn, syncToSpeech: boolean): string {
+  if (!syncToSpeech) return turn.assistantText;
+  return turn.assistantText.slice(0, turn.spokenChars);
 }
 
 function TurnBlock({ entry }: { entry: TranscriptEntry }) {
@@ -62,6 +74,10 @@ export function Conversation() {
   const history = useQuery({ queryKey: ["conversation-history"], queryFn: conversation.history });
   const engineStatus = useQuery({ queryKey: ["engine-status"], queryFn: engine.status });
   const engineRunning = engineStatus.data?.running ?? false;
+  // Shares the cache with the composer's query — no extra request.
+  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: settings.get });
+  const syncToSpeech = settingsQuery.data?.ui?.sync_text_to_speech ?? true;
+  const liveText = liveTurn ? visibleAssistantText(liveTurn, syncToSpeech) : "";
 
   // Seed the local transcript from server history once (live turns append after).
   const seeded = useRef(false);
@@ -83,7 +99,7 @@ export function Conversation() {
     if (stickToBottom.current) {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     }
-  }, [transcript.length, liveTurn?.assistantText, liveTurn?.partialTranscript]);
+  }, [transcript.length, liveText, liveTurn?.partialTranscript]);
 
   // Interrupt lives in the composer now (M5.5 §11), next to mic/send.
   const clear = useMutation({
@@ -194,7 +210,9 @@ export function Conversation() {
                   )}
                 </div>
               )}
-              {!liveTurn.assistantText && liveTurn.finalTranscript && !liveTurn.cancelled && (
+              {/* The thinking beat lasts until there is something to *show* —
+                  in speech-paced mode that means until EVA starts speaking. */}
+              {!liveText && liveTurn.finalTranscript && !liveTurn.cancelled && (
                 <div className="bubble bubble-assistant bubble-thinking" aria-label="Assistant is thinking">
                   <span className="thinking-dots" aria-hidden="true">
                     <span>●</span>
@@ -203,10 +221,10 @@ export function Conversation() {
                   </span>
                 </div>
               )}
-              {liveTurn.assistantText && (
+              {liveText && (
                 <div className="bubble bubble-assistant">
                   <div className="bubble-meta">Assistant · now</div>
-                  <Markdown>{liveTurn.assistantText}</Markdown>
+                  <Markdown>{liveText}</Markdown>
                   <span className="cursor" aria-hidden="true">
                     ▌
                   </span>

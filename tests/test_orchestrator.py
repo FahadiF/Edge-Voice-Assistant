@@ -26,9 +26,11 @@ from eva.core.events import (
     EventBus,
     FinalTranscript,
     LlmFinished,
+    LlmSentence,
     LlmStarted,
     PartialTranscript,
     SpeechFinished,
+    TtsSentenceStarted,
     TurnCancelled,
     TurnFinished,
 )
@@ -151,18 +153,32 @@ class SlowCleanupTTS(TTSEngine):
 
 
 class FakeAudioOut:
+    """Playback that drains instantly: audio queued is audio heard, so a
+    marker (M7.1, ADR-028) fires on the `say()` that carries it. The
+    audio-clock *deferral* — a marker firing seconds after its enqueue — is
+    covered where it lives, in `test_playback.py`."""
+
     def __init__(self) -> None:
         self.spoken: list[Frame] = []
+        self.markers: list[object] = []
         self.stops = 0
+        self._on_marker: Callable[[object], None] | None = None
 
-    def say(self, pcm: Frame) -> None:
+    def say(self, pcm: Frame, *, marker: object | None = None) -> None:
         self.spoken.append(pcm)
+        if marker is not None:
+            self.markers.append(marker)
+            if self._on_marker is not None:
+                self._on_marker(marker)
 
     def finish_utterance(self) -> None:
         pass
 
     def stop_speaking(self) -> None:
         self.stops += 1
+
+    def set_marker_handler(self, handler: Callable[[object], None] | None) -> None:
+        self._on_marker = handler
 
     @property
     def is_speaking(self) -> bool:
@@ -522,6 +538,113 @@ class TestNormalTurn:
             events = await drive(orch, bus, script)
             assert names(events).count("TurnFinished") == 2
             assert len(orch.conversation_turns) == 2
+
+        asyncio.run(scenario())
+
+
+class TestSpeechSynchronizedDisplay:
+    """M7.1/ADR-028: every sentence that reaches the speaker announces itself,
+    so display surfaces can reveal text at speaking pace instead of generation
+    pace. `FakeAudioOut` drains instantly, so here "queued" == "heard"; the
+    audio-clock deferral itself is covered in `test_playback.py`."""
+
+    @staticmethod
+    async def _run_turn(orch: Orchestrator, bus: EventBus) -> list[Event]:
+        async def script() -> None:
+            orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+            for _ in range(200):
+                if orch._turn_task is not None and orch._turn_task.done():
+                    break
+                await asyncio.sleep(0.01)
+
+        return await drive(orch, bus, script)
+
+    def test_each_spoken_sentence_is_announced_in_order(self) -> None:
+        async def scenario() -> None:
+            orch, bus, _audio, _tts = make_orchestrator()
+            events = await self._run_turn(orch, bus)
+
+            spoken = [e for e in events if isinstance(e, TtsSentenceStarted)]
+            assert [(e.index, e.text) for e in spoken] == [
+                (1, "Hello there."),
+                (2, "All good."),
+            ]
+            # The announcement is what the reveal follows, so it must never
+            # precede the text it reveals, nor the start of speech.
+            order = names(events)
+            assert order.index("TtsStarted") <= order.index("TtsSentenceStarted")
+            assert order.index("LlmSentence") < order.index("TtsSentenceStarted")
+
+        asyncio.run(scenario())
+
+    def test_announced_text_is_raw_markdown_not_the_spoken_form(self) -> None:
+        """The speech filter exists for the TTS engine; what a client displays
+        is the raw stream (ADR-024). A reveal keyed off announced text has to
+        match the tokens the client already has, formatting included."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["Try ", "**this**. ", "Then `eva run`."])
+            orch, bus, _audio, tts = make_orchestrator(llm=llm)
+            events = await self._run_turn(orch, bus)
+
+            spoken = [e for e in events if isinstance(e, TtsSentenceStarted)]
+            assert [e.text for e in spoken] == ["Try **this**.", "Then `eva run`."]
+            assert tts.synthesized == ["Try this.", "Then eva run."]
+
+        asyncio.run(scenario())
+
+    def test_a_segment_that_is_never_spoken_keeps_its_index_reserved(self) -> None:
+        """A segment swallowed by the speech filter (a fenced code block) is
+        never announced — but the numbering does not close the gap, so a client
+        revealing everything up to the next announced index still shows the
+        code block, in place."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["Run this. ", "```\n", "puts 'hi'. ", "\n```\n", "Done."])
+            orch, bus, _audio, tts = make_orchestrator(llm=llm)
+            events = await self._run_turn(orch, bus)
+
+            segments = [e.text for e in events if isinstance(e, LlmSentence)]
+            assert len(segments) == 3
+            assert "puts 'hi'." in segments[1]  # the code segment exists...
+            assert tts.synthesized == ["Run this.", "Done."]  # ...but is unspoken
+
+            spoken = [e for e in events if isinstance(e, TtsSentenceStarted)]
+            assert [e.index for e in spoken] == [1, 3]  # index 2 stays reserved
+
+        asyncio.run(scenario())
+
+    def test_a_cancelled_turn_announces_nothing_further(self) -> None:
+        """Barge-in must not reveal text the user never heard."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["One. ", "Two. ", "Three. ", "Four."], delay_s=0.1)
+            orch, bus, audio, _tts = make_orchestrator(llm=llm)
+            collected: list[Event] = []
+            q = bus.subscribe()
+
+            async def pump() -> None:
+                while True:
+                    collected.append(await q.get())
+
+            pump_task = asyncio.create_task(pump())
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await wait_for_event(collected, TtsSentenceStarted)
+                orch.feed_audio_event(BargeIn(speech_ms=200))
+                await wait_for_event(collected, TurnCancelled)
+
+            events = await drive(orch, bus, script)
+            pump_task.cancel()
+
+            cancelled_at = names(events).index("TurnCancelled")
+            assert not [
+                e
+                for i, e in enumerate(events)
+                if isinstance(e, TtsSentenceStarted) and i > cancelled_at
+            ]
+            assert audio.stops >= 1
 
         asyncio.run(scenario())
 

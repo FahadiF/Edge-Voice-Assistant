@@ -34,6 +34,15 @@ const UI_SETTINGS_SCHEMA: JsonSchema = {
       title: "Reduced Motion",
       type: "boolean",
     },
+    sync_text_to_speech: {
+      default: true,
+      description:
+        "Reveal each sentence of a reply as it starts being spoken, so the text on screen " +
+        "stays in step with the voice (M7.1). Turn off to show text as soon as the model " +
+        "generates it — faster to read, but it runs ahead of the speech",
+      title: "Sync Text To Speech",
+      type: "boolean",
+    },
   },
   title: "UISettings",
   type: "object",

@@ -18,8 +18,10 @@ from eva.core.events import (
     PartialTranscript,
     StateChanged,
     TtsAudioReady,
+    TtsSentenceStarted,
     TurnCancelled,
     TurnFinished,
+    TurnStarted,
 )
 from eva.engine import Assistant
 
@@ -38,32 +40,103 @@ def _render(event: Event) -> str | None:
             return f"(turn cancelled: {reason})"
         case TtsAudioReady(ttfa_ms=ttfa):
             return f"  [first audio after {ttfa} ms]"
-        case LlmFinished(text=text, tokens=tokens, ttft_ms=ttft, duration_ms=dur):
-            speed = tokens / (dur / 1000) if dur else 0.0
-            return f"Assistant: {text}\n  [{tokens} tokens, ttft {ttft} ms, {speed:.1f} tok/s]"
         case TurnFinished(error=error) if error:
             return f"(turn failed: {error})"
     return None
+
+
+def _metrics_line(event: LlmFinished) -> str:
+    speed = event.tokens / (event.duration_ms / 1000) if event.duration_ms else 0.0
+    return f"  [{event.tokens} tokens, ttft {event.ttft_ms} ms, {speed:.1f} tok/s]"
+
+
+class ConsoleRenderer:
+    """Console view of the conversation — presentation only, no pipeline state.
+
+    With `ui.sync_text_to_speech` on (default, M7.1) the reply is written out
+    sentence by sentence as each one *starts being spoken* (`TtsSentenceStarted`,
+    ADR-028), so the console never runs ahead of the voice, and the per-turn
+    metrics line is held back until the turn ends rather than landing mid-reply.
+    With it off, tokens stream to the console as the model produces them (the
+    pre-M7.1 behavior).
+    """
+
+    def __init__(self, *, sync_to_speech: bool = True) -> None:
+        self._sync = sync_to_speech
+        self._inline_open = False
+        self._reply: str | None = None  # authoritative text, for the fallback
+        self._metrics: str | None = None
+        self._spoken_any = False
+
+    def handle(self, event: Event) -> None:
+        match event:
+            case TurnStarted():
+                self._reset()
+            case LlmToken(token=token):
+                if not self._sync:
+                    self._write_inline(token)
+            case TtsSentenceStarted(text=text):
+                if not self._sync:
+                    return
+                self._write_inline(("Assistant: " if not self._spoken_any else " ") + text)
+                self._spoken_any = True
+            case LlmFinished() as finished:
+                self._reply = finished.text
+                self._metrics = _metrics_line(finished)
+                if not self._sync:
+                    # Generation is the pace: print the whole reply and its
+                    # metrics right away, exactly as before M7.1.
+                    self._close_inline()
+                    self._print(f"Assistant: {finished.text}")
+                    self._flush_metrics()
+            case TurnFinished():
+                self._close_inline()
+                if self._sync and not self._spoken_any and self._reply:
+                    # Nothing was ever spoken (e.g. TTS unavailable) — the reply
+                    # must still reach the user.
+                    self._print(f"Assistant: {self._reply}")
+                self._flush_metrics()
+                line = _render(event)
+                if line is not None:
+                    self._print(line)
+                self._reset()
+            case _:
+                line = _render(event)
+                if line is not None:
+                    self._close_inline()
+                    self._print(line)
+
+    def _reset(self) -> None:
+        self._reply = None
+        self._metrics = None
+        self._spoken_any = False
+
+    def _flush_metrics(self) -> None:
+        if self._metrics is not None:
+            self._print(self._metrics)
+            self._metrics = None
+
+    def _write_inline(self, text: str) -> None:
+        print(text, end="", flush=True)
+        self._inline_open = True
+
+    def _close_inline(self) -> None:
+        if self._inline_open:
+            print()
+            self._inline_open = False
+
+    def _print(self, line: str) -> None:
+        self._close_inline()
+        print(line, flush=True)
 
 
 async def run_voice_loop(assistant: Assistant) -> None:
     queue = assistant.bus.subscribe()
 
     async def render_events() -> None:
-        token_line_open = False
+        renderer = ConsoleRenderer(sync_to_speech=assistant.settings.ui.sync_text_to_speech)
         while True:
-            event = await queue.get()
-            if isinstance(event, LlmToken):
-                # Stream tokens inline as they arrive.
-                print(event.token, end="", flush=True)
-                token_line_open = True
-                continue
-            line = _render(event)
-            if line is not None:
-                if token_line_open:
-                    print()
-                    token_line_open = False
-                print(line, flush=True)
+            renderer.handle(await queue.get())
 
     renderer = asyncio.create_task(render_events())
     try:

@@ -128,6 +128,7 @@ After that, every engine event is forwarded as it happens:
 {"type": "LlmToken", "data": {"epoch": 3, "token": "It"}}
 {"type": "LlmSentence", "data": {"epoch": 3, "text": "It looks sunny today."}}
 {"type": "TtsAudioReady", "data": {"epoch": 3, "ttfa_ms": 1180}}
+{"type": "TtsSentenceStarted", "data": {"epoch": 3, "index": 1, "text": "It looks sunny today."}}
 {"type": "StateChanged", "data": {"state": "speaking"}}
 {"type": "MicrophoneMuted", "data": {"muted": true}}
 {"type": "TurnCancelled", "data": {"epoch": 3, "reason": "barge-in"}}
@@ -139,6 +140,15 @@ After that, every engine event is forwarded as it happens:
 orchestrator has always published; this is not a separate protocol. Clients
 never poll: settings changes, model downloads, and conversation activity are
 all observable purely by staying connected.
+
+`TtsSentenceStarted` (M7.1, ADR-028) is the one event published from the audio
+callback rather than the turn pipeline: it fires when a sentence starts coming
+out of the speaker, which is what lets a client display text at speaking pace
+instead of generation pace. `LlmToken`/`LlmSentence` say what was *generated*;
+`TtsSentenceStarted` says what was *heard*. Note that its `index` is 1-based
+over all segments and skips any segment the speech filter dropped (a fenced
+code block), so a client that reveals everything up to the announced index
+keeps the reply intact.
 
 ## Design notes
 

@@ -129,6 +129,24 @@ class TtsAudioReady(Event):
     ttfa_ms: int  # time from utterance end to first audio queued
 
 
+class TtsSentenceStarted(Event):
+    """One sentence of the reply just started coming out of the speaker
+    (M7.1, ADR-028) — published from the playback clock, not when the audio
+    was synthesized or queued.
+
+    This is the synchronization point display surfaces use to reveal text at
+    speaking pace instead of at generation pace. `text` is the raw segment as
+    published by `LlmSentence` (Markdown intact — the speech filter's output
+    is what reaches the TTS engine, not what is displayed), and `index` is its
+    1-based position in the reply, so a client can order/deduplicate without
+    string matching.
+    """
+
+    epoch: int
+    index: int
+    text: str
+
+
 class TtsFinished(Event):
     epoch: int
 

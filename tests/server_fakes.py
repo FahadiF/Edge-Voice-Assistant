@@ -108,16 +108,22 @@ class FakeAudioSystem:
         self.capture_ring = _FakeRing()
         self.playback = _FakePlayback()
         self._speaking = False
+        self._on_marker: Callable[[object], None] | None = None
 
     # AudioOutput protocol (used by the orchestrator)
-    def say(self, pcm: Frame) -> None:
+    def say(self, pcm: Frame, *, marker: object | None = None) -> None:
         self.spoken.append(pcm)
+        if marker is not None and self._on_marker is not None:
+            self._on_marker(marker)  # drains instantly: queued == heard
 
     def finish_utterance(self) -> None:
         pass
 
     def stop_speaking(self) -> None:
         self._speaking = False
+
+    def set_marker_handler(self, handler: Callable[[object], None] | None) -> None:
+        self._on_marker = handler
 
     @property
     def is_speaking(self) -> bool:

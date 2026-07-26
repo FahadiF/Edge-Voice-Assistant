@@ -20,6 +20,13 @@ export interface LiveTurn {
   partialTranscript: string;
   finalTranscript: string | null;
   assistantText: string;
+  /** How much of `assistantText` has actually been spoken (M7.1, ADR-028).
+   * Advanced by `TtsSentenceStarted`, which the engine publishes from the
+   * playback clock. A speech-paced view renders the prefix; a
+   * generation-paced view ignores it. The store keeps both facts and takes no
+   * position on which one is displayed — that is the view's policy
+   * (`ui.sync_text_to_speech`). */
+  spokenChars: number;
   cancelled: boolean;
   cancelReason: string | null;
   startedAt: number;
@@ -95,6 +102,8 @@ function summarize(type: string, data: Record<string, unknown>): string {
     case "FinalTranscript":
     case "LlmSentence":
       return String(data.text ?? "").slice(0, 60);
+    case "TtsSentenceStarted":
+      return `#${data.index} ${String(data.text ?? "").slice(0, 50)}`;
     case "StateChanged":
       return String(data.state ?? "");
     case "TtsAudioReady":
@@ -194,6 +203,7 @@ export const useWsStore = create<WsState>((set, get) => ({
             partialTranscript: "",
             finalTranscript: null,
             assistantText: "",
+            spokenChars: 0,
             cancelled: false,
             cancelReason: null,
             startedAt: now,
@@ -223,7 +233,30 @@ export const useWsStore = create<WsState>((set, get) => ({
         const turn = get().liveTurn;
         if (!turn || turn.epoch !== data.epoch) return;
         // Authoritative full text (tokens can be missed across reconnects).
+        // `spokenChars` deliberately does NOT jump to the end here: generation
+        // finishes long before the speech does, and that gap is the entire
+        // problem M7.1 addresses.
         set({ liveTurn: { ...turn, assistantText: data.text as string } });
+        return;
+      }
+      case "TtsSentenceStarted": {
+        const turn = get().liveTurn;
+        if (!turn || turn.epoch !== data.epoch) return;
+        // This sentence is now coming out of the speaker, so it may be shown.
+        // We advance a cursor into the streamed text rather than concatenating
+        // the event's own text: slicing the raw stream preserves formatting
+        // (newlines, Markdown, list structure) exactly, and it carries along
+        // any segment that was never spoken — a fenced code block, which the
+        // speech filter drops — instead of leaving a hole.
+        const spoken = String(data.text ?? "");
+        const found = turn.assistantText.indexOf(spoken, turn.spokenChars);
+        const spokenChars =
+          found >= 0
+            ? found + spoken.length
+            : // Not found: tokens were dropped (a saturated subscriber queue)
+              // or normalized. Advance by length so the reveal keeps moving.
+              Math.min(turn.spokenChars + spoken.length, turn.assistantText.length);
+        set({ liveTurn: { ...turn, spokenChars } });
         return;
       }
       case "TurnCancelled": {

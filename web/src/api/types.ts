@@ -122,6 +122,7 @@ export interface UISettings {
   theme: "dark" | "light" | "system";
   scale: number;
   reduced_motion: boolean;
+  sync_text_to_speech: boolean;
 }
 
 export interface DeveloperSettings {

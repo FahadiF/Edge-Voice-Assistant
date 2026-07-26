@@ -66,6 +66,93 @@ describe("WebSocket store reducers", () => {
     expect(useWsStore.getState().liveTurn?.assistantText).toBe("Hello there");
   });
 
+  describe("speech-synchronized reveal (M7.1, ADR-028)", () => {
+    /** Streams two sentences, then reports them spoken one at a time. */
+    function generateTwoSentences() {
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({ type: "LlmToken", data: { epoch: 1, token: "Hi there. " } });
+      s.handleMessage({ type: "LlmToken", data: { epoch: 1, token: "All good." } });
+      return s;
+    }
+
+    it("reveals nothing until a sentence is actually spoken", () => {
+      generateTwoSentences();
+      const turn = useWsStore.getState().liveTurn!;
+      expect(turn.assistantText).toBe("Hi there. All good."); // generated…
+      expect(turn.spokenChars).toBe(0); // …but not yet heard
+    });
+
+    it("advances the cursor to the end of each spoken sentence", () => {
+      const s = generateTwoSentences();
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 1, text: "Hi there." },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe("Hi there.".length);
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 2, text: "All good." },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe("Hi there. All good.".length);
+    });
+
+    it("keeps the cursor put when generation finishes ahead of speech", () => {
+      const s = generateTwoSentences();
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 1, text: "Hi there." },
+      });
+      s.handleMessage({
+        type: "LlmFinished",
+        data: { epoch: 1, text: "Hi there. All good.", tokens: 2, ttft_ms: 5, duration_ms: 9 },
+      });
+      // LlmFinished must not reveal the rest — that is the defect being fixed.
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe("Hi there.".length);
+    });
+
+    it("reveals a skipped segment along with the next spoken one", () => {
+      // A fenced code block is never spoken (the speech filter drops it), so
+      // the cursor jumps past it when the sentence after it starts.
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({
+        type: "LlmToken",
+        data: { epoch: 1, token: "Run this.\n```\nputs 'hi'\n```\nDone." },
+      });
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 3, text: "Done." },
+      });
+      const turn = useWsStore.getState().liveTurn!;
+      expect(turn.assistantText.slice(0, turn.spokenChars)).toContain("```"); // code shown
+      expect(turn.spokenChars).toBe(turn.assistantText.length);
+    });
+
+    it("drops TtsSentenceStarted from a stale epoch (ADR-006)", () => {
+      const s = generateTwoSentences();
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 0, index: 1, text: "Hi there." },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(0);
+    });
+
+    it("still advances when the spoken text cannot be located", () => {
+      // Tokens can be lost across a reconnect, so the sentence may not appear
+      // in `assistantText` — the reveal must keep moving, bounded by what is
+      // actually there.
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({ type: "LlmToken", data: { epoch: 1, token: "xy" } });
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 1, text: "not in the stream" },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(2);
+    });
+  });
+
   it("moves a finished turn into the transcript and clears liveTurn", () => {
     const s = useWsStore.getState();
     s.handleMessage({ type: "TurnStarted", data: { epoch: 2 } });

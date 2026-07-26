@@ -301,8 +301,10 @@ stats match `eva memory stats`, and latency numbers appear after one turn.
 
 Have a conversation (via the engine — any client that drives it, since audio
 stays server-side per ADR-007). Confirm: partial transcript appears in
-italics and is replaced by the final one, the assistant's reply streams
-token-by-token, an interrupted turn shows an "— interrupted —" marker,
+italics and is replaced by the final one, the assistant's reply appears
+sentence by sentence as it is spoken (M7.1 — see §20; set
+`ui.sync_text_to_speech` off for the older token-by-token stream), an
+interrupted turn shows an "— interrupted —" marker,
 **Export** downloads a JSON file matching `eva conversation export`-shape
 data, **Import** re-loads it, **Clear** empties the view, and the search box
 filters the visible transcript.
@@ -933,6 +935,60 @@ mid-speech ~15 times, varied (early/late in the reply, short/long barge-ins):
       with high CPU/GPU load or the assistant's own audio being loud (residual
       echo can delay VAD detecting your voice). `barge_in_confirm_ms` (200 ms
       default) is the deliberate debounce before a barge-in fires.
+
+## 20. Speech-synchronized text display (M7.1, ADR-028)
+
+The acceptance question is simple: **does the text ever get ahead of the
+voice?** Use a reply long enough to have several sentences ("Explain in four
+sentences why the sky is blue"), and watch the screen while you listen.
+
+### 20.1 Web UI — text and voice in step
+
+With `ui.sync_text_to_speech` on (the default):
+
+- [ ] After you stop speaking, the thinking dots show and **no reply text
+      appears** — even though generation has already finished internally.
+- [ ] The first sentence appears **as EVA starts saying it**, not before.
+- [ ] Each later sentence appears as it starts being spoken. At no point is
+      there a sentence on screen that has not been spoken yet.
+- [ ] When the last sentence finishes, the whole reply is on screen.
+- [ ] A reply containing a fenced code block still shows the code — it appears
+      together with the sentence that follows it (code is never spoken, ADR-024).
+- [ ] Formatting survives the reveal: bold, lists, and tables render normally as
+      they appear, not as raw Markdown that reflows at the end.
+
+### 20.2 Interruption reveals only what was heard
+
+- [ ] Interrupt mid-reply (talk over EVA, or press ⏹ Stop). The live view stops
+      at the sentence that was actually being spoken — no unspoken sentences
+      flash in at the end of the turn.
+- [ ] The archived turn in the transcript then shows the full generated reply
+      with the "— interrupted —" marker. This asymmetry is intended: storage
+      stays canonical, the live view stays honest (ADR-028).
+- [ ] Diagnostics **Event Log** shows `TtsSentenceStarted` entries (`#1`, `#2`,
+      …) interleaved with playback, and **none** after `TurnCancelled`.
+
+### 20.3 Opting out restores the old behavior
+
+- [ ] Settings → Appearance → turn **Sync text to speech** off, save, and have
+      another conversation: the reply streams token-by-token again, ahead of the
+      voice (the pre-M7.1 behavior). Turn it back on.
+
+### 20.4 CLI (`eva run`)
+
+- [ ] Same check in the console: `Assistant:` and the reply text are written
+      sentence by sentence in time with the speech, and the
+      `[N tokens, ttft … ms, … tok/s]` metrics line prints **after** the reply
+      finishes speaking — not in the middle of it.
+
+### 20.5 Degradation — a reply that is never spoken
+
+Text must never be lost, only delayed. Force a no-audio path (Settings →
+Permissions → microphone off is *not* enough — playback still works; instead
+select a nonexistent output device, or stop the TTS model from loading):
+
+- [ ] The reply still appears in full when the turn finishes, and the CLI still
+      prints `Assistant: …`. A silent EVA is acceptable; a mute one is not.
 
 ## Naming note
 

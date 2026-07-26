@@ -6,6 +6,76 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-26 — M7.1: speech-synchronized text display (ADR-028)
+
+The assistant used to write its whole answer on screen and then read it back:
+the user finished reading before the voice was a third of the way through, so
+the voice carried no information and the conversation felt mechanical. This was
+recorded earlier as a perception artifact of fast text streaming — it was not.
+It was the literal behavior of the display layer, which appended every
+`LlmToken` to the live bubble (and printed every token to the console) while
+audio waited on synthesis.
+
+Fixed by changing **display policy only**. One generation, one synthesis pass;
+nothing delayed, nothing generated twice. The spoken pipeline stays the source
+of truth and the UI now reveals content when it is actually spoken.
+
+**Added — playback markers (`PlaybackQueue`, ADR-028 §1)**
+`enqueue()` accepts an opaque `marker` bound to the next frame the queue
+appends; the queue hands it to `on_marker` when the audio callback pulls that
+frame. Why the audio clock and not "sentence queued": the playback queue
+deliberately holds a large synthesized lead (measured 2.1 s → 9.9 s across one
+reply — the mechanism that keeps sentence N sounding while N+1 synthesizes,
+ADR-018), so revealing on enqueue would still run ahead by the entire buffer
+depth. The invariant is strong — **a fired marker means the user heard it** — so
+audio a barge-in cuts off announces nothing, including audio that would only
+begin sounding inside the 40 ms fade-out. Frame handling is otherwise
+unchanged, so barge-in timing is untouched.
+
+**Added — `TtsSentenceStarted(epoch, index, text)` event**
+Published from the playback clock when a sentence starts coming out of the
+speaker. `text` is the raw segment (Markdown intact — the speech filter serves
+the TTS engine, not the reader, ADR-024) so it matches the token stream a
+client already holds. `index` is 1-based over *all* segments and its gaps are
+real: a segment the speech filter drops entirely (a fenced code block) is never
+announced and never renumbered, so a client revealing up to the next announced
+index shows the code block in place instead of leaving a hole.
+
+**Added — `ui.sync_text_to_speech` (default on)**
+Both display surfaces now reveal each sentence as it starts being spoken:
+- **Web UI** — the store tracks the full streamed text *and* how much has been
+  spoken; `Conversation.tsx` picks. The cursor is a character offset into the
+  raw stream rather than a concatenation of announced sentences, so formatting
+  (newlines, lists, fences) is preserved byte for byte. The "thinking" dots now
+  last until there is something to *show*, which is the requested rhythm: brief
+  think, then speech and text together.
+- **`eva run`** — the same policy in a new `ConsoleRenderer`, which also holds
+  the per-turn metrics line until the turn ends (`LlmFinished` arrives *before*
+  the last sentence is spoken, so it used to print mid-reply).
+
+Off restores exact pre-M7.1 behavior on both surfaces. If audio never plays
+(TTS unavailable, no output device), nothing is announced and the full reply
+still appears when the turn finishes — text is never lost, only delayed.
+
+**Deliberate asymmetry:** on a barge-in the *live* view stops at what was heard,
+while the archived transcript, memory, and export keep the full generated reply
+marked interrupted. Storage stays canonical (ADR-024); the live view stays
+honest about what was spoken.
+
+**Tests — 808 total (18 new)**
+`test_playback.py` covers the mechanism where it lives: a marker enqueued while
+earlier audio is still playing must stay silent until the clock reaches it,
+markers survive a partial-tail boundary, cut-off audio fires nothing, indices
+stay aligned after a flush, a stranded marker is discarded, and a raising
+handler never breaks playback. `test_orchestrator.py` covers announcement order,
+raw-vs-spoken text, the reserved index of an unspoken segment, and silence after
+cancellation. `test_voice_loop.py` covers both console policies, including the
+no-audio fallback and per-turn state isolation. `store.test.ts` covers the
+reveal cursor, the stale-epoch drop, and the not-found fallback.
+
+**Not touched (M7.1 scope):** ASR, barge-in detection, prompt engineering,
+memory, the TTS engine, and the desktop shell.
+
 ### 2026-07-22 — Conversation-experience investigation: end-to-end pipeline trace
 
 Instrumented the whole turn pipeline and measured it end-to-end before changing

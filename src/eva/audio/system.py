@@ -79,14 +79,25 @@ class AudioSystem:
         self.pipeline.stop()
         self.stream.stop()
 
-    def say(self, pcm: npt.NDArray[np.int16]) -> None:
+    def say(self, pcm: npt.NDArray[np.int16], *, marker: object | None = None) -> None:
         """Queue one PCM chunk for playback (16 kHz mono int16).
 
         Does not flush the trailing partial frame — call `finish_utterance()`
         once after the last chunk of an utterance so consecutive chunks (ADR-018
         streaming synthesis) join without a silence pad at each boundary.
+
+        `marker` is handed to the marker handler when this chunk's first frame
+        actually reaches the speaker (M7.1, ADR-028) — not when it is queued.
         """
-        self.playback.enqueue(pcm)
+        self.playback.enqueue(pcm, marker=marker)
+
+    def set_marker_handler(self, handler: Callable[[object], None] | None) -> None:
+        """Register who hears about played playback markers (M7.1, ADR-028).
+
+        Called on the audio callback thread, so the handler must be trivial.
+        Set before `start()`; a `None` handler makes markers a no-op.
+        """
+        self.playback.on_marker = handler
 
     def finish_utterance(self) -> None:
         """Flush the trailing partial frame after the last chunk of an utterance."""
