@@ -352,6 +352,15 @@ sub-milestones (ADR-027):
   would let long conversations retain context beyond the recent-turn window —
   its own small design with an ADR, not folded into M6.2.
 
+## Milestone order (approved 2026-07-26)
+
+`Documentation Refresh` → `M7.2 ASR` → `M7.3 Architecture Stabilization` →
+`M8 Performance` → `M7.4 Provider Abstraction` → `M7.5 Online Mode` → `M9 Release`
+
+Performance work precedes the provider and online milestones deliberately: EVA's
+largest felt problem is that conversation is slow, and over 90% of that is in two
+fixable places. A fast local assistant comes before an internet-capable one.
+
 ## M7 — Conversation Experience (in progress)
 Not a feature milestone: the architecture, diagnostics, and regression suite are
 in place, and what remains between EVA and a world-class local assistant is how
@@ -378,29 +387,74 @@ rejected for drift. One generation, one synthesis pass, no added latency.
 appears in full; 808 tests green (18 new, covering the audio-clock deferral in
 `test_playback.py` where it lives). Awaiting manual validation (§20).
 
-### Remaining M7 items — not yet scoped
-The conversation-experience design review (2026-07-26) enumerated candidates
-across quick wins, medium projects, and architecture — prompt-prefix stability
-for KV-cache reuse, GPU execution provider for TTS, filler/acknowledgement
-audio, spoken reply-length control, barge-in detection under double-talk, ASR
-input-path and model evaluation, adaptive endpointing, a voice-first UI surface,
-streaming ASR with speculative prefill. Each needs its own scoping pass and ADR;
-none are started. The performance-engineering scope previously labelled "M7"
-folds in here (below) — renumber once the milestone plan is confirmed.
+### M7.2 — ASR recognition quality ✅ investigation complete, implementation pending
+Real-conversation evidence showed common words being substituted ("fox"→"box").
+A five-stage investigation (event-log analysis, a raw-vs-processed capture probe,
+prompt/beam/compute-type sweeps, and a small-vs-large-v3-turbo comparison on real
+recordings) established that **the acoustic information survives capture** — it is
+`whisper-small` that cannot use it. Measured on the reference platform: turbo fits
+in VRAM with 1.5 GB to spare (1.27 GB at the largest shipped preset), costs +2% of
+time-to-first-audio, and recovered the fricative in 3 of 4 non-truncated failures.
+Decoder settings were validated and left alone: keep `initial_prompt`, keep
+`beam_size=1` (wider beams raise prompt-copy hallucination and fix nothing),
+`compute_type` `auto` already resolves to `int8_float16`.
+Approved implementation sequence: **M0** live-conversation validation (no code —
+a settings edit is enough) → **M1** three independent lifecycle bug fixes →
+**M2** turbo as a catalogued, selectable model → **M3** preset default change,
+gated on a fixture benchmark. See the design review in CHANGELOG for the full
+evidence chain.
 
-### Benchmarking & performance engineering (previously all of M7)
+### M7.3 — Architecture Stabilization
+No user-facing features. Closes the gaps in
+[ARCHITECTURE.md §10](ARCHITECTURE.md#10-known-architectural-gaps) that block
+everything after it: documentation refresh, ASR model lifecycle (install detection,
+prefetch, removal), CUDA runtime registration decoupled from the LLM adapter, the
+**capability/tool port**, and **plugin capability wiring** (completing ADR-011).
+**Exit:** no dangling documentation references; an example plugin registers a working
+capability end-to-end; engine-managed models report install state correctly and can be
+prefetched and removed; zero behavior change.
+
+### M7.4 — Provider Abstraction (fully offline)
+Split `LLMEngine` into a transport-neutral port plus an optional local-weights
+lifecycle, so the orchestrator stops assuming models are local files. Adds a provider
+chain with fallback, OS-keychain secret storage, an OpenAI-compatible adapter (which
+covers Ollama, LM Studio, vLLM and most cloud vendors at once), and a nested settings
+structure. **Ships with local providers only** — this milestone proves the abstraction
+without touching privacy.
+**Exit:** llama.cpp runs as a registered provider with no orchestrator change; a local
+Ollama endpoint works through the OpenAI-compatible adapter; the full test suite passes
+with networking disabled; no credential material appears in any export or diagnostic.
+
+### M7.5 — Online Mode (optional, off by default)
+Internet search, web retrieval, citations, and optional fact verification — as a
+*capability* registered on the ADR-030 port, never as a mode of the engine. Connection
+modes (`offline` / `offline-preferred` / `ask` / `online-preferred`) with `offline` as
+the default, a single controlled egress point, a deterministic retrieval policy deciding
+when local knowledge suffices, and per-capability privacy controls.
+**Exit:** in `offline` mode an automated test proves no outbound socket is opened during
+a full conversation; every online answer carries resolvable citations; disabling online
+returns byte-identical offline behavior.
+
+## M8 — Benchmarking & performance engineering
 Benchmark harness: ASR (WER + latency on recorded fixtures), LLM (tokens/s, TTFT),
 TTS (RTF, TTFA), end-to-end turn latency, memory/VRAM/CPU sampling; HTML/Markdown
 report generator; profile-based optimization pass; re-validate default model picks
 (Parakeet/Moonshine adapters land here if data justifies them). Includes the
-deferred ASR common-word accuracy evaluation (backlog D): recorded fixtures +
-model-size / compute-type / beam-size sweep against measured WER.
+deferred ASR common-word accuracy evaluation (backlog D).
+
+Carries the two largest measured latency costs, both identified in M7 and both
+independent of the milestones above:
+- **GPU execution provider for TTS** — CPU synthesis is ~1.63 s of the ~3.5 s
+  time-to-first-audio; the CPU-only ONNX Runtime is a base dependency (ADR-012).
+- **Prompt-prefix stability for KV-cache reuse** — volatile content (clock, retrieved
+  memories) sits at the head of the prompt, so llama.cpp re-prefills the whole context
+  every turn (~1.65 s, and it grows with conversation length).
+
 **Exit:** reproducible benchmark reports; documented per-profile defaults; startup
 time and interaction latency targets met or consciously re-set.
 
-## M8 — Packaging & release
-PyInstaller bundles, Inno Setup installer, AppImage, docs set (Installation, User,
-Developer, Architecture, Contribution, Troubleshooting guides), 1.0.0 release.
+## M9 — Packaging & release
+PyInstaller bundles, Inno Setup installer, AppImage, user guide, 1.0.0 release.
 **Exit:** a non-developer installs and talks to the assistant without touching Python.
 
 ## Deferred (architecture supports, not scheduled)
@@ -413,7 +467,9 @@ profile (Chatterbox), wake-word activation, multilingual UI.
   `pip install -e ".[dev]"` must yield a runnable app (commands either work or fail
   with actionable guidance — never `ModuleNotFoundError`). See ADR-013.
 - Correctness, modularity, testability before micro-optimization (optimization has a
-  dedicated milestone: M7).
+  dedicated milestone: M8).
+- **Documentation is production work**, not a follow-up: a milestone is not complete
+  until the affected documents agree with the code.
 - Every significant design decision gets a new or updated ADR.
 - CHANGELOG.md, roadmap status, and affected docs are updated with every batch of
   changes, so the project state is always readable from the repository alone.

@@ -2,11 +2,15 @@
 
 Edge Voice Assistant runs fully offline after a one-time setup.
 
+Setting up to *develop* EVA rather than use it? See
+[DEVELOPMENT.md](DEVELOPMENT.md). Something not working? See
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 ## Quickest start (guided)
 
 ```bash
-git clone <your-repo-url> edge-voice-assistant
-cd edge-voice-assistant
+git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
+cd Edge-Voice-Assistant
 python -m venv .venv && .venv\Scripts\Activate.ps1   # Linux: source .venv/bin/activate
 pip install -e .
 eva run
@@ -61,8 +65,8 @@ Installation has three stages:
 
 ```powershell
 # 1. Clone and enter the project
-git clone <your-repo-url> edge-voice-assistant
-cd edge-voice-assistant
+git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
+cd Edge-Voice-Assistant
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
@@ -95,8 +99,8 @@ If PowerShell blocks the activation script, run once:
 # System audio library (PortAudio) — required by sounddevice
 sudo apt-get update && sudo apt-get install -y libportaudio2
 
-git clone <your-repo-url> edge-voice-assistant
-cd edge-voice-assistant
+git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
+cd Edge-Voice-Assistant
 
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -252,6 +256,8 @@ eva-desktop
 
 ## Troubleshooting
 
+Setup-specific issues:
+
 - **The setup wizard was cancelled or interrupted** — run `eva first-run` to
   resume; it re-detects what is still missing and continues.
 - **`eva run` in a script/CI exits without starting** — a non-interactive shell
@@ -259,11 +265,6 @@ eva-desktop
   to auto-confirm, or complete setup manually first.
 - **Force setup to run again** — `eva first-run` always shows the wizard; it
   re-verifies and only installs what is missing.
-- **CUDA build fails to load (`llama.dll` dependency error)** — the NVIDIA
-  cudart/cuBLAS wheels are missing; re-run `eva setup --cuda`, or fall back to
-  `eva setup --cpu`.
-- **No audio devices / stream fails to open** — check `eva devices`; on Linux
-  ensure `libportaudio2` is installed.
-- **Slow first response on CPU** — expected for a 4B model without a GPU; use a
-  smaller LLM (`eva models download qwen3-1.7b-instruct-q4_k_m`, then set it in
-  the configuration) or a CUDA GPU.
+
+For everything else — microphone problems, GPU and CUDA errors, model downloads,
+audio quality, the desktop app — see **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.

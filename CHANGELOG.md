@@ -6,6 +6,66 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-26 — Documentation Refresh milestone
+
+A documentation-only milestone, run before further implementation so the repository
+describes itself accurately. No production code, behavior, or architecture changed.
+
+**Created**
+- **`CONTRIBUTING.md`** — contribution process, the five architecture rules, how to add
+  an adapter (the common case), performance-change expectations, and an explicit list of
+  what gets pushed back on (network calls outside the downloader, vendor branching in
+  core, telemetry, toolchain-requiring dependencies).
+- **`docs/DEVELOPMENT.md`** — the developer guide. Referenced by `.pre-commit-config.yaml`
+  and CHANGELOG since M5 but **missing from the repository**; contributors following that
+  pointer hit nothing. Covers environment setup, the quality gate, codebase orientation
+  ("where the interesting logic lives"), testing approach, debugging tools, settings
+  changes, and the release process.
+- **`docs/TROUBLESHOOTING.md`** — symptom → cause → fix, organized by subsystem. Captures
+  the diagnostic knowledge accumulated across M7: OS-muted microphone, cuBLAS/CUDA
+  registration, silent first-load ASR downloads, far-field recognition quality, and the
+  known install-detection reporting bug.
+- **`docs/adr/README.md`** — index for 28 ADRs, by subsystem and chronologically. Also
+  records, for the first time, the **known gaps between ADRs and implementation**
+  (ADR-011 plugin capability wiring absent; ADR-025 permissions partly aspirational) and
+  the six planned ADRs (029–034).
+
+**Rewritten**
+- **`README.md`** — restructured as the entry point for users, contributors, and
+  visitors. The milestone-by-milestone "Completed milestones" list is replaced by
+  capabilities (that section was structured to rot). Adds a **Limitations** section —
+  previously absent — stating the CPU-bound TTS, ASR accuracy bound, unimplemented
+  permission-gated capabilities, unwired summarization, MME latency, and alpha status.
+  Adds measured performance numbers, a contributor quality gate, and honest macOS/ROCm
+  status. Preserves the thesis-repository link and open-source acknowledgements.
+
+**Corrected — documentation that described unimplemented behavior**
+- `ARCHITECTURE.md` claimed a `tools/` package (**does not exist**), a `piper` TTS adapter
+  (**does not exist**), `Tool`/`AudioDevice` ports (`Tool` does not exist), adaptive
+  endpointing (**not implemented** — endpointing is a fixed 800 ms window), `desktop.py`
+  (now a package), Qwen3-4B (actually Qwen3.5-4B), and "mypy strict on core/ports"
+  (strict on everything).
+- `ARCHITECTURE.md` §4 latency budget claimed "target ≤ 1.2 s, measured ~2.0 s". Replaced
+  with the M7 measurements: **~3.5 s**, decomposed, with the two dominant causes named.
+- New `ARCHITECTURE.md` §10 **Known architectural gaps** — seven gaps between design and
+  implementation, each with its consequence, plus the note that offline-by-construction
+  is currently enforced by convention rather than by test.
+
+**Updated**
+- `ROADMAP.md` — resolved a duplicate-`M7`-heading collision introduced during the M7.1
+  restructure; added the approved milestone order (Documentation → M7.2 → M7.3 → M8 →
+  M7.4 → M7.5 → M9) with the rationale for performance preceding provider/online work;
+  documented M7.2's completed investigation and approved implementation sequence, and the
+  M7.3/M7.4/M7.5 scopes; renumbered packaging to M9; added "documentation is production
+  work" to the standing rules.
+- `INSTALLATION.md` — replaced the placeholder clone URL with the real one, removed the
+  troubleshooting duplication in favour of a pointer to the new guide, cross-referenced
+  DEVELOPMENT.md.
+- `MANUAL_TESTING.md` — stale title (`M4 – M5.5`, actually covers through M7.1) replaced;
+  added a **by-subsystem index** and a pre-release minimum set. Sections remain in
+  historical order, documented as deliberate, with completed-milestone sections retained
+  as regression records.
+
 ### 2026-07-26 — M7.1: speech-synchronized text display (ADR-028)
 
 The assistant used to write its whole answer on screen and then read it back:

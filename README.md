@@ -1,262 +1,282 @@
 ![Version](https://img.shields.io/github/v/release/FahadiF/Edge-Voice-Assistant?include_prereleases)
-![Python](https://img.shields.io/badge/python-3.12-blue)
+![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+![Tests](https://img.shields.io/badge/tests-837%20passing-brightgreen)
 
-# Edge Voice Assistant
+# Edge Voice Assistant (EVA)
 
-A local-first, offline AI voice assistant designed for natural, low-latency conversations on consumer hardware.
+**A private voice assistant that runs entirely on your own computer.**
 
-Edge Voice Assistant runs entirely on your computer after the required AI models are installed. It combines local speech recognition, language models, and speech synthesis into a modular AI platform that prioritizes **privacy**, **responsiveness**, and **extensibility**.
+Talk to EVA and it listens, thinks, and answers out loud — with no cloud service involved.
+Speech recognition, the language model, and speech synthesis all run locally. Once the
+models are downloaded you can unplug the network and nothing changes.
 
-Once the required models are installed, the assistant operates completely offline without requiring cloud APIs or Internet connectivity.
+<img width="1910" height="932" alt="EVA desktop application" src="https://github.com/user-attachments/assets/c8ece7e8-f14a-47d2-959a-b77834150c80" />
 
-<img width="1910" height="932" alt="image" src="https://github.com/user-attachments/assets/c8ece7e8-f14a-47d2-959a-b77834150c80" />
+> **Status: alpha (v0.6.0-alpha).** Everything described below is implemented and tested.
+> Known limitations are listed [plainly, further down](#limitations). Interfaces may still
+> change between releases.
 
----
-
-## Highlights
-
-- Fully offline after initial model installation
-- Natural voice conversations with streaming speech recognition and response generation
-- Real-time voice interruption (barge-in)
-- Text and voice input through a full web UI (chat composer + microphone)
-- Persistent conversation memory with semantic recall, personas, and user profiles
-- Modular architecture with interchangeable AI models
-- Local REST + WebSocket API
-- Fine-grained permission controls (microphone, memory, system information)
-- Background server lifecycle (`eva start/stop/restart/status/logs`)
-- Cross-platform support for Windows and Linux
-- Automatic hardware detection and model recommendations
-- Built for developers, researchers, and edge AI applications
+**Jump to:** [Why EVA](#why-eva) · [Quick start](#quick-start) ·
+[What it does](#what-it-does-today) · [Architecture](#architecture) ·
+[Hardware](#hardware-and-platform-support) · [Limitations](#limitations) ·
+[Contributing](#for-contributors) · [Documentation](#documentation)
 
 ---
 
-## Project Vision
+## Why EVA
 
-Edge Voice Assistant is designed as a long-term open-source platform for local conversational AI.
+Most voice assistants send your voice to someone else's computer. EVA doesn't — and it
+tries to do that without feeling like a compromise:
 
-The architecture is intentionally modular so that language models, speech recognition engines, text-to-speech engines, memory systems, plugins, desktop applications, web applications, and future multimodal capabilities can evolve independently.
-
-The long-term goal is to provide an extensible foundation for private, local-first conversational AI that can adapt to future AI models and hardware.
+- **You can interrupt it.** Talk over EVA mid-sentence and it stops in 40 ms, keeps the
+  words you just said, and answers them. Interruption is the mechanism the entire runtime
+  is organized around, not a feature bolted on afterwards.
+- **It speaks while it thinks.** Generation, synthesis, and playback overlap, so a reply
+  begins before it has finished being written.
+- **Nothing is hard-wired.** Every model, engine, and runtime is referenced by id and
+  resolved through a registry. Changing the language model is a setting, not a patch.
+- **It is honest about itself.** Asked to do something it cannot do, EVA says so instead
+  of inventing an answer.
 
 ---
 
-## Current Status
+## Quick start
 
-The project is under active development.
-
-### Completed milestones
-
-- **M0 – Project Foundation**
-
-- **M1 – Audio Foundation**
-  - Full-duplex audio
-  - Echo cancellation
-  - Voice activity detection
-  - Audio diagnostics
-
-- **M2 – Streaming Pipeline**
-  - Streaming speech recognition
-  - Local language model
-  - Streaming speech synthesis
-  - Turn management
-  - Cancellation
-  - Offline conversation (`eva run`)
-
-- **M2.5 – Production Hardening**
-  - Persistent configuration
-  - Hardware profiles
-  - Model presets
-  - Multilingual foundation
-  - Developer diagnostics
-  - Guided first-run experience
-
-- **M2.6 – Platform API**
-  - FastAPI backend
-  - REST API
-  - WebSocket events
-  - Plugin framework
-  - Shared engine architecture
-
-- **M3 – Natural Voice Conversation**
-  - Streaming TTS
-  - Lower time-to-first-audio
-  - Faster interruption
-  - Rich runtime diagnostics
-  - Graceful shutdown
-  
-  **M4 – Conversation Engine**
-
-  - Persistent memory
-  - Personas
-  - Multiple voices
-  - Context management
-
-- **M4 Integration & Validation Pass**
-  - Fixed assistant identity (introduces itself as "Edge Voice Assistant",
-    reveals the underlying model only on an explicit technical question)
-  - Full CLI parity: `eva personas`, `eva users`, `eva voices`, `eva
-    memory`, `eva profile`
-  - Persona/user-profile/voice state visible in the startup banner and
-    diagnostics
-  - [Manual testing guide](docs/MANUAL_TESTING.md) for the whole milestone
-
-- **M5 – Web UI & Desktop Shell**
-  - React + TypeScript web UI (`web/`) covering the dashboard, conversation,
-    memory, personas, user profiles, models, voices, settings, diagnostics,
-    and plugins — every capability M4 shipped, now reachable without the
-    CLI or raw HTTP
-  - Fully schema-driven settings UI (ADR-009) — no hardcoded field lists
-  - Live updates over the existing WebSocket event stream — no polling
-  - Minimal `pywebview` desktop shell (`eva-desktop`) hosting the same UI
-
-- **M5.1 – M5.4 – Experience & Production Readiness**
-  - Markdown rendered in the UI and converted to natural speech at the
-    TTS boundary
-  - Rewritten prompt composition: stronger personas, capability honesty,
-    conversational continuity
-  - Chat composer with typed text turns sharing the voice pipeline
-  - Grouped permission settings (General, Files, Devices, Tools, Privacy)
-    that actually gate behavior
-  - Long-term memory integrated into replies (semantic recall with
-    keyword fallback), conversation titles, memory manager improvements
-
-- **M5.5 – Stability, Lifecycle & Performance**
-  - Parallel model loading with per-component startup progress (~18 s cold
-    start on the reference machine)
-  - Graceful shutdown and a hardened cancellation architecture
-  - Automatic recovery when speech recognition or synthesis crashes
-  - Background server commands: `eva start`, `eva stop`, `eva restart`,
-    `eva status`, `eva logs`
-
-### Next milestone
-
-**M6 – Desktop polish** (tray icon, global push-to-talk hotkey, engine
-process supervision, first-run wizard window, installers)
-
-See the [Roadmap](docs/ROADMAP.md) for implementation progress.
-
-## Starting, stopping, and exiting
-
-Two ways to run the assistant — pick the one that matches what you're doing.
-
-**Development — foreground, stop with Ctrl+C:**
+Requires **Python 3.12+** on **Windows 10/11** or **Linux**.
 
 ```bash
-cd web && npm install && npm run build   # once: builds web/dist/
-eva serve --open   # API + web UI in the foreground; opens a browser
-eva run            # or: voice-only console loop, no server
+git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
+cd Edge-Voice-Assistant
+pip install -e .
+eva setup
+eva run
 ```
 
-Stop with **Ctrl+C**. Shutdown is bounded (≤ ~5 s even with browser tabs
-still connected) and always ends cleanly: the turn in flight is cancelled,
-components stop in order, no tracebacks, no orphan processes. For UI work
-with live reload, run `eva serve` in one terminal and `cd web && npm run
-dev` in another (it proxies `/api` to the backend).
+`eva setup` detects your hardware, installs the matching LLM runtime, and downloads a
+model set that fits your GPU (roughly 3–5 GB). It is interactive and explains each step.
+`eva run` starts the conversation.
 
-**Background / production — start, stop, restart, status:**
+| Command | Purpose |
+|---|---|
+| `eva diagnose` | Hardware and configuration report |
+| `eva devices` | List audio input/output devices |
+| `eva listen` | Live voice-activity monitor — start here when the microphone misbehaves |
+| `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
+| `eva-desktop` | Native desktop window with system tray |
 
-```bash
-eva start          # background server at http://127.0.0.1:8765/ (no window)
-eva status         # process, API, and engine state
-eva restart        # stop + start (e.g. after changing models)
-eva logs           # tail the newest log file
-eva stop           # graceful: engine stops, audio released, DB flushed,
-                   # then the process exits
-```
-
-`eva stop` asks the background server to shut down over the API first (the
-clean path) and only falls back to terminating the process if the API
-doesn't answer.
-
-**Native desktop app:**
-
-```bash
-pip install -e ".[desktop]"   # pulls pywebview + the tray libs (pystray, pillow)
-eva-desktop
-```
-
-`eva-desktop` opens the web UI in a native window and supervises the backend
-for you: it starts the server if one isn't already running (and attaches to a
-`eva start` server if one is), restarts it if it crashes, and stops it on quit.
-It adds a **system tray** whose icon tracks engine state (running / starting /
-stopped / error) with Restore Window, Hide, Settings, and Quit — the tray is
-the background control surface for day-to-day use, and a left-click on the icon
-restores the window. Close/minimize-to-tray, start-minimized, and auto-start
-are opt-in Desktop settings. Minimizing to the tray keeps the assistant fully
-live (streaming and the live connection continue; restore is instant) rather
-than backgrounding it. Window size, position, and the last-open page are
-remembered across launches. Where the browser UI downloads a file (e.g.
-exporting the Diagnostics event log), the desktop app instead opens a **native
-Save-As dialog** and confirms the saved path, so you always know where an
-export went. Run without the `[desktop]` extra and it prints how to install it
-(never a traceback); the tray degrades gracefully to a plain window if only
-`pywebview` is present.
+Full instructions: **[docs/INSTALLATION.md](docs/INSTALLATION.md)** ·
+Something not working? **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 ---
 
-## Hardware Targets
+## What it does today
 
-Primary development platform
+**Conversation**
+- Streaming spoken conversation — speech in, speech out
+- Real-time barge-in: interrupt at any point and it stops immediately
+- Speech-synchronized text: on-screen text appears as it is spoken, never ahead of it
+- Typed input through the identical pipeline, minus speech recognition
+- Markdown replies rendered on screen and spoken cleanly (no "asterisk asterisk")
 
-- NVIDIA RTX 3060 Laptop GPU (6 GB VRAM)
-- AMD Ryzen 9 5900HX
-- 16 GB RAM
+**Memory and personalization**
+- Conversations persist in SQLite with semantic recall across past sessions
+- Personas, user profiles, and per-language voice selection
+- Auto-titled conversations; resume any stored conversation
 
-The application is designed to scale across different hardware profiles and automatically recommend suitable AI models for each system.
+**Interfaces** — four clients, one engine, one API
+- Command line, local REST + WebSocket API, React web UI, native desktop shell
+
+**Control and transparency**
+- Permission toggles for microphone, memory storage, and system information
+- Hardware detection with model presets (Balanced / Fast / High Accuracy / Low Memory / Developer)
+- Deep runtime diagnostics: per-stage latency, barge-in timing, queue depths, live event log
+
+---
+
+## Architecture
+
+```
+Microphone ─► WebRTC APM ─► Silero VAD ─► Segmenter ─► ASR ─► Context Builder
+               (AEC/NS/AGC)                                          │
+                                                                     ▼
+Speaker  ◄── Playback ◄── TTS ◄── Sentence chunker ◄── LLM (streaming)
+```
+
+Every stage runs concurrently — the language model streams tokens while earlier sentences
+are already being spoken. A turn-epoch system makes each stage cancellable mid-flight,
+which is what makes interruption feel instant.
+
+**Default local stack**
+
+| Stage | Implementation | Runtime |
+|---|---|---|
+| Voice activity | Silero VAD | ONNX Runtime |
+| Speech recognition | faster-whisper (`small` / `base`) | CTranslate2 |
+| Language model | Qwen3.5-4B-Instruct Q4_K_M | llama.cpp |
+| Speech synthesis | Kokoro-82M | ONNX Runtime |
+| Embeddings | all-MiniLM-L6-v2 | ONNX Runtime |
+
+None of these names appear in the conversation engine. Each sits behind a port
+(`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`, `EmbeddingProvider`)
+and is resolved from a registry at runtime.
+
+Deeper detail: **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** ·
+**[diagrams](docs/ARCHITECTURE_DIAGRAMS.md)** ·
+**[architecture decision records](docs/adr/README.md)**
+
+---
+
+## Hardware and platform support
+
+| Tier | Detected by | Models | Status |
+|---|---|---|---|
+| `gpu-12gb` | ≥ 11 GB VRAM | Qwen3.5-9B + Whisper small | Supported |
+| `gpu-6gb` | ≥ 5.5 GB VRAM | Qwen3.5-4B + Whisper small | **Reference platform** |
+| `cpu-only` | no / small GPU | Qwen3-1.7B + Whisper base | Supported, slower |
+
+**Measured on the reference platform** — RTX 3060 Laptop (6 GB), Ryzen 9 5900HX, 16 GB RAM,
+Windows 11:
+
+| | |
+|---|---|
+| VRAM with language model + speech recognition resident | 3.9 GB of 6.1 GB |
+| Barge-in, detection to silence | 40 ms |
+| Speech recognition, 4 s utterance | ~250 ms |
+| Time to first audio | ~3.5 s ([why](#limitations)) |
+
+**Operating systems.** Windows 10/11 and Linux are supported, and CI runs the test suite
+on both. macOS is not supported: llama.cpp has Metal support, but EVA has no macOS
+packaging or testing. Contributions welcome.
+
+**Acceleration.** NVIDIA / CUDA is the tested path. AMD / ROCm is detected but untested.
+Everything runs CPU-only without a GPU, more slowly.
+
+---
+
+## Limitations
+
+Knowing these up front is more useful than discovering them:
+
+- **Speech synthesis runs on CPU.** The CPU build of ONNX Runtime is a base dependency,
+  so Kokoro cannot use the GPU. First-clause synthesis takes ~1.6 s and is the largest
+  single part of the ~3.5 s time-to-first-audio. Moving it to a GPU execution provider is
+  the highest-value performance work outstanding.
+- **Speech recognition accuracy is bounded by the model.** Whisper `small` confuses
+  acoustically similar consonants (`fox` / `box`) on far-field laptop microphones. This
+  has been measured in detail; a larger model recovers most of it for roughly +2% latency.
+- **No internet access, tools, file access, or vision.** Permission toggles for these
+  exist as the contract that future capabilities must respect — the capabilities
+  themselves are not implemented, and EVA says so when asked.
+- **Long conversations grow the prompt.** Automatic summarization is implemented but not
+  yet wired into the live conversation loop.
+- **Windows audio defaults to the MME host API**, which reports ~210 ms of loop latency.
+  Lower-latency host APIs are not selected automatically yet.
+- **Single user, one conversation at a time.** No multi-user or concurrent sessions.
+
+---
+
+## Roadmap
+
+Milestones M0–M6 are complete: full-duplex audio core, streaming pipeline, platform API,
+memory and personalization, web UI, and desktop shell. M7 (conversation experience) is in
+progress.
+
+Planned next, in order: documentation and architecture stabilization → performance work
+(GPU speech synthesis, prompt-cache reuse) → a unified provider abstraction making local
+and remote models interchangeable → an **optional, off-by-default** online mode with
+search, retrieval, and citations.
+
+Online features will never be required, and enabling them will never reduce what works
+offline. See **[ROADMAP.md](docs/ROADMAP.md)** for detail and **[CHANGELOG.md](CHANGELOG.md)**
+for what has already shipped.
+
+---
+
+## For contributors
+
+Contributions are genuinely welcome. **[CONTRIBUTING.md](CONTRIBUTING.md)** covers the
+process; **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the working environment.
+
+```bash
+pip install -e ".[dev]"
+pre-commit install
+```
+
+The quality gate, which CI runs on Windows and Linux:
+
+```bash
+ruff check . && ruff format --check . && mypy && pytest -m "not integration"
+cd web && npm ci && npm run lint && npm run build && npm test
+```
+
+Five rules shape every change:
+
+1. Core code never names a concrete implementation — register it, resolve it by id.
+2. Dependencies point inward: subsystems depend on `core` and `config`, never the reverse.
+3. Every significant design decision gets an [ADR](docs/adr/README.md).
+4. New behavior needs tests. Hardware- and model-dependent tests are marked `integration`
+   and excluded from CI.
+5. Documentation is part of the change, not a follow-up.
+
+Good places to start: additional speech engine adapters, new language registry entries,
+non-NVIDIA acceleration, macOS packaging.
 
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Installation](docs/INSTALLATION.md) | Installation and first-time setup |
-| [Architecture](docs/ARCHITECTURE.md) | Overall system architecture |
-| [API Reference](docs/API.md) | REST & WebSocket API |
-| [Roadmap](docs/ROADMAP.md) | Development milestones |
-| [Architecture Decision Records](docs/adr/) | Architecture Decision Records (ADRs) |
+| Document | For |
+|---|---|
+| [INSTALLATION.md](docs/INSTALLATION.md) | Installing and running EVA |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | When something doesn't work |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the system is built |
+| [ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | Sequence and component diagrams |
+| [API.md](docs/API.md) | REST + WebSocket reference |
+| [adr/README.md](docs/adr/README.md) | Architecture decision records |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Developer environment and workflow |
+| [ROADMAP.md](docs/ROADMAP.md) | Milestones and status |
+| [MANUAL_TESTING.md](docs/MANUAL_TESTING.md) | Validation scenarios |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ---
 
-## Research Background
+## Research background
 
-Edge Voice Assistant originated from my Master's thesis research in **Sustainable and Autonomous Systems** at the **University of Vaasa**.
+Edge Voice Assistant originated from my Master's thesis research in **Sustainable and
+Autonomous Systems** at the **University of Vaasa**, investigating whether a genuinely
+conversational voice assistant can run entirely on consumer edge hardware without cloud
+inference.
 
-The original thesis implementation has been preserved separately as a historical research artifact, while this repository represents the long-term open-source continuation of that work.
+The original thesis implementation is preserved separately as a historical research
+artifact; this repository is the long-term open-source continuation of that work.
 
-**Original thesis repository**
-
+**Original thesis repository:**
 https://github.com/FahadiF/Modular-Software-Implementation-Edge-Voice-Chatbot
 
 ---
 
 ## Acknowledgements
 
-This project began during my Master's thesis at the **University of Vaasa**.
-
 I would like to express my sincere gratitude to my thesis supervisor,
 
-**Jani Boutellier**  
-https://github.com/jboutell
+**Jani Boutellier** — https://github.com/jboutell
 
-for his guidance, valuable feedback, and support throughout the research that inspired this project.
+for his guidance, valuable feedback, and support throughout the research that inspired
+this project.
 
-I am also grateful to the open-source community and the developers behind projects such as **llama.cpp**, **faster-whisper**, **Kokoro ONNX**, **Silero VAD**, **ONNX Runtime**, **FastAPI**, and **CTranslate2**, whose work makes modern local AI accessible to everyone.
-
----
-
-## Contributing
-
-Contributions, bug reports, feature requests, and discussions are welcome.
-
-If you plan to make significant architectural changes, please open an issue first so we can discuss the proposed design before implementation.
+I am also grateful to the open-source community and the developers behind **llama.cpp**,
+**faster-whisper**, **Kokoro ONNX**, **Silero VAD**, **ONNX Runtime**, **CTranslate2**,
+and **FastAPI**, whose work makes modern local AI accessible to everyone.
 
 ---
 
 ## License
 
-Licensed under the **Apache License 2.0**.
+Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE).
 
-See the [LICENSE](LICENSE) file for details.
+Model weights carry their own licenses; run `eva models list` to see each. `pystray`
+(system tray) is LGPL-3.0 and dynamically imported, per
+[ADR-027](docs/adr/ADR-027-native-desktop-shell.md).

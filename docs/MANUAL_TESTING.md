@@ -1,22 +1,42 @@
-# Manual Testing Guide (M4 – M5.5)
+# Manual Testing Guide
 
-This guide lets someone with no source-code access validate every shipped
-capability end-to-end: memory persistence, semantic retrieval, summaries,
-personas, user profiles, voices, the REST API, the WebSocket stream, raw
-SQLite inspection, diagnostics, the React web UI and desktop shell,
-conversational quality, Markdown-to-speech, permissions, and the M5.5
-lifecycle features (startup progress, graceful shutdown, crash recovery,
-`eva start/stop`). Sections 1–12 use the `eva` CLI or plain
-`curl`/`sqlite3`; [section 14](#14-web-ui-m5) walks the same capabilities
-through the browser; later sections cover the M5.1–M5.5 additions.
+Validation scenarios that automated tests cannot cover: perceived latency, audio
+quality, interruption feel, and anything needing a real microphone, speaker, or GPU.
 Nothing here requires reading the codebase.
 
-Assumes `eva doctor` reports all checks passing (models installed, runtime
-available). If not, run `eva first-run` first.
+**Prerequisites.** `eva doctor` reports all checks passing (models installed, runtime
+available). If not, run `eva first-run`. All data lives under your `EVA_HOME` — a per-OS
+app-data directory; `eva diagnose` prints the exact path, and the memory database is
+`memory.db` inside it.
 
-All data lives under your `EVA_HOME` (defaults to a per-OS app-data
-directory; `eva diagnose` prints the exact `Conversations:` path — the
-memory database is `memory.db` inside it).
+If something fails, [TROUBLESHOOTING.md](TROUBLESHOOTING.md) is the faster path than
+debugging from here.
+
+## Find the right section
+
+**By subsystem** — the usual way in:
+
+| Area | Sections |
+|---|---|
+| Audio, voice, interruption | [19](#19-conversation-experience-tracing-streaming-identity) tracing · [18.5](#185-barge-in-responsiveness-m62--regression-check) barge-in · [20](#20-speech-synchronized-text-display-m71-adr-028) speech-synced text |
+| Conversation quality | [15](#15-conversational-evaluation-m52) continuity, pronouns, honesty, personas |
+| Memory and recall | [2](#2-memory-persistence-across-restart) · [3](#3-semantic-retrieval--context-preview-no-generation-needed) · [4](#4-conversation-summaries) · [8](#8-memory-management-verbs) · [11](#11-raw-sqlite-inspection) |
+| Personas, profiles, voices | [5](#5-persona-switching-measurable-effect-on-responses) · [6](#6-user-profiles-crud--influence-on-conversation) · [7](#7-voice-selection-persists-across-restart) |
+| Web UI | [14](#142-conversation) all subsections |
+| Desktop app and tray | [18](#181-launch--supervision-m61) |
+| API and diagnostics | [9](#9-rest-api-walkthrough) · [10](#10-websocket-event-stream) · [12](#12-diagnostics) |
+| Lifecycle and recovery | [16](#161-startup-progress) startup, shutdown, crash recovery |
+| Permissions and privacy | [15.14](#1514-permissions-behavior-m54-acceptance) · [17.4](#174-microphone-permission-off-still-speaks) |
+
+**Before a release**, run at minimum: [13](#13-restart-persistence-checklist) persistence,
+[16](#161-startup-progress) lifecycle, [18.5](#185-barge-in-responsiveness-m62--regression-check)
+barge-in, and [20](#20-speech-synchronized-text-display-m71-adr-028) speech-synced text —
+these cover the paths automated tests provably cannot reach.
+
+> **Note on structure.** Sections are numbered in the order they were written, which
+> follows milestone history rather than subsystem. The index above is the intended
+> entry point. Sections for completed milestones are retained as acceptance records —
+> they remain valid regression tests.
 
 ---
 

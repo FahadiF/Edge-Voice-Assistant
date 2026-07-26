@@ -11,7 +11,8 @@ Status: Accepted. Decisions are recorded in [adr/](adr/).
 3. **Ports and adapters.** The core engine depends only on abstract interfaces
    (`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`,
    `UserProfileStore`, `MemoryRetriever`, `EmbeddingProvider`, `Summarizer`,
-   `Tool`, `AudioDevice`). Models are adapters; swapping one is a config change.
+   `AudioOutput`). Models are adapters; swapping one is a config change.
+   *A `Tool`/capability port is designed but not implemented — see §10.*
 4. **One headless engine, many frontends.** CLI, web UI, and desktop app are thin
    clients over the same engine API (WebSocket + REST on localhost).
 5. **Offline by construction.** The only network code lives in the model downloader.
@@ -36,7 +37,7 @@ Status: Accepted. Decisions are recorded in [adr/](adr/).
 │  │port │  │ port │  │ port  │  │ port  │  │  port  │  Plugins    │
 │  └──┬──┘  └──┬───┘  └───┬───┘  └───┬───┘  └──┬─────┘             │
 │  Silero   faster-    llama.cpp   Kokoro    SQLite                 │
-│  (ONNX)   whisper    (GGUF)      (+Piper)  (JSON export)          │
+│  (ONNX)   whisper    (GGUF)      (ONNX)    (JSON export)          │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │        Audio Subsystem — full-duplex, single clock           │  │
 │  │  duplex PortAudio stream (10 ms frames) → WebRTC APM         │  │
@@ -79,17 +80,22 @@ Fallback ladder (config): full-duplex AEC (default) → half-duplex mute-while-s
 
 ## 4. Streaming pipeline (perceived-latency budget)
 
+**Measured** on the reference laptop (RTX 3060 6 GB, Windows 11), not estimated:
+
 ```
-user stops speaking ──► endpoint detected (VAD, ~300–500 ms adaptive)
-   ASR finalize (faster-whisper, partials already computed)      ~150–300 ms
-   LLM prefill + first sentence tokens (llama.cpp, streaming)    ~300–600 ms
-   TTS first sentence (Kokoro)                                   ~150–300 ms
-──► FIRST AUDIO OUT                                       target ≤ 1.2 s
-   (measured on the reference laptop: ~2.0 s — the gap is dominated by the
-    MME host API's ~210 ms audio loop and CPU TTS synthesis of the first
-    segment; WASAPI/low-latency audio is the planned M7 lever, see ROADMAP)
+user stops speaking
+   endpoint detected (VAD, fixed 800 ms silence window)           800 ms
+   ASR finalize (faster-whisper small, int8 on GPU)            ~250 ms
+   LLM prefill + first clause (llama.cpp, streaming)          ~1650 ms
+   TTS first clause (Kokoro, CPU)                             ~1630 ms
+──► FIRST AUDIO OUT                                     measured ~3.5 s
    ...while remaining sentences generate + synthesize in parallel
 ```
+
+Two costs dominate and both are addressable: speech synthesis runs on **CPU** because the
+CPU build of ONNX Runtime is a base dependency, and prompt prefill re-processes the whole
+context each turn because volatile content sits at the head of the prompt, defeating
+llama.cpp's KV prefix cache. Both are scheduled performance work; see ROADMAP.
 
 - **ASR**: audio is transcribed incrementally during the utterance (partials shown in
   UI); on endpoint only a small finalization pass remains.
@@ -100,9 +106,9 @@ user stops speaking ──► endpoint detected (VAD, ~300–500 ms adaptive)
   the sentence level where the engine supports it (Kokoro via kokoro-onnx's native
   phoneme-batch streaming) — the first audio for a sentence reaches the speaker
   after the first chunk, not the whole sentence.
-- Adaptive endpointing: the fixed ~1 s silence wait is replaced by a shorter base
-  window that lengthens when the partial transcript looks incomplete (trailing
-  conjunction/comma heuristic) — natural pauses without premature cut-offs.
+- **Endpointing is currently a fixed silence window** (`vad.silence_timeout_ms`,
+  default 800 ms). Adaptive endpointing — a shorter base window that lengthens when the
+  partial transcript looks incomplete — is designed but **not implemented**.
 
 ## 5. Concurrency model
 
@@ -133,7 +139,7 @@ edge-voice-assistant/
 │   ├── vad/                  # VADEngine port + registry + adapters (silero)
 │   ├── asr/                  # ASREngine port + registry + adapters (faster-whisper)
 │   ├── llm/                  # LLMEngine port + registry + adapters (llama.cpp)
-│   ├── tts/                  # TTSEngine port + registry + adapters (kokoro, piper);
+│   ├── tts/                  # TTSEngine port + registry + adapters (kokoro);
 │   │                         #   voices.py: voice registry over engine capability
 │   │                         #   discovery (M4, ADR-022)
 │   ├── embedding/            # EmbeddingProvider port + registry + ONNX adapter
@@ -146,8 +152,9 @@ edge-voice-assistant/
 │   ├── memory/               # MemoryStore + UserProfileStore ports + registry +
 │   │                         #   SQLite adapter (one db, WAL, FTS5), NumpyMemoryRetriever,
 │   │                         #   LLMSummarizer, retention policy (M4, ADR-019/020)
-│   ├── tools/                # Tool port + registry (function-calling tools)
-│   ├── plugins/              # plugin SDK: manifest, discovery, lifecycle (ADR-011)
+│   ├── plugins/              # plugin SDK: manifest, discovery, lifecycle (ADR-011).
+│   │                         #   NOTE: capability wiring is not yet implemented —
+│   │                         #   plugins can be listed/toggled but cannot register
 │   ├── models/               # model manager: catalog, download, verify, licenses,
 │   │                         #   disk usage, compatibility, hot-swap
 │   ├── hardware/             # detection + profile presets
@@ -156,7 +163,7 @@ edge-voice-assistant/
 │   ├── metrics/              # per-stage latency, resource sampling, diagnostics
 │   ├── server/               # FastAPI app: REST + WebSocket (the API-first boundary);
 │   │                         #   server/static.py mounts the built web UI when present (M5, ADR-023)
-│   ├── desktop.py            # minimal pywebview shell (M5, ADR-007/023) — starts the
+│   ├── desktop/              # pywebview shell, tray, window state, server
 │   │                         #   same FastAPI app on a thread, opens one native window at it
 │   └── cli.py                # headless/dev interface — one file, one subparser group
 │                             #   per concern (models, profiles, config, personas, users,
@@ -182,7 +189,7 @@ Subsystems may import `core` and `config` only — never each other's adapters �
 with one documented exception (ADR-010 amendment, M4): `memory` imports
 `embedding`'s port and registry, a genuine building-block relationship (turning
 text into a vector is not memory-specific), never the reverse. Business logic
-stays in engine services; `web/`, `desktop.py`, and the CLI are pure API
+stays in engine services; `web/`, `desktop/`, and the CLI are pure API
 consumers, so future clients (mobile app, third-party integrations) require no
 engine changes. The FastAPI server itself gains one narrow rendering
 responsibility in M5 (ADR-023): serving the *built* `web/` output as a static
@@ -196,17 +203,17 @@ the old API-only app when no build is present.
 | VAD | Silero VAD v5 (ONNX, CPU) | Still SOTA for size; proven in thesis | ~2 MB |
 | AEC/NS | WebRTC APM (livekit `rtc.apm` or webrtc-audio-processing) | Battle-tested full-duplex AEC | CPU, negligible |
 | ASR | faster-whisper `small` int8 (GPU) / `base` (CPU fallback) | 4× whisper speed, mature, multilingual | ~0.5 GB |
-| LLM | Qwen3-4B-Instruct GGUF Q4_K_M via llama.cpp | Best quality/VRAM at 4B; native streaming + abort | ~2.8 GB + KV |
+| LLM | Qwen3.5-4B-Instruct GGUF Q4_K_M via llama.cpp | Best quality/VRAM at 4B; native streaming + abort | ~3.5 GB incl. KV (measured) |
 | TTS | Kokoro-82M (CPU) | Apache-2.0, faster than real-time on CPU, strong quality | ~0.4 GB RAM |
-| TTS alt | Piper (low-end CPU) / Chatterbox (voice cloning, GPU) | Profile options | — |
+| Embeddings | all-MiniLM-L6-v2 (ONNX, CPU) | Semantic memory retrieval (ADR-020) | ~90 MB |
 
 **Profiles** have two layers. Hardware detection produces a *capability tier*
 (`cpu-only`, `gpu-6gb`, `gpu-12gb`); each tier maps to goal-oriented *presets* —
 **Balanced** (default), **Fast**, **High Accuracy**, **Low Memory**, **Developer** —
 that select a concrete model combination. Presets are registry entries (ADR-010):
 users can create, edit, export, and share **Custom** profiles from the UI.
-Alternates (Parakeet, Moonshine, SenseVoice ASR; other GGUF LLMs; Chatterbox TTS)
-plug in as adapters.
+Additional engines (Parakeet/Moonshine ASR, other GGUF LLMs, alternative TTS) would
+plug in as adapters; none ship today. Only the stack in the table above is implemented.
 
 See ADR-002…ADR-005 for full rationale and rejected alternatives.
 
@@ -239,7 +246,30 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
   logic are tested with zero models loaded, including the nasty races
   (interrupt during prefill / during synth / during playback / double interrupt).
 - Integration tests with recorded WAV fixtures driving the pipeline offline.
-- ruff (lint+format), mypy (strict on `core`/`ports`), pytest, GitHub Actions CI
-  (lint + tests on Windows and Linux runners; model-free).
-- Structured logging (`structlog`-style JSON option), per-stage latency metrics
-  persisted for the benchmark reports.
+- ruff (lint+format), mypy (**strict, whole package**), pytest, GitHub Actions CI
+  (lint + type check + tests on Windows and Linux runners; model-free).
+  837 tests as of v0.6.0-alpha; hardware/model-dependent tests are marked
+  `integration` and excluded from CI.
+- Structured logging (optional JSON output), per-stage latency metrics exposed through
+  the diagnostics snapshot. An opt-in per-sentence pipeline trace
+  (`EVA_CONVERSATION_TRACE=1`) logs every streaming hand-off on one turn-relative clock.
+
+## 10. Known architectural gaps
+
+Recorded here so the difference between the design and the implementation is never
+something a contributor has to discover by reading source. Each is scheduled; see
+[ROADMAP.md](ROADMAP.md).
+
+| Gap | Current state | Consequence |
+|---|---|---|
+| **No capability/tool port** | The `Tool` port in §1 is designed, not implemented | `permissions.tools.*`, `files.*`, and `general.internet` gate nothing, because nothing exists to gate. Blocks tools, online mode, and vision. |
+| **Plugin capability wiring** | Discovery, manifests, and enable/disable work (ADR-011); registering a plugin's `contributes` into the subsystem registries does not | Plugins can be listed and toggled but cannot add capabilities |
+| **`managed_by="engine"` model lifecycle** | Engine-managed weights (faster-whisper) have no install detection, prefetch, removal, or integrity verification | ASR models always display as "not installed"; first-load downloads are silent and unbounded |
+| **LLM port assumes local weights** | `LLMEngine` exposes `load`/`unload`/`device` | A remote or server-backed provider cannot implement the port honestly. Blocks the provider abstraction. |
+| **Auto-summarization not wired** | `LLMSummarizer` and `summarize_after_turns` exist; nothing invokes them during a live conversation | Long conversations grow the prompt until the recent-turn window truncates it |
+| **Settings is one flat document** | Single pydantic model, strict keys | No structure for per-provider configuration, credentials, or fallback chains |
+| **No secret storage** | None anywhere in the project | Prerequisite for any authenticated provider |
+
+**Offline-by-construction is currently enforced by convention, not by test.** The only
+network code lives in the model downloader, but nothing verifies that. Before any online
+capability is introduced, that invariant needs an automated guard.
