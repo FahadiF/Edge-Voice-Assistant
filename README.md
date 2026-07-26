@@ -238,6 +238,7 @@ non-NVIDIA acceleration, macOS packaging.
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Developer environment and workflow |
 | [ROADMAP.md](docs/ROADMAP.md) | Milestones and status |
+| [BACKLOG.md](docs/BACKLOG.md) | Unscheduled ideas, with rationale |
 | [MANUAL_TESTING.md](docs/MANUAL_TESTING.md) | Validation scenarios |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
