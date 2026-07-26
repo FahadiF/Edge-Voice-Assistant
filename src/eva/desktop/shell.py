@@ -198,7 +198,7 @@ def main() -> int:
         print(
             "The desktop window needs the optional 'desktop' extra.\n"
             '  Install it with:  pip install -e ".[desktop]"\n'
-            "Then run `eva-desktop` again. (For a browser instead, use `eva serve --open`.)"
+            "Then run `eva desktop` again. (For a browser instead, use `eva serve --open`.)"
         )
         return 1
 

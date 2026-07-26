@@ -121,6 +121,18 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
     return run_echo_test(settings, record_seconds=args.record_seconds, loops=args.loops)
 
 
+def _cmd_desktop(_args: argparse.Namespace) -> int:
+    """`eva desktop` — the same entry point the `eva-desktop` script uses.
+
+    Delegates rather than duplicating: `eva.desktop.main` owns supervision,
+    window creation, and the optional-extra guidance, so both spellings behave
+    identically and only one of them can ever drift.
+    """
+    from eva.desktop import main as desktop_main
+
+    return desktop_main()
+
+
 def _cmd_capture_test(args: argparse.Namespace) -> int:
     from pathlib import Path
 
@@ -1102,6 +1114,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt", help="ASR initial_prompt (default: none, to isolate the audio path)"
     )
     p_probe.set_defaults(func=_cmd_capture_test)
+
+    p_desktop = sub.add_parser(
+        "desktop", help="Open the native desktop window (same as the `eva-desktop` script)"
+    )
+    p_desktop.set_defaults(func=_cmd_desktop)
 
     p_run = sub.add_parser("run", help="Start the voice assistant (guided setup on first run)")
     p_run.add_argument("--yes", "-y", action="store_true", help="Auto-confirm setup prompts")
