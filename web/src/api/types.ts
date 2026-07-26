@@ -58,6 +58,7 @@ export interface TTSSettings {
   speed: number;
   pitch: number;
   streaming: boolean;
+  lazy_load: boolean;
 }
 
 export interface PersonaSettingsEntry {
@@ -198,6 +199,7 @@ export interface ModelCard {
   active: boolean;
   compatible: boolean;
   compatibility_notes: string;
+  recommendation: string;
   notes: string;
 }
 
