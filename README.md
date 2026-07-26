@@ -64,7 +64,7 @@ model set that fits your GPU (roughly 3–5 GB). It is interactive and explains 
 | `eva devices` | List audio input/output devices |
 | `eva listen` | Live voice-activity monitor — start here when the microphone misbehaves |
 | `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
-| `eva-desktop` | Native desktop window with system tray |
+| `eva desktop` | Native desktop window with system tray |
 
 Full instructions: **[docs/INSTALLATION.md](docs/INSTALLATION.md)** ·
 Something not working? **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
