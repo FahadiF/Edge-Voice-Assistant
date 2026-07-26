@@ -9,17 +9,20 @@ import { StatusPill, ToastHost, toast } from "./common";
 import "./layout.css";
 import "./composer.css"; // .mode-selector lives with the composer styles
 
+// Icons are decorative (aria-hidden): the label is the accessible name. Order
+// puts the things you use while talking first and Settings last, where
+// configuration conventionally lives.
 const NAV = [
-  { to: "/", label: "Dashboard" },
-  { to: "/conversation", label: "Conversation" },
-  { to: "/memory", label: "Memory" },
-  { to: "/personas", label: "Personas" },
-  { to: "/users", label: "User Profiles" },
-  { to: "/models", label: "Models" },
-  { to: "/voices", label: "Voices" },
-  { to: "/settings", label: "Settings" },
-  { to: "/diagnostics", label: "Diagnostics" },
-  { to: "/plugins", label: "Plugins" },
+  { to: "/", label: "Dashboard", icon: "🏠" },
+  { to: "/conversation", label: "Conversation", icon: "💬" },
+  { to: "/memory", label: "Memory", icon: "🧠" },
+  { to: "/personas", label: "Personas", icon: "🎭" },
+  { to: "/users", label: "User Profiles", icon: "👤" },
+  { to: "/models", label: "Models", icon: "📦" },
+  { to: "/voices", label: "Voices", icon: "🔊" },
+  { to: "/diagnostics", label: "Diagnostics", icon: "📈" },
+  { to: "/plugins", label: "Plugins", icon: "🧩" },
+  { to: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
 function EngineControls() {
@@ -118,7 +121,10 @@ export function Layout() {
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              {item.label}
+              <span className="nav-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              <span className="nav-label">{item.label}</span>
             </NavLink>
           ))}
         </nav>

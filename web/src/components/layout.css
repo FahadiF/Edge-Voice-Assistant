@@ -24,12 +24,30 @@
 }
 
 .nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   color: var(--text);
   text-decoration: none;
   margin-bottom: 2px;
+}
+
+/* Fixed-width so every label starts on the same x — a ragged left edge is
+   harder to scan than no icons at all. */
+.nav-icon {
+  flex: 0 0 1.25em;
+  font-size: 0.95em;
+  line-height: 1;
+  text-align: center;
+  /* Emoji carry their own colour; dim them slightly so the active row's label
+     stays the brightest thing in it. */
+  opacity: 0.85;
+}
+
+.nav-link.active .nav-icon {
+  opacity: 1;
 }
 
 .nav-link:hover {
