@@ -121,6 +121,22 @@ def _cmd_echo_test(args: argparse.Namespace) -> int:
     return run_echo_test(settings, record_seconds=args.record_seconds, loops=args.loops)
 
 
+def _cmd_capture_test(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from eva.audio.capture_probe import run_capture_test
+
+    paths = get_app_paths()
+    return run_capture_test(
+        load_settings(paths.settings_file),
+        paths,
+        reference=args.reference,
+        seconds=args.seconds,
+        out_dir=Path(args.out) if args.out else None,
+        prompt=args.prompt,
+    )
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     """Start the assistant, guiding the user through setup if anything is missing."""
     from eva.conversation.personas import (
@@ -1074,6 +1090,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_echo.add_argument("--record-seconds", type=float, default=4.0)
     p_echo.add_argument("--loops", type=int, default=2)
     p_echo.set_defaults(func=_cmd_echo_test)
+
+    p_probe = sub.add_parser(
+        "capture-test",
+        help="Record one utterance and decode it raw vs processed (M7.2 diagnostic)",
+    )
+    p_probe.add_argument("--reference", help="What you are about to say, for WER scoring")
+    p_probe.add_argument("--seconds", type=float, default=6.0, help="Recording length")
+    p_probe.add_argument("--out", help="Directory for the WAV/JSON output")
+    p_probe.add_argument(
+        "--prompt", help="ASR initial_prompt (default: none, to isolate the audio path)"
+    )
+    p_probe.set_defaults(func=_cmd_capture_test)
 
     p_run = sub.add_parser("run", help="Start the voice assistant (guided setup on first run)")
     p_run.add_argument("--yes", "-y", action="store_true", help="Auto-confirm setup prompts")

@@ -133,6 +133,7 @@ module = [
     "livekit.*",
     "pysilero_vad.*",
     "faster_whisper.*",
+    "ctranslate2.*",
     "llama_cpp.*",
     "kokoro_onnx.*",
     "onnxruntime.*",
