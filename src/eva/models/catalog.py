@@ -54,6 +54,11 @@ class ModelInfo(BaseModel):
     context_length: int | None = None  # LLM only
     quantization: str | None = None
     languages: str = "multilingual"
+    recommendation: str = ""
+    """Short guidance shown next to the model in pickers ("Recommended for most
+    users", "Fastest", "English only", …). Catalog data rather than a UI
+    conditional so a new model ships its own guidance and every client — web
+    UI, CLI, future pickers — shows the same thing."""
     notes: str = ""
     # Download-size hint for engine-managed models (whose files are fetched by
     # the engine, not the manager, so `files` is empty). 0 = derive from `files`.
@@ -92,6 +97,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         ram_mb=1000,
         context_length=32768,
         quantization="Q4_K_M",
+        recommendation="Recommended for most users",
         notes="Default assistant model for the gpu-6gb tier.",
     ),
     ModelInfo(
@@ -117,6 +123,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         ram_mb=1000,
         context_length=32768,
         quantization="Q4_K_M",
+        recommendation="Compatibility fallback",
         notes="Fallback default if the runtime predates Qwen3.5 support.",
     ),
     ModelInfo(
@@ -140,6 +147,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         ram_mb=1500,
         context_length=32768,
         quantization="Q4_K_M",
+        recommendation="Best quality · needs 12 GB GPU",
         notes="Default for the gpu-12gb tier.",
     ),
     ModelInfo(
@@ -163,6 +171,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         ram_mb=800,
         context_length=32768,
         quantization="Q4_K_M",
+        recommendation="Low memory · fastest",
         notes="CPU-only and low-memory tiers.",
     ),
     # ── ASR (faster-whisper sizes; weights fetched by the engine) ──
@@ -177,6 +186,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         vram_mb=600,
         ram_mb=900,
         download_mb_hint=460,
+        recommendation="Recommended for most users",
         notes="Default ASR for GPU tiers; ~460 MB download on first use.",
     ),
     ModelInfo(
@@ -190,6 +200,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         vram_mb=300,
         ram_mb=500,
         download_mb_hint=140,
+        recommendation="Low memory · fastest",
         notes="CPU-tier ASR; ~140 MB download on first use.",
     ),
     ModelInfo(
@@ -204,6 +215,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         ram_mb=2000,
         languages="en",
         download_mb_hint=1500,
+        recommendation="Best accuracy · English only",
         notes="High-accuracy English ASR for 12 GB+ GPUs; ~1.5 GB download on first use.",
     ),
     # ── TTS ──

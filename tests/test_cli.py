@@ -39,6 +39,27 @@ def test_no_command_errors() -> None:
     assert excinfo.value.code == 2
 
 
+def test_desktop_subcommand_delegates_to_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`eva desktop` and the `eva-desktop` script must be the same code path —
+    two launch implementations would drift. This pins the delegation."""
+    calls: list[str] = []
+
+    def fake_main() -> int:
+        calls.append("desktop")
+        return 0
+
+    monkeypatch.setattr("eva.desktop.main", fake_main)
+    assert main(["desktop"]) == 0
+    assert calls == ["desktop"]
+
+
+def test_desktop_subcommand_propagates_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing `[desktop]` extra exits non-zero; the subcommand must not
+    swallow that into a success."""
+    monkeypatch.setattr("eva.desktop.main", lambda: 1)
+    assert main(["desktop"]) == 1
+
+
 def test_doctor_reports_status(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(["doctor"])
     out = capsys.readouterr().out

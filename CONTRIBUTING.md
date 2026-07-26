@@ -28,8 +28,9 @@ gate, and understanding the codebase, see **[docs/DEVELOPMENT.md](docs/DEVELOPME
 deliberate architecture recorded in [28 ADRs](docs/adr/README.md), and a design
 discussion before implementation saves rework for both of us.
 
-Please check [ROADMAP.md](docs/ROADMAP.md) — the change you have in mind may already be
-planned, or deliberately deferred for a reason worth knowing.
+Please check [ROADMAP.md](docs/ROADMAP.md) and [BACKLOG.md](docs/BACKLOG.md) — the change
+you have in mind may already be planned, or deliberately deferred for a reason worth
+knowing.
 
 ---
 

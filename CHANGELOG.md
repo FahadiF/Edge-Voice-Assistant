@@ -6,6 +6,67 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-26 — M7 UX polish: CLI consistency and the Models page
+
+Presentation and developer-experience only. No `ModelManager` lifecycle, verification,
+acquisition, or `ModelState` work — those remain M1.
+
+**Added — `eva desktop`**
+The GUI now launches the same way as everything else. `eva desktop` delegates to
+`eva.desktop.main`, the exact function the `eva-desktop` script entry point calls, so
+there is one launch implementation and it cannot fork. `eva-desktop` continues to work.
+Two tests pin the delegation and exit-code propagation.
+
+**Added — model recommendations as catalog data**
+`ModelInfo.recommendation` ("Recommended for most users", "Best accuracy · English only",
+…) carried through `describe()` to every client. Catalog data rather than UI conditionals,
+so a new model ships its own guidance and every picker shows the same text.
+
+**Fixed — the Models page could not show an active model for two of the five kinds**
+`POST /models/{id}/activate` supports llm, asr, tts, vad and embedding, but `describe()`
+only ever looked at `settings.<kind>.model`. Embeddings are configured under
+`memory.embedding_model`, and `vad` stores an *engine* id rather than a model id — so
+neither could ever display as active. Both are now detected, with a test asserting all
+five kinds resolve.
+
+**Fixed — `types.ts` had drifted from the backend**
+`TTSSettings.lazy_load` had been missing since M5.5. Found by the new drift guard on its
+first run.
+
+**Added — automated TypeScript drift guard** (`tests/test_web_types_sync.py`)
+The hand-maintained API mirror (ADR-023) has gone stale twice; TypeScript cannot detect a
+field the server sends but the interface omits, so the UI silently ignores it. The guard
+compares every settings section, the settings root, and `ModelCard` against the real
+backend shapes — for `ModelCard` that means an actual `describe()` response, since it
+returns a plain dict with no schema of its own. Includes a test that the guard itself
+still fails when it should. Generating the types from OpenAPI would remove the
+duplication entirely and is recorded in the backlog.
+
+**Improved — Models page readability**
+- Filled status badges (`ACTIVE` blue · `INSTALLED` yellow · `AVAILABLE` grey) replacing
+  outline chips that were routinely missed. `READY` (green) and `CORRUPTED` (red) are
+  defined in the stylesheet but deliberately unused until verification lands in M1 —
+  showing a green "ready" for a model never confirmed to load would repeat the exact
+  failure this page already had.
+- "Not installed" → "Available": action-oriented, and leaves M1's lifecycle vocabulary
+  free.
+- Actionable fit warnings — "Requires ~7.0 GB VRAM / Detected GPU: 6.0 GB" from real
+  hardware detection — replacing a `may not fit` chip whose detail was hover-only. The
+  block is suppressed entirely rather than inventing figures when detection is
+  unavailable.
+- Download buttons state the size from catalog metadata: `Download (1.6 GB)`.
+- Cards sorted active → installed → available, group headings show `1/4 installed`, and
+  the detected hardware is stated once at the top.
+- Models whose files EVA does not own now say who does ("bundled with EVA", "managed by
+  its engine") instead of silently omitting controls, which read as broken.
+
+**Added — `docs/BACKLOG.md`**
+Unscheduled ideas with rationale, so they stop living in conversation. Seeded with the
+Models-page UX ideas (search, filters, collapsible sections, tooltips, comparison,
+per-model benchmarks, hardware-aware recommendations), the `eva <page>` CLI navigation
+idea and its collision with existing subcommand groups, and seven engineering items
+including OpenAPI type generation.
+
 ### 2026-07-26 — Documentation Refresh milestone
 
 A documentation-only milestone, run before further implementation so the repository

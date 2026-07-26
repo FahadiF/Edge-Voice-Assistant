@@ -91,11 +91,23 @@ class ModelManager:
 
         active = False
         if settings is not None:
+            # Every kind `POST /models/{id}/activate` can set must be detectable
+            # here, or the UI shows no active model for that kind (M7 UX fix).
+            # Two of them are not `settings.<kind>.model`:
+            #   embedding → settings.memory.embedding_model
+            #   vad       → settings.vad.engine holds an ENGINE id, not a model
+            #               id, so it is compared against info.engine instead.
             active_ids = {
                 getattr(getattr(settings, kind, None), "model", None)
                 for kind in ("llm", "asr", "tts")
             }
-            active = model_id in active_ids
+            memory = getattr(settings, "memory", None)
+            active_ids.add(getattr(memory, "embedding_model", None))
+            if info.kind == "vad":
+                vad = getattr(settings, "vad", None)
+                active = info.engine == getattr(vad, "engine", None)
+            else:
+                active = model_id in active_ids
 
         return {
             "id": info.id,
@@ -121,6 +133,7 @@ class ModelManager:
             "compatibility_notes": (
                 "" if fits_gpu else f"needs {info.vram_mb} MB VRAM, {vram_available} MB detected"
             ),
+            "recommendation": info.recommendation,
             "notes": info.notes,
         }
 

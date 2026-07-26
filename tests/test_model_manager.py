@@ -302,6 +302,46 @@ class TestManager:
         assert card["active"] is True  # it is the settings default
         assert card["installed"] is False  # isolated test home
 
+    def test_describe_detects_the_active_model_for_every_kind(self, manager: ModelManager) -> None:
+        """`POST /models/{id}/activate` can set all five kinds, so `describe()`
+        must be able to report all five as active. Two do not live at
+        `settings.<kind>.model`: embeddings are configured under `memory`, and
+        `vad` stores an *engine* id rather than a model id."""
+        from eva.config.settings import Settings
+
+        settings = Settings()
+        for model_id in (
+            settings.llm.model,
+            settings.asr.model,
+            settings.tts.model,
+            settings.memory.embedding_model,
+            "silero-vad-v5",  # matched on engine id, not model id
+        ):
+            assert manager.describe(model_id, settings)["active"] is True, model_id
+
+    def test_describe_does_not_mark_unrelated_models_active(self, manager: ModelManager) -> None:
+        from eva.config.settings import Settings
+
+        card = manager.describe("qwen3.5-9b-instruct-q4_k_m", Settings())
+        assert card["active"] is False
+
+    def test_describe_carries_catalog_recommendation(self, manager: ModelManager) -> None:
+        """Guidance shown in pickers is catalog data, not a UI conditional, so
+        every client renders the same text and a new model ships its own."""
+        card = manager.describe("qwen3.5-4b-instruct-q4_k_m")
+        assert card["recommendation"] == "Recommended for most users"
+        # Models without guidance return "" rather than omitting the key, so
+        # clients can render unconditionally.
+        assert manager.describe("silero-vad-v5")["recommendation"] == ""
+
+    def test_every_downloadable_model_states_a_size(self, manager: ModelManager) -> None:
+        """The Models page shows the download size on the button; a zero here
+        silently degrades it back to a bare "Download"."""
+        for model in manager.available():
+            if model.managed_by == "bundled":
+                continue
+            assert model.download_mb > 0, f"{model.id} has no download size"
+
     def test_describe_flags_incompatible_models(
         self, manager: ModelManager, monkeypatch: pytest.MonkeyPatch
     ) -> None:
