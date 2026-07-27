@@ -10,6 +10,7 @@ import asyncio
 
 from fastapi import APIRouter, Response
 
+from eva.conversation.language import effective_voice, resolve_language
 from eva.server.deps import StateDep
 from eva.server.schemas import VoicePreviewRequest
 from eva.tts.voices import VoiceInfo, preview_text, register_voices_for_engine, voices_for_engine
@@ -26,7 +27,9 @@ async def list_voices(state: StateDep) -> list[VoiceInfo]:
         # tts.lazy_load skipped registration at preload; the adapter
         # self-loads inside voices() — run off the event loop (model load).
         voices = await asyncio.to_thread(register_voices_for_engine, engine_id, assistant.tts)
-    return voices
+    settings = assistant.settings
+    active = effective_voice(settings, resolve_language(settings))
+    return [v.model_copy(update={"active": v.id == active}) for v in voices]
 
 
 @router.post("/{voice_id}/preview")

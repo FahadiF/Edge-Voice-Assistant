@@ -48,17 +48,53 @@ class ModelManager:
 
     def model_dir(self, model_id: str) -> Path:
         info = self.info(model_id)
+        if info.managed_by == "engine":
+            return self._hf_cache_dir(info)
         return self._paths.models_dir / info.kind / model_id.replace("/", "_")
+
+    def _kind_cache_dir(self, info: ModelInfo) -> Path:
+        """The Hugging Face cache root an engine-managed model downloads into.
+
+        Engines are handed `<models_dir>/<kind>` as their download root (see
+        `eva.asr.registry`), and `huggingface_hub` lays out
+        `<root>/models--<org>--<repo>/snapshots/<revision>/…` beneath it. The
+        manager mirrors that layout rather than owning one, so prefetching here
+        and lazy-loading in the engine populate the *same* files.
+        """
+        return self._paths.models_dir / info.kind
+
+    def _hf_cache_dir(self, info: ModelInfo) -> Path:
+        repo = info.hf_repo or info.id
+        return self._kind_cache_dir(info) / f"models--{repo.replace('/', '--')}"
+
+    def _hf_snapshots(self, info: ModelInfo) -> list[Path]:
+        """Snapshot directories holding real weights, newest-mtime first.
+
+        A snapshot is only counted when it contains a `config.json` *and* at
+        least one weights file: an interrupted download leaves the directory
+        and its symlinks in place, so mere existence proves nothing.
+        """
+        root = self._hf_cache_dir(info) / "snapshots"
+        if not root.is_dir():
+            return []
+        found = [
+            snapshot
+            for snapshot in root.iterdir()
+            if snapshot.is_dir()
+            and (snapshot / "config.json").exists()
+            and any(snapshot.glob("*.bin"))
+        ]
+        return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
 
     def is_installed(self, model_id: str) -> bool:
         info = self.info(model_id)
         if info.managed_by == "bundled":
             return True
         if info.managed_by == "engine":
-            # Engine-managed weights land under the manager's directory tree;
-            # treat presence of any content as installed, absence as "first use
-            # will download".
-            return any(self.model_dir(model_id).glob("**/*"))
+            # Any complete snapshot counts, including one the engine fetched
+            # lazily from `main`. Gating on `hf_revision` would report a
+            # working model as missing whenever upstream moves the branch.
+            return bool(self._hf_snapshots(info))
         return all((self.model_dir(model_id) / f.filename).exists() for f in info.files)
 
     def installed(self, kind: str | None = None) -> list[ModelInfo]:
@@ -139,6 +175,11 @@ class ModelManager:
 
     def disk_usage_mb(self, model_id: str) -> int:
         directory = self.model_dir(model_id)
+        if self.info(model_id).managed_by == "engine":
+            # Hugging Face stores one copy per file in `blobs/` and links it
+            # into each snapshot. Walking the whole tree counts every byte
+            # twice (links included), so measure the blobs alone.
+            directory = directory / "blobs"
         if not directory.exists():
             return 0
         return sum(f.stat().st_size for f in directory.glob("**/*") if f.is_file()) // 1_048_576
@@ -147,8 +188,11 @@ class ModelManager:
 
     def download(self, model_id: str, progress: ProgressCallback | None = None) -> None:
         info = self.info(model_id)
-        if info.managed_by != "manager":
-            logger.info("Model '%s' is %s-managed; nothing to download", model_id, info.managed_by)
+        if info.managed_by == "bundled":
+            logger.info("Model '%s' ships with EVA; nothing to download", model_id)
+            return
+        if info.managed_by == "engine":
+            self._download_from_hub(info, progress)
             return
         target_dir = self.model_dir(model_id)
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +212,43 @@ class ModelManager:
         if directory.exists():
             shutil.rmtree(directory)
             logger.info("Model '%s' removed", model_id)
+
+    def _download_from_hub(self, info: ModelInfo, progress: ProgressCallback | None) -> None:
+        """Prefetch an engine-managed model into the engine's own cache.
+
+        The engine would fetch these weights itself on first use; doing it here
+        makes the download explicit, interruptible, and observable, and is what
+        lets the UI offer a Download button instead of a silent multi-minute
+        stall inside the first turn. Because the destination is the engine's
+        cache root, a prefetched model and a lazily-fetched one are the same
+        files — this adds no second copy.
+        """
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import tqdm as hf_tqdm
+
+        class _ReportingTqdm(hf_tqdm):  # type: ignore[misc]
+            """Bridges hub download bars onto EVA's ProgressCallback."""
+
+            def update(self, n: float | None = 1) -> bool | None:
+                result = super().update(n)
+                if progress is not None and self.total:
+                    progress(str(self.desc or info.id), int(self.n), int(self.total))
+                return result  # type: ignore[no-any-return]
+
+        cache_dir = self._kind_cache_dir(info)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        repo = info.hf_repo or info.id
+        logger.info("Downloading %s from the Hugging Face Hub", repo)
+        try:
+            snapshot_download(
+                repo_id=repo,
+                revision=info.hf_revision or None,
+                cache_dir=str(cache_dir),
+                tqdm_class=_ReportingTqdm if progress is not None else None,
+            )
+        except Exception as exc:  # network, auth, missing repo — all fatal here
+            raise ModelError(f"Could not download '{info.id}' from {repo}: {exc}") from exc
+        logger.info("Model '%s' installed", info.id)
 
     def _download_file(
         self, file: ModelFile, target: Path, progress: ProgressCallback | None

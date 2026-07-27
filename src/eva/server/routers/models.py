@@ -33,9 +33,11 @@ def get_model(model_id: str, state: StateDep) -> dict[str, Any]:
 
 
 @router.post("/{model_id:path}/download", response_model=DownloadStartedResponse)
-def download_model(model_id: str, state: StateDep) -> DownloadStartedResponse:
+async def download_model(model_id: str, state: StateDep) -> DownloadStartedResponse:
+    # Must be `async`: `start_download` schedules onto the running loop, and a
+    # sync handler is dispatched to a worker thread that has none.
     info = state.model_manager.info(model_id)
-    if info.managed_by != "manager":
+    if info.managed_by == "bundled":
         return DownloadStartedResponse(model_id=model_id, status="not_applicable")
     if state.download_active(model_id):
         return DownloadStartedResponse(model_id=model_id, status="already_running")

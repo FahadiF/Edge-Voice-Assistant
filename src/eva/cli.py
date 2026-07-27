@@ -87,7 +87,7 @@ def _cmd_diagnose(_: argparse.Namespace) -> int:
     print(f"Active profile setting: {settings.profile}")
     print(f"LLM:  engine={settings.llm.engine} model={settings.llm.model}")
     print(f"ASR:  engine={settings.asr.engine} model={settings.asr.model}")
-    print(f"TTS:  engine={settings.tts.engine} voice={settings.tts.voice}")
+    print(f"TTS:  engine={settings.tts.engine} voice={_active_voice(settings)}")
     print(f"VAD:  engine={settings.vad.engine} threshold={settings.vad.threshold}")
 
     section("Paths")
@@ -515,6 +515,14 @@ def _cmd_users(args: argparse.Namespace) -> int:
         memory.close()
 
 
+def _active_voice(settings: Settings) -> str:
+    """The voice the pipeline will actually use — `tts.voice` when the user has
+    chosen one, otherwise the conversation language's preferred voice."""
+    from eva.conversation.language import effective_voice, resolve_language
+
+    return effective_voice(settings, resolve_language(settings))
+
+
 def _load_tts_engine() -> tuple[TTSEngine, Settings]:
     """Build and load just the TTS engine (no LLM/ASR/audio system) — voice
     discovery/preview only needs this one, CPU-resident model."""
@@ -549,11 +557,12 @@ def _cmd_voices(args: argparse.Namespace) -> int:
     try:
         register_voices_for_engine(settings.tts.engine, tts)
         if args.voices_command == "list":
+            active = _active_voice(settings)
             print(f"{'':2}{'id':<20} {'language':<10} style")
             for voice in voices_for_engine(settings.tts.engine):
-                marker = "*" if voice.id == settings.tts.voice else " "
+                marker = "*" if voice.id == active else " "
                 print(f"{marker:2}{voice.id:<20} {voice.language:<10} {voice.style_tag}")
-            print("\n* = active voice (settings.tts.voice)")
+            print("\n* = active voice")
             return 0
 
         if args.voices_command == "preview":
@@ -773,7 +782,7 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         assistant.asr,
         assistant.llm,
         assistant.tts,
-        voice=settings.tts.voice,
+        voice=_active_voice(settings),
         system_prompt=settings.conversation.system_prompt,
         params=GenerationParams(
             temperature=settings.conversation.temperature,
@@ -993,7 +1002,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     print(f"  Docs:      http://{host}:{port}/docs")
     print(f"  WebSocket: ws://{host}:{port}/api/v1/ws")
     print(f"  Persona:   {persona.display_name} ({persona.id})")
-    print(f"  Voice:     {settings.tts.voice}")
+    print(f"  Voice:     {_active_voice(settings)}")
     print("  (Memory/user-profile stats become available after POST /api/v1/engine/start)")
     if ui_dist_dir() is not None:
         print(f"  Web UI:    http://{display_host}:{port}/")

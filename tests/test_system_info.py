@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from eva.config.settings import PermissionsSettings, Settings
+from eva.config.settings import (
+    SETTINGS_SCHEMA_VERSION,
+    PermissionsSettings,
+    Settings,
+)
 from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.system_info import system_facts_block
 from eva.memory import db
@@ -176,7 +180,7 @@ class TestSettingsMigration:
         path = tmp_path / "settings.json"
         path.write_text(json.dumps(v1), encoding="utf-8")
         settings = load_settings(path)
-        assert settings.schema_version == 2
+        assert settings.schema_version == SETTINGS_SCHEMA_VERSION
         assert settings.permissions.general.date_time is True
         # cpu/gpu/ram/os all False, locale True → any() keeps it on
         assert settings.permissions.general.system_information is True
@@ -193,7 +197,7 @@ class TestSettingsMigration:
         path = tmp_path / "settings.json"
         path.write_text(json.dumps({"schema_version": 1, "profile": "fast"}), encoding="utf-8")
         settings = load_settings(path)
-        assert settings.schema_version == 2
+        assert settings.schema_version == SETTINGS_SCHEMA_VERSION
         assert settings.profile == "fast"
         assert settings.permissions.devices.microphone is True
 

@@ -207,7 +207,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         hf_repo="Systran/faster-whisper-small",
         hf_revision="536b0662742c02347bc0e980a01041f333bce120",
         recommendation="Recommended for most users",
-        notes="Default ASR for GPU tiers; ~460 MB download on first use.",
+        notes="Default ASR for GPU tiers.",
     ),
     ModelInfo(
         id="faster-whisper/base",
@@ -222,7 +222,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         download_mb_hint=140,
         hf_repo="Systran/faster-whisper-base",
         recommendation="Low memory · fastest",
-        notes="CPU-tier ASR; ~140 MB download on first use.",
+        notes="CPU-tier ASR.",
     ),
     ModelInfo(
         id="faster-whisper/distil-large-v3",
@@ -244,7 +244,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         download_mb_hint=1500,
         hf_repo="Systran/faster-distil-whisper-large-v3",
         recommendation="English only",
-        notes="English-only alternative; ~1.5 GB download on first use.",
+        notes="English-only alternative.",
     ),
     ModelInfo(
         id="faster-whisper/large-v3-turbo",
@@ -267,7 +267,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         recommendation="Best accuracy · multilingual",
         notes=(
             "Multilingual high-accuracy ASR; fits a 6 GB GPU alongside a 4B LLM. "
-            "~1.6 GB download on first use. Not a tier default yet — pending the "
+            "Not a tier default yet — pending the "
             "benchmark recorded in docs/BACKLOG.md."
         ),
     ),

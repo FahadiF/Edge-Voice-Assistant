@@ -54,7 +54,7 @@ export interface LLMSettings {
 export interface TTSSettings {
   engine: string;
   model: string;
-  voice: string;
+  voice: string | null;
   speed: number;
   pitch: number;
   streaming: boolean;
@@ -352,6 +352,7 @@ export interface VoiceInfo {
   display_name: string;
   language: string;
   style_tag: string;
+  active: boolean;
 }
 
 // ── Plugins ────────────────────────────────────────────────────────────────

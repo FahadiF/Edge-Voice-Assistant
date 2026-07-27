@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from eva.config.paths import AppPaths
+from eva.models.manager import ModelManager
 from eva.server import create_app
 
 
@@ -58,8 +59,18 @@ class TestDownloadAndRemove:
         assert r.json() == {"model_id": "kokoro-82m-v1.0", "status": "started"}
         assert started == ["kokoro-82m-v1.0"]
 
-    def test_download_engine_managed_model_is_a_noop(self, client: TestClient) -> None:
+    def test_download_engine_managed_model_starts(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Engine-managed weights are prefetchable (M7.3): the endpoint used to
+        report `not_applicable`, which left the UI with no way to install them."""
+        monkeypatch.setattr(ModelManager, "download", lambda *a, **k: None)
         r = client.post("/api/v1/models/faster-whisper/small/download")
+        assert r.status_code == 200
+        assert r.json()["status"] == "started"
+
+    def test_download_bundled_model_is_a_noop(self, client: TestClient) -> None:
+        r = client.post("/api/v1/models/silero-vad-v5/download")
         assert r.status_code == 200
         assert r.json()["status"] == "not_applicable"
 

@@ -111,6 +111,7 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
     """Snapshot for when no assistant is built/running yet (e.g. server up,
     engine not started). Configuration and system resources are still real;
     pipeline/device fields report their at-rest values."""
+    from eva.conversation.language import effective_voice, resolve_language
     from eva.conversation.personas import resolve_persona
 
     return RuntimeSnapshot(
@@ -149,7 +150,7 @@ def snapshot_idle(settings: Settings) -> RuntimeSnapshot:
         last_retrieval_score_top1=None,
         active_persona_id=resolve_persona(settings).id,
         active_profile_id=settings.conversation.active_profile_id,
-        active_voice=settings.tts.voice,
+        active_voice=effective_voice(settings, resolve_language(settings)),
         recent_events=[],
     )
 
@@ -161,6 +162,7 @@ class DiagnosticsProvider:
         self._assistant = assistant
 
     def snapshot(self) -> RuntimeSnapshot:
+        from eva.conversation.language import effective_voice, resolve_language
         from eva.conversation.personas import resolve_persona
 
         a = self._assistant
@@ -206,6 +208,6 @@ class DiagnosticsProvider:
             last_retrieval_score_top1=a.orchestrator.last_retrieval_score_top1,
             active_persona_id=resolve_persona(a.settings).id,
             active_profile_id=active_profile.id if active_profile is not None else None,
-            active_voice=a.settings.tts.voice,
+            active_voice=effective_voice(a.settings, resolve_language(a.settings)),
             recent_events=[e.name for e in a.bus.recent_events()],
         )

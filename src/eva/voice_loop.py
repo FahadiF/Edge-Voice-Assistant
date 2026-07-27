@@ -152,6 +152,7 @@ def _startup_banner(assistant: Assistant) -> None:
     plus which persona/user profile/voice/memory state is active (M4) —
     without this, there was no on-screen confirmation the M4 subsystems were
     doing anything."""
+    from eva.conversation.language import effective_voice, resolve_language
     from eva.conversation.personas import resolve_persona
     from eva.hardware import detect_hardware, recommend_profile
     from eva.models.manager import ModelManager
@@ -180,7 +181,7 @@ def _startup_banner(assistant: Assistant) -> None:
     memory_stats = assistant.memory.stats()
     print(f"  Persona: {persona.display_name} ({persona.id})")
     print(f"  User profile: {user_line}")
-    print(f"  Voice: {settings.tts.voice}")
+    print(f"  Voice: {effective_voice(settings, resolve_language(settings))}")
     print(
         f"  Memory: {memory_stats.conversation_count} conversation(s), "
         f"{memory_stats.turn_count} turn(s) stored"

@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 _PIPELINE_RATE = 16_000
 
+# Voice used when the requested one is missing from the loaded voice pack.
+_DEFAULT_VOICE = "af_heart"
+
 # Conversation language (BCP-47 primary subtag) → espeak-ng phonemizer voice
 # (M5.6). Kokoro's text frontend is espeak-based: feeding non-English text
 # through the default "en-us" phonemizer is why non-English replies sounded
@@ -93,6 +96,21 @@ class KokoroTTS(TTSEngine):
     def unload(self) -> None:
         self._kokoro = None
 
+    def _resolve_voice(self, voice: str) -> str:
+        """`voice` if this model provides it, else the built-in default.
+
+        kokoro-onnx raises on an unknown voice id, which would surface as a
+        failed turn. A voice can go missing legitimately — a settings file
+        written against a different voice pack, or a renamed id — so degrade
+        to the default with a warning instead of losing the reply.
+        """
+        available = self.voices()
+        if not available or voice in available:
+            return voice
+        fallback = _DEFAULT_VOICE if _DEFAULT_VOICE in available else available[0]
+        logger.warning("Voice '%s' is not available in this model; using '%s'", voice, fallback)
+        return fallback
+
     def synthesize(
         self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
     ) -> Frame:
@@ -104,7 +122,7 @@ class KokoroTTS(TTSEngine):
             return np.zeros(0, dtype=np.int16)
         try:
             samples, sample_rate = self._kokoro.create(
-                text, voice=voice, speed=speed, lang=_espeak_lang(language)
+                text, voice=self._resolve_voice(voice), speed=speed, lang=_espeak_lang(language)
             )
         except Exception as exc:
             raise ModelError(f"Kokoro synthesis failed: {exc}") from exc
@@ -129,7 +147,7 @@ class KokoroTTS(TTSEngine):
             return
         loop = asyncio.new_event_loop()
         agen = self._kokoro.create_stream(
-            text, voice=voice, speed=speed, lang=_espeak_lang(language)
+            text, voice=self._resolve_voice(voice), speed=speed, lang=_espeak_lang(language)
         )
         try:
             while True:

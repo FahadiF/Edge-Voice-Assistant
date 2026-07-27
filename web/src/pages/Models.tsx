@@ -86,7 +86,7 @@ function ModelRow({ model, hardware }: { model: ModelCard; hardware?: HardwareSu
     mutationFn: () => models.download(model.id),
     onSuccess: (r) => {
       if (r.status === "not_applicable") {
-        toast("info", "This model is downloaded automatically by its engine on first use");
+        toast("info", `${model.name} ships with EVA — nothing to download`);
       } else if (r.status === "already_running") {
         toast("info", "Download already in progress");
       } else {
@@ -117,16 +117,15 @@ function ModelRow({ model, hardware }: { model: ModelCard; hardware?: HardwareSu
 
   const status = statusOf(model);
   const fit = fitWarning(model, hardware);
-  // Download/Remove only exist for manager-managed models. Rather than render
-  // buttons that cannot work, say who does own the files — silently omitting
-  // the controls just looks broken (M7 UX polish).
+  // Bundled models have no controls at all. Rather than render buttons that
+  // cannot work, say who does own the files — silently omitting the controls
+  // just looks broken (M7 UX polish).
+  const canManage = model.managed_by !== "bundled";
   const managedNote =
-    model.managed_by === "engine"
-      ? model.installed
-        ? "managed by its engine — removal arrives with model lifecycle support"
-        : "auto-downloads on first use"
-      : model.managed_by === "bundled"
-        ? "bundled with EVA"
+    model.managed_by === "bundled"
+      ? "bundled with EVA"
+      : model.managed_by === "engine" && !model.installed
+        ? "downloads on first use if you skip this"
         : "";
 
   return (
@@ -179,7 +178,7 @@ function ModelRow({ model, hardware }: { model: ModelCard; hardware?: HardwareSu
         </div>
       )}
       <div className="model-actions">
-        {!model.installed && model.managed_by === "manager" && !download && (
+        {!model.installed && canManage && !download && (
           <button className="primary" onClick={() => startDownload.mutate()} disabled={startDownload.isPending}>
             {model.download_mb ? `Download (${formatSize(model.download_mb)})` : "Download"}
           </button>
@@ -190,7 +189,9 @@ function ModelRow({ model, hardware }: { model: ModelCard; hardware?: HardwareSu
             Set active
           </button>
         )}
-        {model.installed && model.managed_by === "manager" && (
+        {/* Deleting the weights the engine has open fails at the filesystem
+            level on Windows; make the active model unremovable instead. */}
+        {model.installed && canManage && !model.active && (
           <button className="danger" onClick={() => setConfirmRemove(true)}>
             Remove
           </button>

@@ -45,6 +45,11 @@ class VoiceInfo(BaseModel):
     display_name: str
     language: str = "unknown"
     style_tag: str = ""
+    #: Set per-request by the API, not at registration: whether this is the
+    #: voice the pipeline currently resolves to. Registry entries always carry
+    #: the default — resolution depends on settings, which the registry has no
+    #: view of (`eva.conversation.language.effective_voice`).
+    active: bool = False
 
 
 voice_registry: Registry[VoiceInfo] = Registry("voice")

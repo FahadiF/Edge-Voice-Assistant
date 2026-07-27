@@ -42,8 +42,8 @@ export function Voices() {
     enabled: running,
     retry: false,
   });
-  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: settingsApi.get });
-  const activeVoice = settingsQuery.data?.tts.voice;
+  // `voice.active` is resolved server-side: `tts.voice` is null until the user
+  // picks one, and the conversation language supplies the default.
 
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("");
@@ -88,6 +88,7 @@ export function Voices() {
     onSuccess: (updated) => {
       queryClient.setQueryData(["settings"], updated);
       toast("success", `Voice set to ${updated.tts.voice} — takes effect on engine restart`);
+      void queryClient.invalidateQueries({ queryKey: ["voices"] });
     },
     onError: (e) => toast("error", e.message),
   });
@@ -144,11 +145,11 @@ export function Voices() {
           {filtered.map((voice) => (
             <div
               key={voice.id}
-              className={`voice-card ${voice.id === activeVoice ? "voice-active" : ""}`}
+              className={`voice-card ${voice.active ? "voice-active" : ""}`}
             >
               <div>
                 <strong>{voice.display_name}</strong>{" "}
-                {voice.id === activeVoice && <span className="chip chip-accent">active</span>}
+                {voice.active && <span className="chip chip-accent">active</span>}
                 <div className="model-id">
                   <code>{voice.id}</code>
                 </div>
@@ -170,7 +171,7 @@ export function Voices() {
                 >
                   {previewing === voice.id ? "Playing…" : "Preview"}
                 </button>
-                {voice.id !== activeVoice && (
+                {!voice.active && (
                   <button className="primary" onClick={() => select.mutate(voice.id)}>
                     Use
                   </button>

@@ -110,7 +110,7 @@ class TestSnapshot:
         assert snap.last_retrieval_score_top1 == 0.83
         assert snap.active_persona_id == "default"
         assert snap.active_profile_id is None
-        assert snap.active_voice == Settings().tts.voice
+        assert snap.active_voice == "af_heart"  # resolved, not the raw None setting
 
     def test_snapshot_serializes_to_json(self) -> None:
         provider = DiagnosticsProvider(_stub_assistant())  # type: ignore[arg-type]
@@ -125,4 +125,4 @@ class TestSnapshotIdle:
         assert snap.state == "idle"
         assert snap.active_persona_id == "default"
         assert snap.active_profile_id is None
-        assert snap.active_voice == settings.tts.voice
+        assert snap.active_voice == "af_heart"  # resolved from the conversation language

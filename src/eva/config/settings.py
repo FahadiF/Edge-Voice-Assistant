@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eva.core.errors import ConfigError
 
-SETTINGS_SCHEMA_VERSION = 2
+SETTINGS_SCHEMA_VERSION = 3
 
 
 class _Section(BaseModel):
@@ -120,8 +120,9 @@ class LLMSettings(_Section):
 class TTSSettings(_Section):
     engine: str = Field("kokoro", description="TTS engine id (registry key)")
     model: str = Field("kokoro-82m-v1.0", description="Installed TTS model id")
-    voice: str = Field(
-        "af_heart", description="Voice id within the active engine (language may override)"
+    voice: str | None = Field(
+        None,
+        description="Voice id within the active engine; None = follow the conversation language",
     )
     speed: Annotated[float, Field(ge=0.5, le=2.0)] = Field(
         1.0, description="Speech rate multiplier"
@@ -462,6 +463,14 @@ def _migrate_raw(raw: Any) -> Any:
     v1 → v2 (M5.4): flat `permissions` keys become grouped sections
     (ADR-025 regroup); the dead `conversation.memory_enabled` flag moves to
     `permissions.privacy.remember_conversations` (now actually enforced).
+
+    v2 → v3 (M7.3): `tts.voice` gains a `None` sentinel meaning "follow the
+    conversation language". The old default `"af_heart"` was indistinguishable
+    from a deliberate choice, so `effective_voice()` could not honour user
+    selections. Documents still carrying the old default are rewritten to
+    `None` — behaviour-preserving, because `"af_heart"` is exactly what the
+    English profile resolves to, and non-English profiles were overriding it
+    anyway. Any other value was necessarily set by hand and is left alone.
     """
     if not isinstance(raw, dict) or raw.get("schema_version", 1) >= SETTINGS_SCHEMA_VERSION:
         return raw
@@ -491,6 +500,9 @@ def _migrate_raw(raw: Any) -> Any:
         raw.setdefault("permissions", {}).setdefault("privacy", {})["remember_conversations"] = (
             remember
         )
+    tts = raw.get("tts")
+    if isinstance(tts, dict) and tts.get("voice") == "af_heart":
+        tts["voice"] = None
     raw["schema_version"] = SETTINGS_SCHEMA_VERSION
     return raw
 

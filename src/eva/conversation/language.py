@@ -24,6 +24,12 @@ from eva.core.registry import Registry
 
 logger = logging.getLogger(__name__)
 
+#: Last-resort voice when neither the user nor the conversation language names
+#: one. Kept in sync with the `tts.voice == "af_heart"` case in the settings
+#: v2 → v3 migration, which cannot import this module (config is inward of
+#: conversation, ADR-010).
+DEFAULT_VOICE = "af_heart"
+
 
 class LanguageProfile(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -112,4 +118,11 @@ def effective_asr_language(settings: Settings, language: LanguageProfile) -> str
 
 
 def effective_voice(settings: Settings, language: LanguageProfile) -> str:
-    return language.voice_for(settings.tts.engine, settings.tts.voice)
+    """Explicit voice override wins; otherwise follow the conversation language.
+
+    Mirrors `effective_asr_language`. Before M7.3 the arguments were the other
+    way round — the language profile's registered voice was returned first and
+    `settings.tts.voice` was only its fallback, which made a user's choice
+    unreachable for any language that registers a voice for the active engine.
+    """
+    return settings.tts.voice or language.voice_for(settings.tts.engine, DEFAULT_VOICE)

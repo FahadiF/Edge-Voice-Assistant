@@ -79,7 +79,7 @@ class TestResolution:
         settings.conversation.language = code
         with caplog.at_level(logging.WARNING):
             voice = effective_voice(settings, resolve_language(settings))
-        assert voice == settings.tts.voice  # graceful fallback, never a crash
+        assert voice == "af_heart"  # graceful fallback, never a crash
         assert any("non-native voice" in r.message for r in caplog.records)
 
 

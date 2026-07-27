@@ -37,7 +37,7 @@ def test_partial_file_merges_with_defaults(tmp_path: Path) -> None:
     s = load_settings(path)
     assert s.llm.model == "custom-model"
     assert s.llm.engine == "llamacpp"  # untouched default
-    assert s.tts.voice == "af_heart"
+    assert s.tts.voice is None  # unset = follow the conversation language
 
 
 def test_unknown_keys_rejected(tmp_path: Path) -> None:
