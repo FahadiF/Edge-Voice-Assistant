@@ -85,13 +85,22 @@ class TestCatalog:
         assert s.llm.model in ids
         assert s.asr.model in ids
 
-    def test_profile_models_exist_in_catalog(self) -> None:
+    def test_every_tier_resolves_to_catalogued_models(self) -> None:
+        """Hardware profiles no longer carry their own model copies — a tier's
+        models come from the presets. This replaces the old
+        `test_profile_models_exist_in_catalog`, whose coverage is a strict
+        subset of `test_presets_and_persistence`'s all-presets check; kept here
+        because it pins the *tier ids* the two modules must agree on."""
+        from eva.hardware.presets import preset_registry, register_builtin_presets
         from eva.hardware.profiles import PROFILES
 
+        register_builtin_presets()
         ids = {m.id for m in BUILTIN_CATALOG}
-        for profile in PROFILES.values():
-            assert profile.llm_model in ids, profile.id
-            assert profile.asr_model in ids, profile.id
+        balanced = preset_registry.get("balanced")
+        for tier_id in PROFILES:
+            models = balanced.for_tier(tier_id)
+            assert models.llm_model in ids, tier_id
+            assert models.asr_model in ids, tier_id
 
 
 class TestManager:
@@ -324,6 +333,44 @@ class TestManager:
 
         card = manager.describe("qwen3.5-9b-instruct-q4_k_m", Settings())
         assert card["active"] is False
+
+    def test_turbo_is_catalogued_as_a_multilingual_option(self, manager: ModelManager) -> None:
+        """large-v3-turbo exists and is selectable. It is deliberately NOT a
+        tier default yet — that waits on the benchmark (docs/BACKLOG.md)."""
+        turbo = manager.info("faster-whisper/large-v3-turbo")
+        assert turbo.kind == "asr"
+        assert turbo.engine == "faster-whisper"
+        assert turbo.managed_by == "engine"
+        assert turbo.languages == "multilingual"
+        assert turbo.vram_mb == 1200  # measured: 1106-1121 MiB resident
+        assert turbo.download_mb == 1600
+
+    def test_no_asr_model_claims_a_gpu_tier_it_was_never_measured_on(
+        self, manager: ModelManager
+    ) -> None:
+        """`distil-large-v3` used to advertise "for 12 GB+ GPUs" on an estimate
+        no one had checked, while the *larger* turbo measured 1121 MiB on a 6 GB
+        card. Guidance text must not imply a hardware requirement."""
+        for model in manager.available("asr"):
+            blurb = f"{model.notes} {model.recommendation}"
+            assert "12 GB" not in blurb, model.id
+            assert "GB+" not in blurb, model.id
+
+    def test_engine_managed_models_record_their_upstream_repo(self, manager: ModelManager) -> None:
+        """Provenance for engine-managed weights. Informational until M1b makes
+        downloads repository-aware, but recorded now because the engine's alias
+        map is an implementation detail — `large-v3-turbo` resolves to a
+        third-party repo, unlike the first-party Systran entries."""
+        for model in manager.available():
+            if model.managed_by != "engine":
+                continue
+            assert model.hf_repo, f"{model.id} has no hf_repo"
+            assert "/" in model.hf_repo, f"{model.id} hf_repo is not owner/name"
+        turbo = manager.info("faster-whisper/large-v3-turbo")
+        assert turbo.hf_repo == "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+        # Only revisions verified against a real download are pinned; a guessed
+        # one would look authoritative while being fiction.
+        assert len(turbo.hf_revision) == 40, "turbo revision must be a full SHA"
 
     def test_describe_carries_catalog_recommendation(self, manager: ModelManager) -> None:
         """Guidance shown in pickers is catalog data, not a UI conditional, so

@@ -113,7 +113,7 @@ which is what makes interruption feel instant.
 | Stage | Implementation | Runtime |
 |---|---|---|
 | Voice activity | Silero VAD | ONNX Runtime |
-| Speech recognition | faster-whisper (`small` / `base`) | CTranslate2 |
+| Speech recognition | faster-whisper (`small` / `base`; `large-v3-turbo` optional) | CTranslate2 |
 | Language model | Qwen3.5-4B-Instruct Q4_K_M | llama.cpp |
 | Speech synthesis | Kokoro-82M | ONNX Runtime |
 | Embeddings | all-MiniLM-L6-v2 | ONNX Runtime |
@@ -163,9 +163,11 @@ Knowing these up front is more useful than discovering them:
   so Kokoro cannot use the GPU. First-clause synthesis takes ~1.6 s and is the largest
   single part of the ~3.5 s time-to-first-audio. Moving it to a GPU execution provider is
   the highest-value performance work outstanding.
-- **Speech recognition accuracy is bounded by the model.** Whisper `small` confuses
-  acoustically similar consonants (`fox` / `box`) on far-field laptop microphones. This
-  has been measured in detail; a larger model recovers most of it for roughly +2% latency.
+- **Speech recognition accuracy is bounded by the default model.** Whisper `small`
+  confuses acoustically similar consonants (`fox` / `box`) on far-field laptop
+  microphones. `large-v3-turbo` is catalogued and selectable — it recovered most of
+  those cases for roughly +2% of time-to-first-audio — but it is not yet a tier
+  default, pending a wider benchmark.
 - **No internet access, tools, file access, or vision.** Permission toggles for these
   exist as the contract that future capabilities must respect — the capabilities
   themselves are not implemented, and EVA says so when asked.

@@ -67,7 +67,17 @@ def _cmd_diagnose(_: argparse.Namespace) -> int:
     section("Recommended profile")
     print(f"{profile.id} — {profile.display_name}")
     print(f"  {profile.description}")
-    print(f"  LLM: {profile.llm_model} | ASR: {profile.asr_model} | TTS: {profile.tts_engine}")
+    # Models come from the default preset for this tier, not from a second copy
+    # held on the profile — that copy had already drifted from what applying a
+    # preset actually does.
+    from eva.hardware.presets import preset_registry, register_builtin_presets
+
+    register_builtin_presets()
+    recommended = preset_registry.get("balanced").for_tier(profile.id)
+    print(
+        f"  LLM: {recommended.llm_model} | ASR: {recommended.asr_model}"
+        f" | TTS: {recommended.tts_engine}"
+    )
 
     section("Configuration")
     print(

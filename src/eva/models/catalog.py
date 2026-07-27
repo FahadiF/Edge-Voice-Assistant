@@ -54,6 +54,24 @@ class ModelInfo(BaseModel):
     context_length: int | None = None  # LLM only
     quantization: str | None = None
     languages: str = "multilingual"
+    hf_repo: str = ""
+    """Upstream Hugging Face repository for engine-managed weights.
+
+    **Informational only today.** The faster-whisper adapter still passes the
+    model *alias* (e.g. `large-v3-turbo`), which the engine resolves through its
+    own internal map — so this field does not yet control what is downloaded.
+    It is recorded now because that map is an engine implementation detail that
+    can change between versions, and `large-v3-turbo` in particular resolves to
+    a third-party repository rather than the first-party `Systran` ones. M1b
+    makes downloads repository-aware, at which point this becomes authoritative.
+    """
+    hf_revision: str = ""
+    """Pinned upstream commit for `hf_repo`; empty means "whatever is current".
+
+    Same status as `hf_repo`: informational until M1b. Only populated where the
+    revision has been verified against a real local download — a guessed
+    revision is worse than none, because it would look authoritative.
+    """
     recommendation: str = ""
     """Short guidance shown next to the model in pickers ("Recommended for most
     users", "Fastest", "English only", …). Catalog data rather than a UI
@@ -186,6 +204,8 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         vram_mb=600,
         ram_mb=900,
         download_mb_hint=460,
+        hf_repo="Systran/faster-whisper-small",
+        hf_revision="536b0662742c02347bc0e980a01041f333bce120",
         recommendation="Recommended for most users",
         notes="Default ASR for GPU tiers; ~460 MB download on first use.",
     ),
@@ -200,6 +220,7 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         vram_mb=300,
         ram_mb=500,
         download_mb_hint=140,
+        hf_repo="Systran/faster-whisper-base",
         recommendation="Low memory · fastest",
         notes="CPU-tier ASR; ~140 MB download on first use.",
     ),
@@ -211,12 +232,44 @@ BUILTIN_CATALOG: tuple[ModelInfo, ...] = (
         provider="Hugging Face / Systran",
         license="MIT",
         managed_by="engine",
+        # vram_mb/ram_mb here are the original catalog estimates and have never
+        # been measured. Deliberately left as-is rather than replaced with a
+        # fresh guess; measuring them is a benchmark task (docs/BACKLOG.md).
+        # For scale: large-v3-turbo is the larger model (~809M vs ~756M
+        # parameters) and measured 1121 MiB resident on a 6 GB card, so the
+        # "12 GB+ GPUs" guidance this entry used to carry was unsupported.
         vram_mb=1600,
         ram_mb=2000,
         languages="en",
         download_mb_hint=1500,
-        recommendation="Best accuracy · English only",
-        notes="High-accuracy English ASR for 12 GB+ GPUs; ~1.5 GB download on first use.",
+        hf_repo="Systran/faster-distil-whisper-large-v3",
+        recommendation="English only",
+        notes="English-only alternative; ~1.5 GB download on first use.",
+    ),
+    ModelInfo(
+        id="faster-whisper/large-v3-turbo",
+        kind="asr",
+        display_name="Whisper large-v3-turbo (CTranslate2)",
+        engine="faster-whisper",
+        # Third-party CTranslate2 conversion — every other ASR entry is
+        # first-party Systran. Named honestly so the difference is visible.
+        provider="OpenAI / mobiuslabsgmbh",
+        license="MIT",
+        managed_by="engine",
+        # Measured on an RTX 3060 Laptop (6 GB): 1106-1121 MiB resident
+        # alongside the 4B LLM, 1.6 GB on disk. ram_mb follows the existing
+        # catalog convention rather than a measurement.
+        vram_mb=1200,
+        ram_mb=1600,
+        download_mb_hint=1600,
+        hf_repo="mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+        hf_revision="0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+        recommendation="Best accuracy · multilingual",
+        notes=(
+            "Multilingual high-accuracy ASR; fits a 6 GB GPU alongside a 4B LLM. "
+            "~1.6 GB download on first use. Not a tier default yet — pending the "
+            "benchmark recorded in docs/BACKLOG.md."
+        ),
     ),
     # ── TTS ──
     ModelInfo(

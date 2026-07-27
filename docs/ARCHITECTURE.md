@@ -202,7 +202,7 @@ the old API-only app when no build is present.
 |---|---|---|---|
 | VAD | Silero VAD v5 (ONNX, CPU) | Still SOTA for size; proven in thesis | ~2 MB |
 | AEC/NS | WebRTC APM (livekit `rtc.apm` or webrtc-audio-processing) | Battle-tested full-duplex AEC | CPU, negligible |
-| ASR | faster-whisper `small` int8 (GPU) / `base` (CPU fallback) | 4× whisper speed, mature, multilingual | ~0.5 GB |
+| ASR | faster-whisper `small` int8 (GPU) / `base` (CPU fallback); `large-v3-turbo` selectable | 4× whisper speed, mature, multilingual | ~0.5 GB (turbo: 1.1 GB measured) |
 | LLM | Qwen3.5-4B-Instruct GGUF Q4_K_M via llama.cpp | Best quality/VRAM at 4B; native streaming + abort | ~3.5 GB incl. KV (measured) |
 | TTS | Kokoro-82M (CPU) | Apache-2.0, faster than real-time on CPU, strong quality | ~0.4 GB RAM |
 | Embeddings | all-MiniLM-L6-v2 (ONNX, CPU) | Semantic memory retrieval (ADR-020) | ~90 MB |

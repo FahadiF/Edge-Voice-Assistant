@@ -36,6 +36,20 @@ were deferred to keep that pass small.
 |---|---|---|
 | C1 | **`eva open <page>`** — `eva open models`, `eva open voices`, `eva open settings`, `eva open diagnostics`, later `plugins` / `logs` / `downloads` | Natural extension now that `eva desktop` exists: open the desktop app directly on a page, starting it first if it is not running. The `eva open` prefix is deliberate — `eva models` and `eva voices` already are (and should remain) CLI subcommand *groups* for model and voice management, so a bare `eva models` would break scripted usage. `open` also scales to new pages without ever colliding with a management verb. |
 
+## ASR model selection
+
+Recorded during the M7.2 catalog audit. `large-v3-turbo` is catalogued and
+selectable; **no tier default changed**, because the evidence does not yet support
+one. See ADR-003 § Model Selection History for the measurements taken so far.
+
+| # | Item | Rationale |
+|---|---|---|
+| A1 | **Benchmark the `gpu-12gb` ASR default** — compare `large-v3`, `large-v3-turbo`, and any newer production-ready multilingual model available at that time | The current default (`small` in balanced) was never chosen on evidence, and no 12 GB card has been tested. `distil-large-v3` is no longer presented as the preferred high-accuracy option because it is English-only, but replacing it with turbo on a 6 GB measurement would substitute one assumption for another. Decide from data. |
+| A2 | **Benchmark the `gpu-6gb` ASR default** — `small` vs `large-v3-turbo` on a real fixture set | Turbo recovered 3 of 4 fricative failures, but n=11, one speaker, one room, one session. Needs a wider sample before it becomes a default. Blocked on the capture probe's fixed-window truncation bug (4 of 11 samples unusable). |
+| A3 | **Measure `distil-large-v3`'s real footprint** | Its `vram_mb=1600` / `ram_mb=2000` are original estimates, never verified. Left unchanged rather than replaced with a guess. |
+| A4 | **Evaluate `distil-large-v3.5`** | Present in faster-whisper 1.2.1's resolver map, not catalogued. English-only, so it inherits distil's disqualification as a general default — but may be worth offering alongside `distil-large-v3`. |
+| A5 | **Activate repository pinning** | `hf_repo`/`hf_revision` are recorded but **inert**: the adapter still passes the model alias, which the engine resolves through its own map. M1b makes downloads repository-aware and turns these authoritative. Until then the pin is documentation, not a guarantee. |
+
 ## Engineering
 
 | # | Item | Rationale |

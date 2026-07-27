@@ -6,6 +6,59 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-26 — ASR catalog: add large-v3-turbo, correct unsupported metadata
+
+Catalog and documentation only. **No tier default changed** — turbo is selectable,
+not assigned. Defaults wait on the benchmark recorded in `docs/BACKLOG.md`.
+
+**Fixed — duplicated tier→model mapping had already drifted**
+`HardwareProfile` carried its own `llm_model`/`asr_model`/`asr_device`/`tts_engine`
+copies alongside the real selection in `ModelPreset.tiers`. They disagreed:
+`eva diagnose` told a 12 GB user their recommended ASR was `distil-large-v3` on
+`cuda`, while applying the default preset actually gave `small` on `auto`. The
+profile now carries tier identity only (`id`, `display_name`, `description`,
+`min_vram_mb`) and `eva diagnose` derives models from the balanced preset, so the
+two cannot diverge again. The fields had exactly one consumer — that printout — and
+the test reading them was a strict subset of `test_presets_and_persistence`.
+
+**Added — `faster-whisper/large-v3-turbo`**
+Multilingual, `vram_mb=1200` (measured 1106–1121 MiB resident beside the 4B LLM),
+1.6 GB download. Selectable from the Models page and `eva models use`; not a default.
+
+**Added — `ModelInfo.hf_repo` / `hf_revision`**
+Upstream provenance for engine-managed weights. **Informational only** — the adapter
+still passes the model alias, which faster-whisper resolves through its own internal
+map, so these do not yet control downloads. Recorded now because that map is an
+engine implementation detail, and `large-v3-turbo` resolves to a *third-party*
+repository (`mobiuslabsgmbh`) unlike the first-party `Systran` entries. Revisions are
+pinned only where verified against a real local download; a guessed revision would
+look authoritative while being fiction. M1b makes them binding.
+
+**Corrected — `distil-large-v3` claimed a hardware tier nobody measured**
+Its guidance read "High-accuracy English ASR for **12 GB+ GPUs**". That figure was
+never verified, and the *larger* turbo (~809M vs ~756M parameters) measured 1121 MiB
+on a 6 GB card — so the gate was unsupported. Guidance is now "English only"; the
+model stays catalogued as a legitimate English-only option. Its `vram_mb`/`ram_mb`
+estimates are deliberately **left unchanged** rather than replaced with a fresh
+guess — measuring them is a backlog item.
+
+`small` keeps "Recommended for most users": it is still the default, so the label is
+still true.
+
+**Documentation**
+- **ADR-003 gains a "Model Selection History" section** — the original decision, why
+  turbo was absent (never evaluated, not rejected), why it is being introduced, the
+  measurements gathered, and what still needs benchmarking. Future model changes stay
+  traceable.
+- `docs/BACKLOG.md` — new ASR section (A1–A5), including the 12 GB benchmark comparing
+  `large-v3`, `large-v3-turbo`, and any newer production-ready multilingual model.
+- README and ARCHITECTURE model tables; README limitation reworded now that a better
+  ASR option exists but is not yet default.
+
+**Tests** — 860 total. Turbo catalogued correctly; no ASR entry may claim a GPU tier in
+its guidance text; every engine-managed model records an upstream repo; tier→model
+resolution goes through the presets.
+
 ### 2026-07-26 — M7 UX polish: CLI consistency and the Models page
 
 Presentation and developer-experience only. No `ModelManager` lifecycle, verification,
