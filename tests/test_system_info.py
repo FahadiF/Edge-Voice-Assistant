@@ -201,6 +201,32 @@ class TestSettingsMigration:
         assert settings.profile == "fast"
         assert settings.permissions.devices.microphone is True
 
+    def test_v2_stale_default_voice_becomes_unset(self, tmp_path: Path) -> None:
+        """v2 → v3: `af_heart` was the field default, so it could not be told
+        apart from a deliberate choice. Rewriting it to None is behaviour-
+        preserving — English resolves back to `af_heart`, and non-English
+        profiles were overriding it anyway."""
+        import json
+
+        from eva.config.settings import load_settings
+
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps({"schema_version": 2, "tts": {"voice": "af_heart"}}), encoding="utf-8"
+        )
+        assert load_settings(path).tts.voice is None
+
+    def test_v2_chosen_voice_is_preserved(self, tmp_path: Path) -> None:
+        import json
+
+        from eva.config.settings import load_settings
+
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps({"schema_version": 2, "tts": {"voice": "af_bella"}}), encoding="utf-8"
+        )
+        assert load_settings(path).tts.voice == "af_bella"
+
     def test_v2_documents_load_unchanged(self, tmp_path: Path) -> None:
 
         from eva.config.settings import load_settings, save_settings

@@ -6,6 +6,55 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-27 — Fix voice selection and the engine-managed model lifecycle
+
+Two release blockers, both long-standing.
+
+**Fixed — a selected voice was ignored; EVA always spoke as `af_heart`**
+`effective_voice()` passed the user's setting as the *fallback* argument to
+`LanguageProfile.voice_for()`, which returns the language's registered voice first.
+English registers `{"kokoro": "af_heart"}`, so `af_heart` won unconditionally and
+`settings.tts.voice` was unreachable — the Voices page saved a choice that nothing
+read. The adjacent `effective_asr_language()` had it the right way round
+(`settings.asr.language or language.asr_language`), which is now the shape of both.
+
+`tts.voice` becomes `str | None` (**settings schema v3**), because the old default
+`"af_heart"` could not be told apart from a deliberate choice — and that distinction
+is what lets a Spanish conversation default to `ef_dora` while still honouring a user
+who explicitly picks `af_heart`. The v2 → v3 migration rewrites the stale default to
+`None` and leaves every other value alone, which is behaviour-preserving in all cases.
+
+`GET /voices` now marks the resolved voice (`VoiceInfo.active`) rather than leaving
+each client to re-implement resolution; `eva diagnose`, `eva voices list`, `eva serve`
+and the Dashboard all report the voice actually in use. Kokoro falls back to
+`af_heart` with a logged warning when a configured voice is missing from the model,
+instead of failing the turn.
+
+**Fixed — engine-managed models could never be installed, detected, or removed**
+`is_installed()` looked under `<models_dir>/<kind>/<model_id>/`, a directory the ASR
+engine never writes to; it downloads into a Hugging Face cache at
+`<models_dir>/<kind>/models--<org>--<repo>/`. Every Whisper model therefore reported
+"not installed" forever — the Models page showed "Speech Recognition — 0/4 installed"
+with a model demonstrably running — and because the Download button was gated on
+`managed_by === "manager"`, there was no way to install one either. `large-v3-turbo`
+was catalogued but unreachable from the UI.
+
+The manager now reads and writes that layout: install detection requires a snapshot
+holding both `config.json` and weights (an interrupted download leaves the tree
+behind, so existence alone proves nothing), `download()` prefetches through
+`huggingface_hub` with byte-level progress on the event bus, `remove()` clears the
+cache, and `disk_usage_mb()` measures blobs so hard-linked snapshots are not
+double-counted. Verified against the real cache: turbo 1546 MB, `small` 463 MB.
+
+**Fixed — no download could ever start from the API**
+`POST /models/{id}/download` was a sync handler, so FastAPI ran it in a worker thread
+where `asyncio.create_task` has no running loop. It is now `async`. This affected
+manager-managed models too and was never covered by a test.
+
+Also: the active model can no longer be removed from the Models page (deleting
+weights the engine has open fails at the filesystem level on Windows), and catalog
+notes no longer say "downloads on first use" now that installing is explicit.
+
 ### 2026-07-26 — ASR catalog: add large-v3-turbo, correct unsupported metadata
 
 Catalog and documentation only. **No tier default changed** — turbo is selectable,

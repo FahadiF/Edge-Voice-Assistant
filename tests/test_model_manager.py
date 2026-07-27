@@ -16,6 +16,18 @@ def manager(app_paths: AppPaths) -> ModelManager:
     return ModelManager(app_paths)
 
 
+def _fake_hub_snapshot(paths: AppPaths, info: ModelInfo, revision: str) -> Path:
+    """Reproduce the `huggingface_hub` cache layout an engine downloads into:
+    `<models_dir>/<kind>/models--<org>--<repo>/snapshots/<revision>/`."""
+    assert info.hf_repo
+    root = paths.models_dir / info.kind / f"models--{info.hf_repo.replace('/', '--')}"
+    snapshot = root / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot / "model.bin").write_bytes(b"weights")
+    return snapshot
+
+
 def _register_test_model(suffix: str, *, payload: bytes, verified: bool) -> str:
     """Register (once) a synthetic single-file catalog entry for download
     tests. `verified=True` stamps the payload's real size and SHA-256 into
@@ -371,6 +383,63 @@ class TestManager:
         # Only revisions verified against a real download are pinned; a guessed
         # one would look authoritative while being fiction.
         assert len(turbo.hf_revision) == 40, "turbo revision must be a full SHA"
+
+    def test_engine_managed_install_detection_reads_the_hub_cache(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        """Engine-managed models used to report `installed: False` forever —
+        `is_installed` looked in a directory the engine never writes to, so the
+        Models page showed "0/3 installed" with a model demonstrably running."""
+        model_id = "faster-whisper/small"
+        assert manager.is_installed(model_id) is False
+
+        snapshot = _fake_hub_snapshot(app_paths, manager.info(model_id), "deadbeef")
+        assert manager.is_installed(model_id) is True
+        assert manager.disk_usage_mb(model_id) == 0  # blobs measured, links skipped
+        del snapshot
+
+    def test_incomplete_hub_snapshot_is_not_installed(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        """An interrupted download leaves the directory tree behind; presence
+        alone must not count as installed."""
+        model_id = "faster-whisper/small"
+        info = manager.info(model_id)
+        snapshot = _fake_hub_snapshot(app_paths, info, "partial")
+        (snapshot / "model.bin").unlink()
+        assert manager.is_installed(model_id) is False
+
+    def test_engine_managed_removal_clears_the_hub_cache(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        model_id = "faster-whisper/small"
+        _fake_hub_snapshot(app_paths, manager.info(model_id), "deadbeef")
+        manager.remove(model_id)
+        assert manager.is_installed(model_id) is False
+
+    def test_hub_progress_reports_bytes_not_file_counts(self) -> None:
+        """`snapshot_download` drives two bars off `tqdm_class`. Reporting the
+        files-completed one would leave a single-weights-file model showing 0%
+        for the whole download, so only the byte counter is forwarded."""
+        from eva.models.manager import _reporting_tqdm
+
+        seen: list[tuple[str, int, int]] = []
+        cls = _reporting_tqdm("repo/name", lambda f, d, t: seen.append((f, d, t)))
+
+        cls(total=6, unit="it").update(2)
+        assert seen == []
+
+        cls(total=1000, unit="B").update(250)
+        assert seen == [("repo/name", 250, 1000)]
+
+    def test_hub_progress_never_exceeds_its_total(self) -> None:
+        """The hub's total is an estimate until every file's metadata lands."""
+        from eva.models.manager import _reporting_tqdm
+
+        seen: list[tuple[str, int, int]] = []
+        cls = _reporting_tqdm("repo/name", lambda f, d, t: seen.append((f, d, t)))
+        cls(total=100, unit="B").update(140)
+        assert seen == [("repo/name", 100, 100)]
 
     def test_describe_carries_catalog_recommendation(self, manager: ModelManager) -> None:
         """Guidance shown in pickers is catalog data, not a UI conditional, so

@@ -264,7 +264,7 @@ something a contributor has to discover by reading source. Each is scheduled; se
 |---|---|---|
 | **No capability/tool port** | The `Tool` port in §1 is designed, not implemented | `permissions.tools.*`, `files.*`, and `general.internet` gate nothing, because nothing exists to gate. Blocks tools, online mode, and vision. |
 | **Plugin capability wiring** | Discovery, manifests, and enable/disable work (ADR-011); registering a plugin's `contributes` into the subsystem registries does not | Plugins can be listed and toggled but cannot add capabilities |
-| **`managed_by="engine"` model lifecycle** | Engine-managed weights (faster-whisper) have no install detection, prefetch, removal, or integrity verification | ASR models always display as "not installed"; first-load downloads are silent and unbounded |
+| **`managed_by="engine"` model integrity** | Engine-managed weights (faster-whisper) have install detection, prefetch, and removal (2026-07-27) but no integrity verification | A snapshot that finalizes corrupt is reported as installed and fails later inside CTranslate2 |
 | **LLM port assumes local weights** | `LLMEngine` exposes `load`/`unload`/`device` | A remote or server-backed provider cannot implement the port honestly. Blocks the provider abstraction. |
 | **Auto-summarization not wired** | `LLMSummarizer` and `summarize_after_turns` exist; nothing invokes them during a live conversation | Long conversations grow the prompt until the recent-turn window truncates it |
 | **Settings is one flat document** | Single pydantic model, strict keys | No structure for per-provider configuration, credentials, or fallback chains |

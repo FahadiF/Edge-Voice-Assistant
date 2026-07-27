@@ -82,6 +82,28 @@ class TestResolution:
         assert voice == "af_heart"  # graceful fallback, never a crash
         assert any("non-native voice" in r.message for r in caplog.records)
 
+    def test_explicit_voice_override_wins(self) -> None:
+        """The M7.3 fix: before it, the language profile's registered voice was
+        returned first and the user's choice was unreachable."""
+        settings = Settings()
+        settings.tts.voice = "af_bella"
+        assert effective_voice(settings, resolve_language(settings)) == "af_bella"
+
+    def test_explicit_voice_override_wins_for_non_english(self) -> None:
+        settings = Settings()
+        settings.conversation.language = "es"
+        assert effective_voice(settings, resolve_language(settings)) == "ef_dora"
+        settings.tts.voice = "af_bella"
+        assert effective_voice(settings, resolve_language(settings)) == "af_bella"
+
+    def test_choosing_the_default_voice_is_honoured(self) -> None:
+        """`af_heart` is both the fallback and a selectable voice: picking it
+        under a non-English language must not silently resolve elsewhere."""
+        settings = Settings()
+        settings.conversation.language = "es"
+        settings.tts.voice = "af_heart"
+        assert effective_voice(settings, resolve_language(settings)) == "af_heart"
+
 
 class TestOrchestratorIntegration:
     def test_orchestrator_speaks_configured_language(self) -> None:

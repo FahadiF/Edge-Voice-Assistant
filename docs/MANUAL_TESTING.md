@@ -167,14 +167,27 @@ eva users delete <user_id>
 
 ```bash
 eva voices list                         # requires the TTS model installed
-eva voices preview af_heart             # writes a WAV file, prints its path
-eva voices use af_heart
+eva voices preview bm_george            # writes a WAV file, prints its path
+eva voices use bm_george
 ```
 Restart and confirm the choice stuck:
 ```bash
-eva voices list                         # '*' should now mark af_heart
+eva voices list                         # '*' should now mark bm_george
 eva run                                 # spoken replies use the new voice
 ```
+
+**Listen to the reply, do not just read the marker.** Until 2026-07-27 the setting
+persisted correctly and every surface displayed it, while synthesis silently used
+`af_heart` — a display-only check passes against the bug. Repeat through the Voices
+page as well; the `active` chip is now resolved server-side.
+
+Round-trip back to the default, which is also a selectable voice:
+```bash
+eva voices use af_heart                 # must be honoured as a choice, not read as "unset"
+```
+And confirm the language default still applies when nothing is chosen — set
+`conversation.language` to `es` with `tts.voice` absent from `settings.json` and
+`eva diagnose` should report `ef_dora`.
 
 ---
 

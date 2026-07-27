@@ -130,4 +130,4 @@ Designed but not yet written, pending the milestones that need them:
 | ADR-031 | Online Mode — connection modes, consent, egress boundary, citations |
 | ADR-032 | Secret storage — OS keychain, never settings files |
 | ADR-033 | Plugin capability wiring — completing ADR-011 |
-| ADR-034 | Engine-managed model lifecycle — install state, prefetch, removal, verification |
+| ADR-034 | Engine-managed model lifecycle — `ModelState`, integrity verification, repair (install state, prefetch, and removal shipped 2026-07-27 as a release fix) |

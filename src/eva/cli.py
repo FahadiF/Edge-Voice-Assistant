@@ -221,11 +221,13 @@ def _cmd_models(args: argparse.Namespace) -> int:
         for info in manager.available():
             installed = manager.is_installed(info.id)
             marker = "*" if info.id in active else " "
-            size = sum(f.size_mb for f in info.files)
-            size_str = f"{size} MB" if size else "—"
+            # `download_mb` covers engine-managed entries, whose weights are
+            # not enumerated as `files` — summing those reported "—" for every
+            # Whisper model.
+            size_str = f"{info.download_mb} MB" if info.download_mb else "—"
             status = "installed" if installed else "available"
-            if info.managed_by == "engine" and not installed:
-                status = "auto (on first use)"
+            if info.managed_by == "bundled":
+                status = "bundled"
             print(
                 f"{marker:2}{info.id:<32} {info.kind:<5} {info.license:<12} {size_str:>8}  {status}"
             )

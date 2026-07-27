@@ -59,7 +59,6 @@ one. See ADR-003 § Model Selection History for the measurements taken so far.
 | E3 | **pre-commit strips Markdown hard line breaks** | `trailing-whitespace` removed an intentional two-space break in README during the documentation milestone. Fix: `args: [--markdown-linebreak-ext=md]`. |
 | E4 | **README test-count badge is hardcoded** | `837 passing` will rot. Either wire it to CI or drop it. |
 | E5 | **`docs/adr/README.md` is hand-maintained** | 28 entries with titles and dates, updated by hand per ADR. Fine now; generate it if the count grows. |
-| E6 | **Add the install-detection symptom to the ADR gap list** | `docs/adr/README.md` describes the engine-managed lifecycle gap abstractly. The concrete symptom — "Speech Recognition — 0/3 installed" while a model is demonstrably running — makes it land. Do this when M1 closes the gap, as part of removing the entry. |
 | E7 | **Subsystem dependency direction is unenforced** | ADR-010's inward-only rule is stated in docs and reviewed by eye. An import-direction test would make it structural. M1 plans one for `acquire`/`verify`; consider generalising it. |
 
 ## Deferred to M1 (not backlog — scheduled)
@@ -67,11 +66,12 @@ one. See ADR-003 § Model Selection History for the measurements taken so far.
 Listed here only so this file is not read as the complete picture:
 
 - `ModelState` / `ModelStatus` lifecycle representation
-- Install detection for engine-managed models (`is_installed()` currently always `False` for ASR)
 - Post-download integrity verification and corruption detection
-- Prefetch with progress reporting for engine-managed models
-- Removal support for engine-managed models
 - `eva models status` diagnostic command
 - CUDA runtime registration decoupled from the LLM adapter
+
+Install detection, prefetch, and removal for engine-managed models shipped early on
+2026-07-27 — the Models page could not install or even see a Whisper model, which
+blocked the release. See CHANGELOG and `docs/M1_READINESS.md`.
 
 See [ROADMAP.md](ROADMAP.md) § M7.3 and the M1 design.

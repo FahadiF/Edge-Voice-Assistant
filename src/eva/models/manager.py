@@ -1,8 +1,14 @@
 """Model manager: install, resolve, and remove models from the catalog.
 
-The only component in the product that touches the network (ADR-008). Files
-download to `<models_dir>/<kind>/<model_id>/` via a temporary `.part` file and
-atomic rename, so an interrupted download never leaves a model half-"installed".
+The only component in the product that touches the network (ADR-008).
+
+Two ownership models live here. Manager-managed files download to
+`<models_dir>/<kind>/<model_id>/` via a temporary `.part` file and atomic
+rename, so an interrupted download never leaves a model half-"installed".
+Engine-managed weights (ASR) belong to the engine's own Hugging Face cache
+under `<models_dir>/<kind>/models--<org>--<repo>/`; the manager reads and
+prefetches that layout rather than duplicating it, so a model installed here
+and one the engine fetched lazily are the same bytes on disk.
 """
 
 from __future__ import annotations
@@ -26,6 +32,46 @@ _DOWNLOAD_ATTEMPTS = 3
 
 ProgressCallback = Callable[[str, int, int], None]
 """(filename, bytes_done, bytes_total) — bytes_total may be 0 if unknown."""
+
+
+def _reporting_tqdm(label: str, progress: ProgressCallback) -> type:
+    """A `tqdm` subclass for `snapshot_download(tqdm_class=…)` that forwards
+    byte counts to `progress` instead of drawing a terminal bar.
+
+    `snapshot_download` builds two bars from this class: a files-completed one
+    and a shared byte counter that every worker thread updates. Only the byte
+    counter is useful here — the file counter would jump 0 → 20 → 100% on a
+    model whose weights live in a single 1.5 GB file — so the unit is checked
+    before reporting. The byte bar is also created with `disable=` derived from
+    the logging level, which switches it off under EVA's default configuration;
+    it is forced on, and its output sent nowhere, because this process reports
+    through the event bus rather than stdout.
+    """
+    from huggingface_hub.utils.tqdm import tqdm as hf_tqdm
+
+    class _Sink:
+        def write(self, _: str) -> int:
+            return 0
+
+        def flush(self) -> None:
+            return None
+
+    class _ReportingTqdm(hf_tqdm):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            kwargs["disable"] = False
+            kwargs["file"] = _Sink()
+            super().__init__(*args, **kwargs)  # type: ignore[no-untyped-call]
+
+        def update(self, n: float | None = 1) -> bool | None:
+            updated = super().update(n)
+            if self.unit == "B":
+                # The total is only an estimate until every file's metadata has
+                # arrived, and the sum of actual sizes can overshoot it.
+                total = int(self.total or 0)
+                progress(label, min(int(self.n), total) if total else int(self.n), total)
+            return updated  # type: ignore[no-any-return]
+
+    return _ReportingTqdm
 
 
 class ModelManager:
@@ -217,23 +263,13 @@ class ModelManager:
         """Prefetch an engine-managed model into the engine's own cache.
 
         The engine would fetch these weights itself on first use; doing it here
-        makes the download explicit, interruptible, and observable, and is what
-        lets the UI offer a Download button instead of a silent multi-minute
-        stall inside the first turn. Because the destination is the engine's
-        cache root, a prefetched model and a lazily-fetched one are the same
-        files — this adds no second copy.
+        makes the download explicit and observable, and is what lets the UI
+        offer a Download button instead of a silent multi-minute stall inside
+        the first turn. Because the destination is the engine's cache root, a
+        prefetched model and a lazily-fetched one are the same files — this
+        adds no second copy.
         """
         from huggingface_hub import snapshot_download
-        from huggingface_hub.utils import tqdm as hf_tqdm
-
-        class _ReportingTqdm(hf_tqdm):  # type: ignore[misc]
-            """Bridges hub download bars onto EVA's ProgressCallback."""
-
-            def update(self, n: float | None = 1) -> bool | None:
-                result = super().update(n)
-                if progress is not None and self.total:
-                    progress(str(self.desc or info.id), int(self.n), int(self.total))
-                return result  # type: ignore[no-any-return]
 
         cache_dir = self._kind_cache_dir(info)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -244,7 +280,7 @@ class ModelManager:
                 repo_id=repo,
                 revision=info.hf_revision or None,
                 cache_dir=str(cache_dir),
-                tqdm_class=_ReportingTqdm if progress is not None else None,
+                tqdm_class=_reporting_tqdm(repo, progress) if progress else None,
             )
         except Exception as exc:  # network, auth, missing repo — all fatal here
             raise ModelError(f"Could not download '{info.id}' from {repo}: {exc}") from exc

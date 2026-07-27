@@ -17,14 +17,19 @@ Baseline verification before M1 (engine-managed model lifecycle) begins.
 
 ## Known technical debt entering M1
 
-Everything M1 is scheduled to fix, plus what it deliberately is not:
+Everything M1 is scheduled to fix, plus what it deliberately is not.
+
+Three rows shipped early: the Models page could not install, detect, or remove
+an engine-managed model at all, which blocked the release. That fix is the
+minimum plumbing only — `ModelState`, integrity verification, repair, and
+`eva models status` are untouched and remain M1's substance.
 
 | Debt | Fixed by |
 |---|---|
-| `is_installed()` always `False` for engine-managed models | M1b |
+| ~~`is_installed()` always `False` for engine-managed models~~ | **shipped 2026-07-27** (release blocker, ahead of M1) |
+| ~~No prefetch — 1.6 GB downloads silently inside `load()`~~ | **shipped 2026-07-27** (release blocker, ahead of M1) |
+| ~~No removal for engine-managed models~~ | **shipped 2026-07-27** (release blocker, ahead of M1) |
 | Engine-managed downloads can finalize corrupt, undetected until engine start | M1b/M1c |
-| No prefetch — 1.6 GB downloads silently inside `load()` | M1c |
-| No removal for engine-managed models | M1c |
 | CUDA registration is a side effect of constructing the LLM | M1a |
 | `load()` reports success, fails later at `encode()` | M1a |
 | Auto-summarization implemented, never wired | *not M1* — ROADMAP backlog |
