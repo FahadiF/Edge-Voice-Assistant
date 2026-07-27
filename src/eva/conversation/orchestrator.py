@@ -398,20 +398,22 @@ class Orchestrator:
     def _asr_prompt(self) -> str | None:
         """Context bias for Whisper decoding (`initial_prompt`).
 
-        Measured to fix proper-noun spelling (e.g. a name mis-transcription)
-        with no spurious injection of unspoken words. Includes the name the
-        user stated this session (so once they say it, later mentions are
-        spelled consistently — this also feeds the identity fix) plus a short
-        hint of the app's own jargon. Returns None before anything is known,
-        so a fresh session adds no bias."""
-        parts = []
-        if self._session_name:
-            parts.append(f"The speaker's name is {self._session_name}.")
-        parts.append(
-            "This is a conversation with Edge Voice Assistant about the "
-            "event log, settings, and diagnostics."
-        )
-        return " ".join(parts)
+        Carries the name the user stated this session, so once they say it,
+        later mentions are spelled consistently (this also feeds the identity
+        fix). Returns None before anything is known, so a fresh session adds
+        no bias.
+
+        A generic hint of the app's own jargon used to be appended here
+        unconditionally, which meant this never actually returned None. It was
+        measured to hurt on real far-field audio: it biases the decoder toward
+        words that were not spoken, which trips the quality thresholds and
+        triggers Whisper's temperature fallback (see `fasterwhisper.py`). On
+        one recording it was echoed back verbatim *as the transcript*. The
+        name bias is kept because it is specific and short; the generic
+        sentence is not worth a false transcript."""
+        if not self._session_name:
+            return None
+        return f"The speaker's name is {self._session_name}."
 
     # ── external control (platform API — same event loop as run()) ──
 

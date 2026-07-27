@@ -21,6 +21,7 @@ class _FakeWhisperModel:
     offline (`local_files_only=True`) load until `cached` is True."""
 
     attempts: ClassVar[list[dict[str, Any]]] = []
+    transcribe_kwargs: ClassVar[dict[str, Any]] = {}
     cached = True
     fail_all = False
 
@@ -32,6 +33,10 @@ class _FakeWhisperModel:
             raise RuntimeError("LocalEntryNotFoundError: not cached")
         if kwargs.get("device") == "cuda":
             raise RuntimeError("CUDA runtime not available")
+
+    def transcribe(self, _audio: Any, **kwargs: Any) -> Any:
+        _FakeWhisperModel.transcribe_kwargs = kwargs
+        return iter(()), type("Info", (), {"language": "en"})()
 
 
 @pytest.fixture(autouse=True)
@@ -76,3 +81,21 @@ def test_total_failure_raises_modelerror() -> None:
     asr = FasterWhisperASR("small", device="cpu")
     with pytest.raises(ModelError, match="Cannot load faster-whisper"):
         asr.load()
+
+
+def test_transcription_makes_a_single_greedy_pass() -> None:
+    """No temperature fallback.
+
+    Whisper's default ladder (0.0 → 0.2 → … → 1.0) re-decodes the whole
+    utterance up to six times when the first pass trips its quality
+    thresholds, which short far-field utterances do routinely. Measured on 14
+    real recordings, that turned ~280 ms into 4835 ms (large-v3-turbo) and
+    3670 ms (small), and the retries hallucinated rather than recovered.
+    """
+    import numpy as np
+
+    asr = FasterWhisperASR("small", device="cpu")
+    asr.transcribe(np.zeros(1600, dtype=np.int16), "en")
+    kwargs = _FakeWhisperModel.transcribe_kwargs
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["beam_size"] == 1

@@ -421,11 +421,15 @@ class TestNormalTurn:
             await drive(orch, bus, script)
             assert orch._session_name == "Fahad"
             assert asr.calls >= 2
-            # The domain hint is always present; the name appears once captured
-            # (turn 1 transcribed without it, turn 2 with it).
-            assert all("Edge Voice Assistant" in (p or "") for p in asr.prompts)
-            assert asr.prompts[0] is not None and "Fahad" not in asr.prompts[0]
+            # No bias until something specific is known: turn 1 sends no
+            # prompt at all, turn 2 carries the captured name.
+            assert asr.prompts[0] is None
             assert asr.prompts[-1] is not None and "Fahad" in asr.prompts[-1]
+            # A generic domain hint used to be appended unconditionally. It
+            # biased the decoder toward words nobody said, which triggered
+            # Whisper's temperature fallback (280 ms → 4835 ms measured) and
+            # was once echoed back verbatim as the transcript. Keep it gone.
+            assert not any("Edge Voice Assistant" in (p or "") for p in asr.prompts)
 
         asyncio.run(scenario())
 

@@ -6,6 +6,45 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-27 — Fix multi-second ASR stalls (Whisper temperature fallback)
+
+**Symptom** `SpeechFinished` → `FinalTranscript` took 13–14 s on some turns, while
+`transcribe()` measured 243–327 ms in isolation and LLM/TTS looked normal.
+
+**Root cause** Whisper's temperature fallback. When the first greedy pass trips
+`compression_ratio_threshold` or `log_prob_threshold`, faster-whisper re-decodes the
+entire utterance at temperature 0.2, 0.4, 0.6, 0.8, 1.0 — up to six full decodes.
+Short far-field utterances trip those thresholds routinely. Measured across 14 real
+recordings, the worst cases were **4835 ms (large-v3-turbo)** and **3670 ms (small)**
+against a ~280 ms baseline, and the retries emitted hallucinated text rather than
+recovering the utterance. Because a partial and a final transcription share one
+`WhisperModel` and CTranslate2 serializes them, a pathological pair stacks — which is
+how one turn reached 13–14 s.
+
+Long-standing (the ladder was always Whisper's default); switching `asr.model` to
+`large-v3-turbo` for the M0 trial made it visible, since each fallback decode costs
+2–4× more on turbo.
+
+**Fixed — `temperature=0.0`** in the faster-whisper adapter: one greedy pass, no
+ladder. A late wrong transcript is worse than a fast one in a conversational loop.
+
+**Fixed — `_asr_prompt()` no longer injects a generic domain hint.** It appended
+"This is a conversation with Edge Voice Assistant about the event log, settings, and
+diagnostics." to *every* transcription, so it never returned `None` as its own
+docstring promised. The hint biased the decoder toward words nobody said, which is
+what tripped the thresholds — and on one recording it was echoed back verbatim **as
+the transcript**. The stated-name bias is kept; it is specific and short.
+
+**Measured after the fix** (14 real recordings, through EVA's adapter, CUDA):
+
+| | before (mean / worst) | after (mean / worst) |
+|---|---|---|
+| `small` | 456 ms / 3670 ms | **215 ms / 424 ms** |
+| `large-v3-turbo` | 767 ms / 4835 ms | **281 ms / 302 ms** |
+
+LLM (455–677 ms, 66–69 tok/s) and TTS (first chunk 1260–3795 ms, RTF 0.49–0.61) are
+unchanged. Barge-in, streaming, and cancellation suites pass.
+
 ### 2026-07-27 — Fix voice selection and the engine-managed model lifecycle
 
 Two release blockers, both long-standing.

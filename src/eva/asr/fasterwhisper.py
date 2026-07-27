@@ -93,6 +93,16 @@ class FasterWhisperASR(ASREngine):
             beam_size=1,  # greedy: ~2x faster than default beam 5; measured quality parity
             condition_on_previous_text=False,  # avoids repetition loops on short utterances
             vad_filter=False,  # VAD already applied upstream
+            # Single greedy pass — no temperature fallback. Whisper's default
+            # ladder (0.0 → 0.2 → … → 1.0) re-decodes the whole utterance up to
+            # six times whenever the first pass trips `compression_ratio` or
+            # `log_prob` thresholds, which short far-field utterances do
+            # routinely. Measured on 14 real recordings: it turned 280 ms into
+            # 4835 ms (turbo) / 3670 ms (small) on the worst cases, and the
+            # retries produced hallucinated text rather than recovering the
+            # utterance. A late, wrong transcript is worse than a fast one, and
+            # this is a conversational assistant with a latency budget.
+            temperature=0.0,
             # Context bias (measured to fix proper-noun spelling — e.g. a name —
             # with no spurious injection of unspoken words). None → no prompt.
             initial_prompt=prompt or None,
