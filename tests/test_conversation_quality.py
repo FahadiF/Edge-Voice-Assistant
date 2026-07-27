@@ -71,7 +71,7 @@ class TestPromptHierarchy:
     def test_helpfulness_over_literalness_guidance(self, store: SQLiteMemoryStore) -> None:
         """'I am not a spreadsheet' class of reply (M5.2 §3): the prompt must
         steer toward doing the task, not defending identity."""
-        system = _system(store)
+        system = _system(store).lower()
         assert "never refuse on the grounds of not being that kind of tool" in system
         assert "what the user is trying to do" in system
 
@@ -299,3 +299,145 @@ class TestPersonaDistinctness:
             system = _system(store, settings)
             assert system.count("Edge Voice Assistant") == 1, pid
             assert "continue the current topic" in system, pid
+
+
+def _system_spoken(
+    store: SQLiteMemoryStore,
+    settings: Settings | None = None,
+    *,
+    spoken: bool,
+    devices: dict[str, str] | None = None,
+) -> str:
+    conv = store.start_conversation()
+    builder = ContextBuilder(
+        settings or Settings(),
+        store,
+        runtime_devices=(lambda: devices) if devices is not None else None,
+    )
+    return builder.build(conv.id, "hi", spoken=spoken).messages[0].content
+
+
+class TestRuntimeAwareness:
+    """EVA must never guess where it is running (M7.3).
+
+    Measured before this: five phrasings of "are you using my GPU?" produced
+    five different answers, three of them wrong — including "your RTX 3060 is
+    free to do what it wants" while both the LLM and ASR were resident on
+    CUDA. The prompt listed model names and the hardware the machine
+    contains, but never which device each component executes on.
+    """
+
+    def test_live_devices_reach_the_prompt(self, store: SQLiteMemoryStore) -> None:
+        system = _system_spoken(
+            store, spoken=False, devices={"llm": "cuda", "asr": "cuda", "tts": "cpu"}
+        )
+        assert "running on the GPU (CUDA)" in system
+        assert "running on the CPU" in system
+
+    def test_each_component_reports_its_own_device(self, store: SQLiteMemoryStore) -> None:
+        """A single shared device string would be a different wrong answer:
+        TTS is CPU-resident even when the LLM and ASR are on the GPU."""
+        settings = Settings()
+        system = _system_spoken(
+            store, settings, spoken=False, devices={"llm": "cuda", "asr": "cuda", "tts": "cpu"}
+        )
+        assert f"LLM model = {settings.llm.model}, running on the GPU (CUDA)" in system
+        assert f"ASR model = {settings.asr.model}, running on the GPU (CUDA)" in system
+        assert f"TTS model = {settings.tts.model}, running on the CPU" in system
+
+    def test_unloaded_components_say_so_rather_than_going_silent(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """`tts.lazy_load` leaves TTS "unloaded" for the first turns. Omitting
+        the device outright is worse than naming the state: with the line
+        simply absent, the model invented one ("text-to-speech is running on
+        the GPU" while it was not loaded at all)."""
+        system = _system_spoken(
+            store, spoken=False, devices={"llm": "cuda", "asr": "cuda", "tts": "unloaded"}
+        )
+        assert f"TTS model = {Settings().tts.model}, running on not loaded yet" in system
+
+    def test_locality_is_stated_not_implied(self, store: SQLiteMemoryStore) -> None:
+        assert "no request is sent to any remote service" in _system(store)
+
+    def test_no_provider_keeps_the_previous_output(self, store: SQLiteMemoryStore) -> None:
+        """Backward compatibility: callers that pass no provider (context
+        preview, benchmarks) get exactly the model-name-only block."""
+        system = _system(store)
+        assert "running on" not in system
+        assert f"LLM model = {Settings().llm.model}" in system
+
+
+class TestWorldFactHonesty:
+    """Uncertainty about the world is handled like uncertainty about the user.
+
+    Measured before this: asked for the weather, EVA answered "it's likely
+    warm and sunny in many parts of Europe" — inferred from the timezone in
+    its own system-facts block. Spoken aloud, the trailing hedge does not
+    undo the assertion.
+    """
+
+    def test_volatile_categories_are_named(self, store: SQLiteMemoryStore) -> None:
+        system = _system(store).lower()
+        for category in ("weather", "news", "prices", "scores", "standings"):
+            assert category in system, category
+
+    def test_inference_and_hedging_are_both_forbidden(self, store: SQLiteMemoryStore) -> None:
+        """Naming the failure modes matters: "don't guess" alone still let
+        the model estimate from the date and hedge with "probably"."""
+        system = _system(store).lower()
+        assert "do not estimate it" in system
+        assert "infer it from the date or location" in system
+        assert "probably" in system
+
+    def test_it_must_not_hand_the_question_back(self, store: SQLiteMemoryStore) -> None:
+        """It asked "who is leading the standings right now?" — pushing the
+        unknown onto the user instead of admitting it."""
+        assert "do not ask the user to supply it" in _system(store).lower()
+
+
+class TestDeliveryStyle:
+    """Spoken and on-screen turns get different formatting rules."""
+
+    def test_spoken_turns_ask_for_brevity_and_prose(self, store: SQLiteMemoryStore) -> None:
+        system = _system_spoken(store, spoken=True).lower()
+        assert "read aloud" in system
+        assert "one to three sentences" in system
+        assert "no markdown" in system
+
+    def test_spoken_turns_forbid_screen_only_phrasing(self, store: SQLiteMemoryStore) -> None:
+        """ "Copy the text and paste it here" is an instruction the user
+        physically cannot follow in a voice conversation."""
+        assert "paste, click, type or look at" in _system_spoken(store, spoken=True)
+
+    def test_spoken_turns_damp_the_closing_question_reflex(self, store: SQLiteMemoryStore) -> None:
+        """Every one of twelve probe replies ended with a follow-up question."""
+        system = _system_spoken(store, spoken=True).lower()
+        assert "only when you genuinely need the answer" in system
+
+    def test_text_turns_still_allow_markdown_and_tables(self, store: SQLiteMemoryStore) -> None:
+        system = _system_spoken(store, spoken=False).lower()
+        assert "markdown is welcome" in system
+        assert "tables" in system
+        assert "read aloud" not in system
+
+    def test_exactly_one_delivery_style_per_turn(self, store: SQLiteMemoryStore) -> None:
+        spoken = _system_spoken(store, spoken=True).lower()
+        text = _system_spoken(store, spoken=False).lower()
+        assert "markdown is welcome" not in spoken
+        assert "no markdown" not in text
+
+    def test_default_is_the_on_screen_style(self, store: SQLiteMemoryStore) -> None:
+        """`spoken` defaults to False so the context-preview endpoint and the
+        benchmarks keep the behaviour they had."""
+        assert "read on screen" in _system(store)
+
+    def test_delivery_style_follows_the_persona(self, store: SQLiteMemoryStore) -> None:
+        """A persona sets tone; it must not talk the model out of the length
+        and formatting limits the output channel imposes."""
+        settings = Settings()
+        settings.conversation.persona = "technical"  # asks for detail and structure
+        system = _system_spoken(store, settings, spoken=True)
+        register_builtin_personas()
+        persona_prompt = persona_registry.get("technical").system_prompt
+        assert system.index(persona_prompt) < system.index("Your reply will be read aloud")

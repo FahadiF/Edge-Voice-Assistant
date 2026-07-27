@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from eva.config.settings import Settings
@@ -54,18 +54,37 @@ _IDENTITY_PREAMBLE = (
 )
 
 _CONVERSATION_GUIDANCE = (
-    "This is a flowing spoken conversation, not isolated questions. Short "
+    "This is a flowing conversation, not isolated questions. Short "
     "fragments, pronouns (it, that, this, them), and incomplete sentences "
     'continue the current topic — if the user says "with rows and '
     'columns" right after discussing a table, extend that table; never '
     "treat a follow-up as an unrelated request. Focus on accomplishing "
     "what the user is trying to do rather than explaining what you are or "
-    "are not. Anything expressible in text — lists, tables, structured "
-    "data, step-by-step plans, calculations — you can and should produce; "
-    "never refuse on the grounds of not being that kind of tool. When a "
-    "request is ambiguous, make the most helpful reasonable assumption, or "
-    "ask one short clarifying question. Stay concise by default; expand "
-    "when detail genuinely helps."
+    "are not. Never refuse on the grounds of not being that kind of tool: "
+    "anything expressible in words, you can produce. When a request is "
+    "ambiguous, make the most helpful reasonable assumption, or ask one "
+    "short clarifying question."
+)
+
+# Delivery-specific style. Exactly one of these is included per turn, chosen
+# by `build(spoken=...)`. Splitting them is what lets the same assistant be
+# terse and markdown-free out loud while still producing tables and fenced
+# code on screen — one prompt cannot honestly ask for both.
+_SPOKEN_STYLE = (
+    "Your reply will be read aloud. Give the direct answer in one to three "
+    "sentences and then stop — no preamble, no recap, no summary of what "
+    "you just said. Go longer only when the user asks for more. Use plain "
+    "flowing prose: no markdown, no headings, no bullet or numbered lists, "
+    "and no tables unless the user explicitly asks for one. Never refer to "
+    "anything on screen or tell the user to paste, click, type or look at "
+    "something. Ask a follow-up question only when you genuinely need the "
+    "answer to help — otherwise simply stop talking."
+)
+
+_TEXT_STYLE = (
+    "Your reply is read on screen. Markdown is welcome where it genuinely "
+    "helps — lists, tables and fenced code blocks are all fine. Stay "
+    "concise by default; expand when detail genuinely helps."
 )
 
 _CAPABILITY_GUIDANCE = (
@@ -81,7 +100,13 @@ _CAPABILITY_GUIDANCE = (
     "unless it is given to you here or earlier in this conversation; if you "
     "do not have it, say so plainly and ask, rather than guessing or "
     "inventing one. Do not contradict something you already established this "
-    "conversation."
+    "conversation. The same rule covers the world, not just the user: you "
+    "have no live data, so anything that changes over time — weather, news, "
+    "prices, scores, standings, schedules, who currently holds a position — "
+    "is something you do not know. Say that in one short sentence and stop. "
+    "Do not estimate it, do not infer it from the date or location, do not "
+    'hedge it with "probably" or "usually", and do not ask the user to '
+    "supply it."
 )
 
 
@@ -119,12 +144,18 @@ class ContextBuilder:
         retriever: MemoryRetriever | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         profile_store: UserProfileStore | None = None,
+        runtime_devices: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
         self._settings = settings
         self._memory = memory
         self._retriever = retriever
         self._embedding_provider = embedding_provider
         self._profile_store = profile_store
+        # Called once per build() rather than captured at construction: a
+        # component reports "unloaded" until it has actually loaded (and
+        # `tts.lazy_load` defers that past the first turns), so a snapshot
+        # taken here would be wrong for the whole session.
+        self._runtime_devices = runtime_devices
         self._last_retrieval_ms: int | None = None
         self._last_retrieval_top_score: float | None = None
 
@@ -141,14 +172,28 @@ class ContextBuilder:
         return self._last_retrieval_top_score
 
     def build(
-        self, conversation_id: str, user_text: str, *, session_name: str | None = None
+        self,
+        conversation_id: str,
+        user_text: str,
+        *,
+        session_name: str | None = None,
+        spoken: bool = False,
     ) -> BuiltContext:
+        """Compose the turn's messages.
+
+        `spoken` selects the delivery-style block: True for a turn that came
+        in over the microphone and will be read aloud, False for typed input
+        rendered on screen. It defaults to False so every existing caller
+        (context preview, benchmarks) keeps the on-screen behaviour it had.
+        """
         language = resolve_language(self._settings)
         persona = resolve_persona(self._settings)
         profile = self._profile_store.active() if self._profile_store is not None else None
         trimmed_sections: list[str] = []
 
-        system_prompt = self._compose_system_prompt(persona.system_prompt, language.prompt_note)
+        system_prompt = self._compose_system_prompt(
+            persona.system_prompt, language.prompt_note, spoken=spoken
+        )
         if profile is not None:
             system_prompt = self._apply_profile_preferences(system_prompt, profile)
         # The user's name is a durable fact, so it goes in the always-present
@@ -252,16 +297,22 @@ class ContextBuilder:
                 merged.append((role, content))
         return merged
 
-    def _compose_system_prompt(self, persona_prompt: str, language_note: str) -> str:
+    def _compose_system_prompt(
+        self, persona_prompt: str, language_note: str, *, spoken: bool = False
+    ) -> str:
         """Identity → conversational behavior → capability honesty → persona
-        style → language. Behavior before persona so continuity/helpfulness
-        rules hold for every persona; persona after so its voice is the last
-        (most salient) style instruction (ADR-021 Amendment 3)."""
+        style → delivery style → language. Behavior before persona so
+        continuity/helpfulness rules hold for every persona; persona after so
+        its voice is the last (most salient) style instruction (ADR-021
+        Amendment 3). Delivery style comes after the persona deliberately: a
+        persona may set tone, but it must not talk the model out of the
+        length and formatting limits the output channel imposes."""
         parts = [
             _IDENTITY_PREAMBLE,
             _CONVERSATION_GUIDANCE,
             _CAPABILITY_GUIDANCE,
             persona_prompt,
+            _SPOKEN_STYLE if spoken else _TEXT_STYLE,
         ]
         if language_note:
             parts.append(language_note)
@@ -271,12 +322,49 @@ class ContextBuilder:
         """Backend details the model may cite only when explicitly asked a
         technical question (see `_IDENTITY_PREAMBLE`) — a separate system
         message so identity/persona text never has to name a concrete
-        model."""
+        model.
+
+        Each component's *live* execution device is included when a provider
+        was supplied. Without it the model had only model names and the
+        hardware the machine happens to contain, so "are you using my GPU?"
+        was answered by guessing — measured at three wrong answers out of
+        five phrasings, including "your RTX 3060 is free" while both the LLM
+        and ASR were resident on CUDA.
+        """
         s = self._settings
+        devices = self._runtime_devices() if self._runtime_devices is not None else {}
+
+        def component(label: str, model: str, key: str) -> str:
+            device = devices.get(key)
+            if not device:
+                return f"{label} = {model}"
+            # Spelled out in the words the user will ask in. Reporting the raw
+            # "cuda" left the model to connect it to the GPU named in the
+            # system-information block, and a 4B model does not reliably make
+            # that leap: asked "is my RTX 3060 being used?" it answered "no,
+            # I'm running on your CPU" with "running on CUDA" in its context.
+            # "unloaded" is a real state (lazy TTS, pre-preload) and is said
+            # plainly — an omitted device gets guessed at instead.
+            human = {
+                "cuda": "the GPU (CUDA)",
+                "rocm": "the GPU (ROCm)",
+                "cpu": "the CPU",
+                "unloaded": "not loaded yet",
+            }.get(device, device)
+            return f"{label} = {model}, running on {human}"
+
+        parts = [
+            component("LLM model", s.llm.model, "llm"),
+            component("ASR model", s.asr.model, "asr"),
+            component("TTS model", s.tts.model, "tts"),
+            f"VAD engine = {s.vad.engine}",
+        ]
         return (
-            "Technical backend details (share only if explicitly asked): "
-            f"LLM model = {s.llm.model}; ASR model = {s.asr.model}; "
-            f"TTS model = {s.tts.model}; VAD engine = {s.vad.engine}."
+            "Technical backend details (share only if explicitly asked, and "
+            "quote them exactly rather than guessing): "
+            + "; ".join(parts)
+            + ". Every one of these runs on this machine; no request is sent "
+            "to any remote service."
         )
 
     def _apply_profile_preferences(self, system_prompt: str, profile: UserProfile) -> str:

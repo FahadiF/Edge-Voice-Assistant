@@ -6,6 +6,53 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-27 — Conversational quality: runtime awareness, honesty, voice-first replies
+
+Prompt composition only (ADR-021 Amendment 4). No architecture change; the
+`ContextBuilder` gains one optional constructor argument and one optional `build()`
+parameter, both defaulting to the previous behaviour.
+
+**Fixed — EVA guessed where it was running.** The prompt carried model *names* and the
+hardware the machine *contains*, but never the device each component executes on.
+Asked "are you using my GPU?" in five phrasings it gave five different answers, three
+wrong — including "your RTX 3060 is free to do what it wants" while the LLM and ASR
+were both on CUDA. `ContextBuilder` now takes a `runtime_devices` callable (wired in
+`build_assistant` to the live `.device` attributes, the same state diagnostics
+publishes) and folds it into the technical block. Evaluated per turn, because
+components report `unloaded` until they load. Devices are spelled the way users ask —
+"the GPU (CUDA)", not "cuda" — because a 4B model did not reliably connect the two.
+
+**Fixed — invented world facts.** The honesty rule covered personal details only, so a
+weather question produced "it's likely warm and sunny in many parts of Europe",
+inferred from the timezone in EVA's own facts block. The rule now names the volatile
+categories and the three observed failure modes: estimating, inferring from date or
+location, and handing the question back to the user.
+
+**Added — delivery-aware style.** `build(spoken=...)` selects one of two style blocks;
+the orchestrator passes `spoken=text is None`. Spoken turns get prose, one to three
+sentences, no markdown or tables, no on-screen phrasing, and a follow-up question only
+when the answer is needed. Typed composer turns keep markdown, tables and fenced code.
+The style block sits *after* the persona so a persona can set tone without overriding
+the channel's limits.
+
+**Changed** — the Amendment 3 clause "lists, tables, structured data … you can and
+should produce" is narrowed to "never refuse on the grounds of not being that kind of
+tool: anything expressible in words, you can produce". It was written to stop
+"I am not a spreadsheet" refusals (M5.2 §3) and that intent is preserved and still
+tested; the encouragement to emit tables aloud is not.
+
+**Measured** — twelve probes, real prompt, real model, before → after:
+
+| | before | after |
+|---|---|---|
+| runtime questions correct | 2/5 | **5/5** |
+| reply length, mean / max | 55 / 145 words | **24 / 75 words** |
+| replies ending in a question | 12/12 | **3/12** |
+| weather / standings | invented | "I don't know…" in 6 and 12 words |
+
+Cost: +173 system-prompt tokens; `LLM (first sentence ready)` 135 → 148 ms, within
+run-to-run noise. ASR, TTS and full-generation timings unchanged.
+
 ### 2026-07-27 — Fix engine restart leaving every model resident in VRAM
 
 **Symptom** After stopping and restarting the engine in the same process, the whole

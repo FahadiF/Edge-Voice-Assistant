@@ -738,6 +738,10 @@ class Orchestrator:
                 self._conversation.id,
                 user_text,
                 session_name=self._session_name,
+                # `text` is set only by the composer (M5.3); a microphone turn
+                # arrives as audio and will be spoken back, so it gets the
+                # brief, markdown-free style instead of the on-screen one.
+                spoken=text is None,
             )
         )
         messages = built_context.messages

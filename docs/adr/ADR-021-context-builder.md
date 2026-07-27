@@ -234,3 +234,62 @@ Amendment 2 unchanged):
 name-appears-once, guidance presence, fragment/pronoun antecedents in the
 message list, persona pairwise distinctness, and memory-block ordering.
 Behavioral validation against the real LLM is in MANUAL_TESTING §15.
+
+## Amendment 4 (M7.3, 2026-07-27): live runtime facts and delivery-aware style
+
+Two findings from a product review, both measured against the real LLM.
+
+**Runtime facts were absent, so the model guessed.** The technical block
+listed model *names*, and the system-information block listed hardware the
+machine *contains* — neither said where inference actually runs. Asked "are
+you using my GPU?" in five phrasings, EVA gave five different answers, three
+wrong, including *"your RTX 3060 is free to do what it wants"* while both the
+LLM and ASR were resident on CUDA. For a product whose entire claim is "it
+runs on your machine", that is the most damaging possible wrong answer.
+
+`ContextBuilder` now takes an optional `runtime_devices` callable and folds
+each component's live device into the technical block. Three details matter:
+
+- It is a **callable, evaluated per turn**, not a value captured at
+  construction — every adapter reports `unloaded` until it loads, and
+  `tts.lazy_load` defers that past the first turns.
+- Devices are spelled in the words users ask in — `the GPU (CUDA)`, not
+  `cuda`. A 4B model did not reliably connect "CUDA" to the RTX 3060 named
+  elsewhere in its own context.
+- `unloaded` is stated plainly rather than omitted. An absent line was
+  filled in by invention ("text-to-speech is running on the GPU" when it was
+  not loaded at all).
+
+The provider is optional and defaults to `None`, which reproduces the old
+model-name-only block exactly — the context-preview endpoint and the
+benchmarks are unchanged.
+
+**One prompt cannot honestly ask for both speech and screen.** Amendment 3's
+guidance told the model that "lists, tables, structured data … you can and
+should produce" — written to kill "I am not a spreadsheet" refusals, but in
+a voice-first product it encouraged the least speakable output format. Replies
+also ran to 145 words (≈60 s of speech) and ended with a follow-up question
+12 times out of 12.
+
+`build(spoken=...)` now selects exactly one delivery-style block, placed
+*after* the persona: a persona may set tone, but it must not talk the model
+out of the limits the output channel imposes. The orchestrator passes
+`spoken=text is None` — typed composer input keeps markdown, tables and
+fenced code; microphone turns get prose, one to three sentences, and a
+follow-up question only when the answer is genuinely needed. The parameter
+defaults to `False`, so every other caller keeps the on-screen behaviour.
+
+**World-fact honesty.** The capability block forbade inventing *personal*
+details but said nothing about the world, so EVA answered a weather question
+with *"it's likely warm and sunny in many parts of Europe"* — inferred from
+the timezone in its own facts block. Spoken aloud, a trailing hedge does not
+undo the assertion. The rule now names the volatile categories and the three
+specific failure modes observed: estimating, inferring from date or location,
+and handing the question back to the user.
+
+Measured before → after, same twelve probes, same model: runtime questions
+correct 2/5 → 5/5; reply length mean 55 → 24 words, max 145 → 75; replies
+ending in a question 12/12 → 3/12; weather and standings answered "I don't
+know" in 6 and 12 words. Cost: +173 system-prompt tokens, and +13 ms on
+`LLM (first sentence ready)` — the prefill-sensitive metric — which is
+within run-to-run noise.

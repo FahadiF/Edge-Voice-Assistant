@@ -227,6 +227,12 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
         retriever=retriever,
         embedding_provider=embedding,
         profile_store=profiles,
+        # Read live on every turn, not snapshotted: each adapter reports
+        # "unloaded" until it loads, and resolves cuda vs cpu only then. This
+        # is the same state the diagnostics snapshot publishes — the prompt
+        # was the one consumer that never got it, which is why EVA guessed
+        # when asked whether it was using the GPU.
+        runtime_devices=lambda: {"llm": llm.device, "asr": asr.device, "tts": tts.device},
     )
 
     orchestrator: Orchestrator | None = None
