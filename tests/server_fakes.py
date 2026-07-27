@@ -36,12 +36,16 @@ from eva.tts.base import TTSEngine
 
 class FakeASR(ASREngine):
     device = "cpu"
+    loaded = False
 
     def __init__(self, text: str = "hello") -> None:
         self.text = text
 
-    def load(self) -> None: ...
-    def unload(self) -> None: ...
+    def load(self) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
 
     def transcribe(
         self, audio: Frame, language: str | None = None, *, prompt: str | None = None
@@ -51,9 +55,13 @@ class FakeASR(ASREngine):
 
 class FakeLLM(LLMEngine):
     device = "cpu"
+    loaded = False
 
-    def load(self) -> None: ...
-    def unload(self) -> None: ...
+    def load(self) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
 
     def stream(
         self,
@@ -69,9 +77,13 @@ class FakeLLM(LLMEngine):
 
 class FakeTTS(TTSEngine):
     device = "cpu"
+    loaded = False
 
-    def load(self) -> None: ...
-    def unload(self) -> None: ...
+    def load(self) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
 
     def synthesize(
         self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None

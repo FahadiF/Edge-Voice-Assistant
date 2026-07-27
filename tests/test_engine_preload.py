@@ -130,3 +130,43 @@ class TestMicrophonePermissionAudio:
         assert assistant.audio.started_mode == "playback-only"
         # stop() must stop the playback-only stream too.
         assert assistant._audio_started is True
+
+
+class TestStopReleasesModels:
+    """Engine restart in one process (M7.3).
+
+    `Assistant.stop()` used to leave every model resident: the adapters sit in
+    reference cycles, so dropping the assistant frees nothing until a full
+    `gc.collect()`. Measured on the reference platform, an engine holds 4541 MB
+    of 6144 MB VRAM and stop() released *zero*. The next engine then loaded on
+    top — 9 GB requested on a 6 GB card — and WDDM silently paged GPU memory to
+    host RAM, slowing every GPU stage ~30x with no error and no device
+    fallback. ASR went from ~300 ms to ~13 s per utterance.
+    """
+
+    def test_stop_unloads_every_model_engine(self, app_paths: AppPaths) -> None:
+        assistant = build_fake_assistant(Settings(), app_paths)
+        assistant.preload()
+        assert assistant.llm.loaded and assistant.asr.loaded and assistant.tts.loaded
+
+        assistant.stop()
+
+        assert not assistant.llm.loaded, "LLM weights still resident after stop()"
+        assert not assistant.asr.loaded, "ASR weights still resident after stop()"
+        assert not assistant.tts.loaded, "TTS weights still resident after stop()"
+
+    def test_one_failing_unload_does_not_abort_teardown(self, app_paths: AppPaths) -> None:
+        """Teardown is exception-proof (ADR-026): a component that cannot
+        unload must not strand the other two in VRAM."""
+        assistant = build_fake_assistant(Settings(), app_paths)
+        assistant.preload()
+
+        def boom() -> None:
+            raise RuntimeError("driver wedged")
+
+        assistant.llm.unload = boom  # type: ignore[method-assign]
+
+        assistant.stop()
+
+        assert not assistant.asr.loaded
+        assert not assistant.tts.loaded

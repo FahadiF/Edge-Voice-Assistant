@@ -91,6 +91,30 @@ class Assistant:
         if self._audio_started:
             self.audio.stop()
         self.memory.close()
+        self.unload_models()
+
+    def unload_models(self) -> None:
+        """Release model memory now, rather than whenever the GC gets to it.
+
+        Dropping the `Assistant` is not enough: the adapters sit in reference
+        cycles, so refcounting never frees them and the weights survive until
+        a full `gc.collect()`. Measured on the reference platform, an engine
+        holds 4541 MB of 6144 MB VRAM and `stop()` + dropping the reference
+        released *zero* of it.
+
+        That is invisible until the engine is restarted in the same process,
+        at which point the second engine loads on top of the first: 9 GB
+        requested on a 6 GB card. Windows' WDDM driver does not fail that
+        allocation — it silently pages GPU memory to system RAM, and every
+        GPU stage slows by roughly 30x with no error and no device fallback.
+        Nulling each adapter's model drops the weights by refcount even while
+        the adapter itself is still cycle-trapped.
+        """
+        for name, engine in (("llm", self.llm), ("asr", self.asr), ("tts", self.tts)):
+            try:
+                engine.unload()
+            except Exception:  # teardown must never abort on one component
+                logger.exception("Unloading '%s' failed; continuing", name)
 
     def preload(self) -> None:
         """Load all models up front so the first turn has no load latency.

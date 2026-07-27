@@ -6,6 +6,47 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-27 — Fix engine restart leaving every model resident in VRAM
+
+**Symptom** After stopping and restarting the engine in the same process, the whole
+pipeline slowed ~30×. `SpeechFinished` → `FinalTranscript` went from ~300 ms to
+12.7–12.9 s, and final-ASR → TTS from 1.03 s to 32.0 s. A cold start was always fast;
+only restarts were affected. No error, no device fallback — `eva.log` reported
+`loaded (cuda, int8, offline)` in both cases.
+
+**Root cause** `Assistant.stop()` stopped the orchestrator, audio, and memory but
+never unloaded a model, and `ServerState.stop_engine()` only dropped its reference.
+The adapters sit in reference cycles, so refcounting frees nothing and the weights
+survive until a full `gc.collect()`. Measured on the reference platform:
+
+```
+engine #1 loaded                4541 / 6144 MB
+after stop() + drop reference   4541 / 6144 MB   <- released 0 MB
+after explicit gc.collect()       97 / 6144 MB
+```
+
+The next engine therefore loaded on top of the previous one: **9082 MB requested on a
+6144 MB card**. Windows' WDDM driver does not fail that allocation — it silently pages
+GPU memory to system RAM, which slows every GPU stage by roughly 30× while still
+reporting CUDA. That is why both ASR *and* the LLM degraded together, and why a
+partial transcription scheduled every 1.216 s started being skipped.
+
+**Fixed** `Assistant.stop()` now calls a new `unload_models()` that nulls each
+adapter's model, dropping the weights by refcount even while the adapter itself is
+still cycle-trapped. Teardown stays exception-proof (ADR-026): a component that fails
+to unload is logged and the rest still release.
+
+**Verified** — same process, engine #1 → stop → engine #2, with 14 real recordings:
+
+| | VRAM at load | after `stop()` | ASR mean / max |
+|---|---|---|---|
+| engine #1 (cold) | 4541 MB | 105 MB | 324 ms / 873 ms |
+| engine #2 (restart) | **4549 MB** | 105 MB | **281 ms / 306 ms** |
+
+Peak on restart is now 4549 MB rather than 9082 MB, and post-restart ASR is
+indistinguishable from cold. LLM (449 ms, first sentence 135 ms) and TTS (first chunk
+1200 ms, RTF 0.56) unchanged.
+
 ### 2026-07-27 — Fix multi-second ASR stalls (Whisper temperature fallback)
 
 **Symptom** `SpeechFinished` → `FinalTranscript` took 13–14 s on some turns, while

@@ -663,6 +663,29 @@ Privacy):
 
 ## 16. Stability, lifecycle & performance (M5.5)
 
+### 16.0 Engine restart must not slow the pipeline down
+
+A cold start is not enough — this failure mode only appears on the **second** engine
+start in one process, and it reports no error. Until 2026-07-27 `stop()` released no
+VRAM at all, so the next engine loaded on top of the previous one (9 GB requested on
+a 6 GB card) and Windows silently paged GPU memory to host RAM: every GPU stage ran
+~30× slower while still logging `loaded (cuda, int8)`.
+
+With the engine running, watch VRAM in a second terminal:
+
+```bash
+nvidia-smi --query-gpu=memory.used --format=csv --loop=1
+```
+
+- [ ] Stop the engine from the web UI. VRAM drops to near-idle (~100 MB) **within a
+      couple of seconds** — not at some later moment, and not only when the process
+      exits.
+- [ ] Start it again. Peak VRAM is about the same as the first start, not double.
+- [ ] Hold a conversation. `SpeechFinished` → `FinalTranscript` on the Diagnostics
+      page stays in the same range as before the restart (~250–450 ms). A jump to
+      double-digit seconds means the weights were not released.
+- [ ] Repeat the stop/start cycle three times. Latency must not creep upward.
+
 ### 16.1 Startup progress
 
 From the web UI (engine stopped), click **Start engine**:
