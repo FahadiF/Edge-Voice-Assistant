@@ -2,7 +2,7 @@
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/tests-837%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-911%20passing-brightgreen)
 
 # Edge Voice Assistant (EVA)
 
@@ -49,29 +49,37 @@ Requires **Python 3.12+** on **Windows 10/11** or **Linux**.
 ```bash
 git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
 cd Edge-Voice-Assistant
+python -m venv .venv && .venv\Scripts\Activate.ps1   # Linux: source .venv/bin/activate
 pip install -e .
-eva setup
+eva run
 ```
 
-`eva setup` detects your hardware, installs the matching LLM runtime, and downloads a
-model set that fits your GPU (roughly 3–5 GB). It is interactive and explains each step.
+On first run, `eva run` detects that setup is incomplete and launches a guided wizard —
+it shows your hardware, the recommended runtime, and the models to download (roughly
+3–5 GB), asks once to confirm, then installs everything and starts the assistant.
+No further commands needed.
+
+> **Linux users:** install PortAudio first: `sudo apt-get install -y libportaudio2`
 
 ### Running EVA
 
-You can run EVA in your local web browser or as a native desktop app. Use the following primary commands to operate the assistant smoothly:
+Once set up, you can run EVA in your browser or as a native desktop app:
 
 | Command | Purpose |
 |---|---|
-| `eva start` | Starts the local server and web UI on `127.0.0.1:8765` for browser access |
-| `eva stop` | Stops the running voice assistant local server |
-| `eva desktop` | Launches the native desktop application with a system tray |
+| `eva start` | Start the server in the background; open `http://127.0.0.1:8765` in your browser |
+| `eva stop` | Stop the background server |
+| `eva-desktop` | Launch the native desktop app with a system tray icon |
+
+> **Desktop app prerequisite:** `pip install -e ".[desktop]"` (one-time, adds the `pywebview` and `pystray` extras)
 
 **Additional Utilities:**
 
 | Command | Purpose |
 |---|---|
-| `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
-| `eva diagnose` | Hardware and configuration report |
+| `eva serve` | Start the server in the **foreground** (useful for development; Ctrl+C to stop) |
+| `eva status` | Show whether the background server is running |
+| `eva diagnose` | Hardware, configuration, and paths report |
 | `eva devices` | List audio input/output devices |
 | `eva listen` | Live voice-activity monitor — helpful for microphone troubleshooting |
 
@@ -192,9 +200,10 @@ Knowing these up front is more useful than discovering them:
 
 Milestones M0–M6 are complete: full-duplex audio core, streaming pipeline, platform API,
 memory and personalization, web UI, and desktop shell. M7 (conversation experience) is in
-progress.
+progress — M7.1 (speech-synchronized text display) is done; M7.2 (ASR accuracy
+investigation) is complete with implementation pending.
 
-Planned next, in order: documentation and architecture stabilization → performance work
+Planned next, in order: architecture stabilization → ASR model upgrade → performance work
 (GPU speech synthesis, prompt-cache reuse) → a unified provider abstraction making local
 and remote models interchangeable → an **optional, off-by-default** online mode with
 search, retrieval, and citations.
