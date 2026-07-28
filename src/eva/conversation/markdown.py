@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Callable
+from typing import Any
 
 # ── inline transforms (paired constructs, applied to a fixpoint) ──
 _IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
@@ -128,3 +130,38 @@ class MarkdownSpeechFilter:
 def markdown_to_speech(text: str) -> str:
     """Whole-text convenience wrapper (single-shot callers and tests)."""
     return MarkdownSpeechFilter().convert(text)
+
+
+def speakable_end(text: str, chunker_factory: Callable[[], Any]) -> int:
+    """Offset in `text` after the last character that will be spoken.
+
+    Everything beyond it is display-only — a trailing code fence, table, or
+    other segment the speech filter drops — so a speech-paced view may reveal
+    it as soon as its cursor arrives, without ever showing unspoken prose
+    ahead of playback (ADR-028). Returns 0 when nothing in `text` is
+    speakable, and `len(text)` when the text ends on spoken words.
+
+    Recomputed from the finished text with the same chunker and filter the
+    speak worker used, so the offset lands exactly where the worker's last
+    marker left the cursor. `chunker_factory` is injected rather than
+    imported to keep this module free of a dependency on the chunker.
+    """
+    chunker = chunker_factory()
+    segments = chunker.feed(text)
+    tail = chunker.flush()
+    if tail:
+        segments = [*segments, tail]
+    speech_filter = MarkdownSpeechFilter()
+    offset = 0
+    last_spoken_end = 0
+    for segment in segments:
+        # Locate each segment in the source rather than summing lengths: the
+        # chunker strips the whitespace between segments, so lengths alone
+        # drift out of alignment with the text. This mirrors exactly how the
+        # web store advances its cursor (`indexOf` from the last position),
+        # so the offset produced here lands where that cursor will land.
+        found = text.find(segment, offset)
+        offset = (found + len(segment)) if found >= 0 else (offset + len(segment))
+        if speech_filter.convert(segment):
+            last_spoken_end = offset
+    return last_spoken_end

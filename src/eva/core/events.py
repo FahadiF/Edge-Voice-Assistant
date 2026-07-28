@@ -26,6 +26,24 @@ logger = logging.getLogger(__name__)
 _SUBSCRIBER_QUEUE_SIZE = 256
 
 
+FinishReason = Literal["stop", "length", "abort", "error"]
+"""Why generation ended.
+
+- `stop`   — the model emitted its end-of-turn token: the reply is complete.
+- `length` — the `max_tokens` ceiling was hit: the reply is CUT OFF mid-thought.
+- `abort`  — `should_abort()` went True (barge-in, supersede): deliberately stopped.
+- `error`  — the adapter raised.
+
+`length` is the one that must never be mistaken for `stop`. Before M7.3 the
+adapter discarded llama.cpp's reason entirely, so a reply truncated at 512
+tokens was stored, replayed into the next turn's history, and described by the
+model as complete — which is exactly what a user then argues with.
+
+Lives in `core` rather than `eva.llm` so `core.events` can name it without
+importing a subsystem: dependencies point inward (ADR-010).
+"""
+
+
 class Event(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -115,6 +133,15 @@ class LlmFinished(Event):
     tokens: int
     ttft_ms: int
     duration_ms: int
+    finish_reason: FinishReason = "stop"
+    """Why generation ended. `length` means `text` is cut off mid-thought —
+    consumers must not present it as a finished answer (M7.3)."""
+    speakable_end: int = -1
+    """Character offset in `text` after which nothing will ever be spoken
+    (a trailing code fence, table, or other display-only content). -1 when
+    not computed. Lets a speech-paced view reveal that tail as soon as the
+    cursor reaches it, instead of holding it back until the turn ends —
+    it cannot run ahead of speech, because it is never spoken (ADR-028)."""
 
 
 # ── TTS / playback ──

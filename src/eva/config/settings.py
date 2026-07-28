@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eva.core.errors import ConfigError
 
-SETTINGS_SCHEMA_VERSION = 3
+SETTINGS_SCHEMA_VERSION = 4
 
 
 class _Section(BaseModel):
@@ -185,7 +185,9 @@ class ConversationSettings(_Section):
         0.9, description="Nucleus-sampling probability mass"
     )
     max_tokens: Annotated[int, Field(ge=16, le=8192)] = Field(
-        512, description="Maximum tokens per reply"
+        2048,
+        description="Maximum tokens per reply (a ceiling, not a reservation — "
+        "spoken answers stop far earlier)",
     )
     stop_sequences: list[str] = Field(
         default_factory=list, description="Extra sequences that end generation"
@@ -500,6 +502,9 @@ def _migrate_raw(raw: Any) -> Any:
         raw.setdefault("permissions", {}).setdefault("privacy", {})["remember_conversations"] = (
             remember
         )
+    conversation = raw.get("conversation")
+    if isinstance(conversation, dict) and conversation.get("max_tokens") == 512:
+        conversation["max_tokens"] = 2048
     tts = raw.get("tts")
     if isinstance(tts, dict) and tts.get("voice") == "af_heart":
         tts["voice"] = None

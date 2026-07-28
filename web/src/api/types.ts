@@ -455,6 +455,10 @@ export interface LlmFinishedEvent {
   tokens: number;
   ttft_ms: number;
   duration_ms: number;
+  /** "stop" | "length" | "abort" | "error" — `length` means `text` is cut off. */
+  finish_reason: string;
+  /** Offset after which nothing in `text` is ever spoken; -1 if not computed. */
+  speakable_end: number;
 }
 export interface TtsStartedEvent { epoch: number }
 export interface TtsAudioReadyEvent { epoch: number; ttfa_ms: number }

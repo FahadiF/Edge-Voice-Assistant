@@ -6,11 +6,12 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
 from eva.core.errors import ModelError
+from eva.core.events import FinishReason
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 
 logger = logging.getLogger(__name__)
@@ -101,12 +102,19 @@ class LlamaCppLLM(LLMEngine):
             with self._infer_lock:
                 self._llama = None
 
+    def count_tokens(self, text: str) -> int:
+        """Exact count from llama.cpp's tokenizer (falls back to the port's
+        estimate before the model is loaded)."""
+        if self._llama is None:
+            return super().count_tokens(text)
+        return len(self._llama.tokenize(text.encode("utf-8"), add_bos=False, special=False))
+
     def stream(
         self,
         messages: list[ChatMessage],
         params: GenerationParams,
         should_abort: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Generator[str, None, FinishReason]:
         if self._llama is None:
             self.load()
         assert self._llama is not None
@@ -119,13 +127,21 @@ class LlamaCppLLM(LLMEngine):
                 stop=list(params.stop) or None,
                 stream=True,
             )
+            # llama.cpp reports why it stopped on the LAST chunk only, and
+            # "length" (the max_tokens ceiling) is indistinguishable from a
+            # finished reply unless it is read. Default to "stop" so an
+            # adapter or stub that never reports one is treated as complete.
+            reason: FinishReason = "stop"
             try:
                 for chunk in completion:
                     if should_abort():
                         logger.debug("LLM generation aborted")
-                        break
-                    delta = chunk["choices"][0]["delta"]
-                    token = delta.get("content")
+                        return "abort"
+                    choice = chunk["choices"][0]
+                    reported = choice.get("finish_reason")
+                    if reported in ("stop", "length"):
+                        reason = reported
+                    token = choice["delta"].get("content")
                     if token:
                         yield token
             finally:
@@ -133,3 +149,8 @@ class LlamaCppLLM(LLMEngine):
                 close = getattr(completion, "close", None)
                 if close is not None:
                     close()
+            if reason == "length":
+                logger.info(
+                    "Generation hit the %d-token ceiling; reply is truncated", params.max_tokens
+                )
+            return reason

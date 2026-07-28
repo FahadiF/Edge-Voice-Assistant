@@ -35,7 +35,7 @@ from eva.conversation.system_info import system_facts_block
 from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, validate_chat_messages
 from eva.memory.base import MemoryRetriever, MemoryStore, UserProfileStore
-from eva.memory.models import MemorySearchResult, UserProfile
+from eva.memory.models import MemorySearchResult, MemoryTurn, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +70,20 @@ _CONVERSATION_GUIDANCE = (
 # by `build(spoken=...)`. Splitting them is what lets the same assistant be
 # terse and markdown-free out loud while still producing tables and fenced
 # code on screen — one prompt cannot honestly ask for both.
+
+# Deliberately NOT compressed. A 27-token trim of this block was measured
+# against the same probe set and could not be shown to preserve behaviour,
+# so it was reverted: this block is the only thing arguing against the
+# model's defaults, and 27 tokens is not worth weakening it.
 _SPOKEN_STYLE = (
     "Your reply will be read aloud. Give the direct answer in one to three "
     "sentences and then stop — no preamble, no recap, no summary of what "
     "you just said. Go longer only when the user asks for more. Use plain "
-    "flowing prose: no markdown, no headings, no bullet or numbered lists, "
-    "and no tables unless the user explicitly asks for one. Never refer to "
+    "flowing prose: no markdown, no headings, no bullet or numbered lists. "
+    "If the user explicitly asks for something written out — code, a table, "
+    "a file — say in one sentence what you produced and then give the whole "
+    "thing in full; it is shown on screen, not read aloud, so never abridge "
+    "it or describe it instead of writing it. Never refer to "
     "anything on screen or tell the user to paste, click, type or look at "
     "something. Ask a follow-up question only when you genuinely need the "
     "answer to help — otherwise simply stop talking."
@@ -127,12 +135,39 @@ class ContextTrace:
     summary_text_preview: str | None
     recent_turn_count: int
     trimmed_sections: tuple[str, ...]
+    history_tokens: int = 0
+    """Tokens the recent-turn window contributes to the prompt."""
+    history_turns_dropped: int = 0
+    """Oldest turns dropped to fit the context budget (M7.3)."""
 
 
 @dataclass(frozen=True)
 class BuiltContext:
     messages: list[ChatMessage]
     trace: ContextTrace
+
+
+def _estimate_tokens(text: str) -> int:
+    """Coarse fallback when no tokenizer is available (~4 chars/token)."""
+    return max(1, len(text) // 4)
+
+
+#: Per-message chat-template overhead (role markers and turn delimiters that
+#: the GGUF Jinja template adds around every message). Qwen/Llama/Mistral all
+#: sit at three to four tokens; four is used so the estimate errs toward
+#: dropping one turn too many rather than overflowing the window.
+_PER_MESSAGE_OVERHEAD_TOKENS = 4
+
+#: Headroom for tokenizer drift between the estimate here and what llama.cpp
+#: actually builds. Small next to an 8k window, large enough to absorb the
+#: difference on a long prompt.
+_CONTEXT_SAFETY_TOKENS = 128
+
+#: Appended to a stored assistant turn that hit the token ceiling, so the
+#: model reads its own half-finished reply as unfinished. Deliberately a
+#: statement of fact with no instruction attached: telling the model to
+#: apologise produces a turn that is mostly apology.
+_TRUNCATION_NOTE = "[This reply was cut off by the length limit — it is incomplete.]"
 
 
 class ContextBuilder:
@@ -145,6 +180,7 @@ class ContextBuilder:
         embedding_provider: EmbeddingProvider | None = None,
         profile_store: UserProfileStore | None = None,
         runtime_devices: Callable[[], Mapping[str, str]] | None = None,
+        token_counter: Callable[[str], int] | None = None,
     ) -> None:
         self._settings = settings
         self._memory = memory
@@ -156,6 +192,10 @@ class ContextBuilder:
         # `tts.lazy_load` defers that past the first turns), so a snapshot
         # taken here would be wrong for the whole session.
         self._runtime_devices = runtime_devices
+        # Exact when the engine supplies its tokenizer; a chars/4 estimate
+        # otherwise. Only ever used to DROP history, so an estimate that runs
+        # slightly high costs a turn of context, never a context overflow.
+        self._token_counter = token_counter or _estimate_tokens
         self._last_retrieval_ms: int | None = None
         self._last_retrieval_top_score: float | None = None
 
@@ -247,7 +287,13 @@ class ContextBuilder:
         system_sections.append(self._technical_facts_block())
         combined_system_prompt = "\n\n".join(system_sections)
 
-        turn_pairs = [(turn.speaker, turn.text) for turn in recent_turns]
+        kept_turns, history_tokens, dropped = self._fit_history(
+            recent_turns, combined_system_prompt, user_text
+        )
+        if dropped:
+            trimmed_sections.append("history")
+
+        turn_pairs = [(turn.speaker, self._render_turn(turn)) for turn in kept_turns]
         turn_pairs.append(("user", user_text))
         messages: list[ChatMessage] = [
             ChatMessage(role="system", content=combined_system_prompt),
@@ -270,10 +316,92 @@ class ContextBuilder:
             retrieved_memories=tuple(memory_trace),
             summary_included=summary_text is not None,
             summary_text_preview=summary_text[:80] if summary_text else None,
-            recent_turn_count=len(recent_turns),
+            recent_turn_count=len(kept_turns),
+            history_tokens=history_tokens,
+            history_turns_dropped=dropped,
             trimmed_sections=tuple(trimmed_sections),
         )
         return BuiltContext(messages=messages, trace=trace)
+
+    def _render_turn(self, turn: MemoryTurn) -> str:
+        """A stored turn as the model should read it.
+
+        A reply that hit the token ceiling is replayed with a one-line note.
+        Without it the model sees its own half-finished code as if it had
+        ended deliberately and answers "yes, that is complete" — which is
+        exactly what happened before M7.3. The note is factual and carries no
+        instruction to apologise; it exists so that "is it complete?" can be
+        answered truthfully and "continue" has something to continue from.
+        """
+        if turn.speaker == "assistant" and turn.metadata.get("finish_reason") == "length":
+            return f"{turn.text}\n\n{_TRUNCATION_NOTE}"
+        return turn.text
+
+    def _fit_history(
+        self, turns: list[MemoryTurn], system_prompt: str, user_text: str
+    ) -> tuple[list[MemoryTurn], int, int]:
+        """Trim the recent-turn window to what the context window can hold.
+
+        `max_history_turns` alone bounds the *count*, not the size: twenty
+        ordinary turns are a few hundred tokens, but a handful of generated
+        code artifacts is thousands, and raising `max_tokens` made that
+        reachable. Overflowing llama.cpp's window is not a graceful
+        degradation — it is an error or silent truncation of the system
+        prompt, which is where every behavioural rule lives.
+
+        Budget: context, less the generation allowance, the system prompt,
+        the current utterance, per-message template overhead and a safety
+        margin. Turns are
+        then admitted NEWEST first, so the most recent exchange always
+        survives and only the oldest are dropped. Memory and summary are left
+        exactly as composed — they are already budgeted by their own char
+        limits, and trimming them here would undo ADR-021's ordering.
+        """
+        budget = (
+            self._settings.llm.context_length
+            - self._settings.conversation.max_tokens
+            - self._token_counter(system_prompt)
+            - self._token_counter(user_text)
+            - 2 * _PER_MESSAGE_OVERHEAD_TOKENS  # system + current user
+            - _CONTEXT_SAFETY_TOKENS
+        )
+        if budget <= 0:
+            # The prompt alone does not fit. Dropping history cannot help, and
+            # sending nothing is worse than sending the current utterance.
+            logger.warning(
+                "System prompt plus generation allowance exceeds the %d-token context; "
+                "dropping all history",
+                self._settings.llm.context_length,
+            )
+            return [], 0, len(turns)
+
+        kept: list[MemoryTurn] = []
+        used = 0
+        for turn in reversed(turns):
+            cost = self._token_counter(self._render_turn(turn)) + _PER_MESSAGE_OVERHEAD_TOKENS
+            if used + cost > budget:
+                break
+            used += cost
+            kept.append(turn)
+        kept.reverse()
+
+        # The window must open on a user turn: every chat template rejects a
+        # leading assistant message (validate_chat_messages enforces it), and
+        # trimming an odd number of turns can leave one exposed.
+        while kept and kept[0].speaker != "user":
+            used -= self._token_counter(self._render_turn(kept[0])) + _PER_MESSAGE_OVERHEAD_TOKENS
+            kept.pop(0)
+
+        dropped = len(turns) - len(kept)
+        if dropped:
+            logger.info(
+                "History trimmed to fit context: kept %d of %d turns (%d tokens of %d available)",
+                len(kept),
+                len(turns),
+                used,
+                budget,
+            )
+        return kept, used, dropped
 
     def _normalize_alternation(
         self, turn_pairs: Sequence[tuple[str, str]]

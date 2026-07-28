@@ -27,6 +27,14 @@ export interface LiveTurn {
    * position on which one is displayed — that is the view's policy
    * (`ui.sync_text_to_speech`). */
   spokenChars: number;
+  /** Offset after which nothing in `assistantText` will ever be spoken —
+   * a trailing code fence, table, or other display-only content. Published
+   * on `LlmFinished`. Null until then. Once the cursor reaches it there is
+   * no unspoken prose left to hold back, so the remainder is revealed
+   * immediately rather than waiting for the turn to end (M7.3). */
+  speakableEnd: number | null;
+  /** Why generation stopped. `length` means `assistantText` is cut off. */
+  finishReason: string;
   cancelled: boolean;
   cancelReason: string | null;
   startedAt: number;
@@ -204,6 +212,8 @@ export const useWsStore = create<WsState>((set, get) => ({
             finalTranscript: null,
             assistantText: "",
             spokenChars: 0,
+            speakableEnd: null,
+            finishReason: "stop",
             cancelled: false,
             cancelReason: null,
             startedAt: now,
@@ -232,11 +242,29 @@ export const useWsStore = create<WsState>((set, get) => ({
       case "LlmFinished": {
         const turn = get().liveTurn;
         if (!turn || turn.epoch !== data.epoch) return;
-        // Authoritative full text (tokens can be missed across reconnects).
-        // `spokenChars` deliberately does NOT jump to the end here: generation
-        // finishes long before the speech does, and that gap is the entire
-        // problem M7.1 addresses.
-        set({ liveTurn: { ...turn, assistantText: data.text as string } });
+        {
+          // Authoritative full text (tokens can be missed across reconnects).
+          // `spokenChars` still does NOT jump to the end for spoken prose —
+          // generation finishes long before speech does, and that gap is the
+          // whole point of M7.1. Only never-spoken trailing content moves.
+          const assistantText = data.text as string;
+          const speakableEnd = (data.speakable_end as number) ?? -1;
+          set({
+            liveTurn: {
+              ...turn,
+              assistantText,
+              finishReason: (data.finish_reason as string) ?? "stop",
+              speakableEnd: speakableEnd >= 0 ? speakableEnd : null,
+              // Nothing after `speakableEnd` is ever spoken, so revealing it
+              // cannot put prose ahead of playback. Covers the code-only
+              // reply, where no sentence marker will ever arrive.
+              spokenChars:
+                speakableEnd >= 0 && turn.spokenChars >= speakableEnd
+                  ? assistantText.length
+                  : turn.spokenChars,
+            },
+          });
+        }
         return;
       }
       case "TtsSentenceStarted": {
@@ -256,7 +284,15 @@ export const useWsStore = create<WsState>((set, get) => ({
             : // Not found: tokens were dropped (a saturated subscriber queue)
               // or normalized. Advance by length so the reveal keeps moving.
               Math.min(turn.spokenChars + spoken.length, turn.assistantText.length);
-        set({ liveTurn: { ...turn, spokenChars } });
+        set({
+          liveTurn: {
+            ...turn,
+            spokenChars:
+              turn.speakableEnd !== null && spokenChars >= turn.speakableEnd
+                ? turn.assistantText.length
+                : spokenChars,
+          },
+        });
         return;
       }
       case "TurnCancelled": {

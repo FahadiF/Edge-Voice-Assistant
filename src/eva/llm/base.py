@@ -10,12 +10,13 @@ barge-in cut generation mid-sentence instead of finishing a stale reply.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from eva.core.errors import InvalidChatSequenceError
+from eva.core.events import FinishReason as FinishReason
 
 
 class ChatMessage(BaseModel):
@@ -76,11 +77,27 @@ class LLMEngine(ABC):
     def unload(self) -> None:
         """Release model resources (hot-swap support)."""
 
+    def count_tokens(self, text: str) -> int:
+        """Token count for `text` under this model's tokenizer.
+
+        The default is a coarse chars/4 estimate so adapters need not
+        implement it; engines that can tokenize exactly should override.
+        Used by the Context Builder to keep the assembled prompt plus the
+        generation allowance inside the model's context window.
+        """
+        return max(1, len(text) // 4)
+
     @abstractmethod
     def stream(
         self,
         messages: list[ChatMessage],
         params: GenerationParams,
         should_abort: Callable[[], bool],
-    ) -> Iterator[str]:
-        """Yield response text incrementally; honor `should_abort` per token."""
+    ) -> Generator[str, None, FinishReason]:
+        """Yield response text incrementally; honor `should_abort` per token.
+
+        RETURNS (via `StopIteration.value`, i.e. `return` in the generator
+        body) the `FinishReason`. Callers that only iterate keep working —
+        a generator with a bare `return` yields `None`, which the caller
+        treats as `stop`.
+        """

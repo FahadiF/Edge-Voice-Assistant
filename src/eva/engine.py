@@ -233,6 +233,9 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
         # was the one consumer that never got it, which is why EVA guessed
         # when asked whether it was using the GPU.
         runtime_devices=lambda: {"llm": llm.device, "asr": asr.device, "tts": tts.device},
+        # The model's own tokenizer, so the history budget measures what
+        # llama.cpp will actually build rather than a chars/4 guess.
+        token_counter=llm.count_tokens,
     )
 
     orchestrator: Orchestrator | None = None

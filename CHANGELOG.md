@@ -6,6 +6,72 @@ first release onward.
 
 ## [Unreleased]
 
+### 2026-07-28 — Generation limits, truncation honesty, and trailing display reveal
+
+A voice request for a single-file HTML page was cut off three times in a row and
+then described by EVA as "complete and ready to run". All three attempts stopped at
+byte-identical text, which is what proved a deterministic cap rather than
+cancellation or transport.
+
+**Fixed — `finish_reason` was discarded.** `llamacpp.stream()` read the token delta
+and ignored the reason llama.cpp reports on the final chunk, so a reply truncated at
+the ceiling was indistinguishable from a finished one. The port now returns a
+`FinishReason` (`stop` / `length` / `abort` / `error`) as the generator's return
+value; `LlmFinished` carries it, the assistant turn is persisted with
+`metadata={"finish_reason": "length"}` (no schema migration — `MemoryTurn.metadata`
+already existed), and the Context Builder replays such a turn with a one-line factual
+note. Asked "is the code complete?" after a real truncation, EVA now answers *"No,
+the code I provided is incomplete because it got cut off in the middle of the CSS
+styles."*
+
+**Changed — `conversation.max_tokens` 512 → 2048**, with a v3 → v4 settings migration
+(`save_settings` writes every field, so existing installs carry 512 explicitly and
+would keep truncating). Benchmarked on the reference platform:
+
+| cap | short question | artifact |
+|---|---|---|
+| 512 | 7 tok, `stop`, 374 ms | 512 tok, **length**, no `</html>` |
+| 1024 | 7 tok, `stop`, 371 ms | 1024 tok, **length**, no `</html>` |
+| **2048** | 7 tok, `stop`, **374 ms** | **1964 tok, `stop`, complete** |
+
+The cap is a ceiling, not a reservation: short answers are byte-identical and
+equally fast at every setting. A hand-tuned value is left alone by the migration.
+
+**Added — a real token budget for conversation history.** `max_history_turns` bounds
+the turn *count*, not their size; a few 2000-token artifacts could push an 8192-token
+window into overflow, which corrupts or drops the system prompt. `ContextBuilder`
+now takes a `token_counter` (wired to llama.cpp's own tokenizer, chars/4 fallback)
+and admits turns **newest first** against context − generation allowance − system
+prompt − current utterance − template overhead − safety margin. Memory and summary
+composition is untouched. Measured across five consecutive ~2000-token artifact
+turns: prompts peaked at 5439 of a 6144 ceiling and the budget dropped 2 then 6 of
+the oldest turns — no overflow.
+
+**Fixed — trailing display-only content stayed hidden.** `spokenChars` only advances
+on `TtsSentenceStarted`, and a code fence emitted after the last spoken sentence
+never gets a marker, so it was invisible for 13 seconds until the turn ended.
+`LlmFinished` now carries `speakable_end` — the offset after which nothing is ever
+spoken — computed with the same chunker and filter the speak worker used. The web
+store reveals that tail once the cursor reaches it. ADR-028 is unweakened: unspoken
+*prose* is still held back, because the revealed region is by definition never
+spoken.
+
+**Changed — the spoken style now permits an explicitly requested artifact.** It read
+"no markdown … no tables unless the user explicitly asks", which did not cover code
+fences: over voice the model *described* a page in 62 tokens instead of writing it.
+It now says to give a one-sentence summary and then the whole thing, since the block
+is shown rather than read. Measured after: 1824 tokens, `stop`, complete `</html>`,
+an 11-word spoken preamble, and no code in the speech stream.
+
+Deferred, recorded in `docs/BACKLOG.md`: exact mid-generation continuation (A9 — after
+a truncation "continue" regenerates the artifact rather than resuming mid-stream) and
+the first-chunk length finding (A8).
+
+Unchanged: ASR, barge-in, streaming, text/audio synchronization, typed-chat markdown
+and tables, and fenced code remaining excluded from TTS. Steady-state benchmark ASR
+788/791 ms, LLM first sentence 142/389 ms, TTS first chunk 1382/4364 ms.
+
+
 ### 2026-07-27 — Conversational quality: runtime awareness, honesty, voice-first replies
 
 Prompt composition only (ADR-021 Amendment 4). No architecture change; the

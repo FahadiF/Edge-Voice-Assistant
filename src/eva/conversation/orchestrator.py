@@ -64,12 +64,13 @@ from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.history import ConversationTurn, pair_turns
 from eva.conversation.identity import extract_stated_name
 from eva.conversation.language import effective_asr_language, effective_voice, resolve_language
-from eva.conversation.markdown import MarkdownSpeechFilter
+from eva.conversation.markdown import MarkdownSpeechFilter, speakable_end
 from eva.core.events import (
     BargeInDetected,
     BargeInLatencyMeasured,
     EventBus,
     FinalTranscript,
+    FinishReason,
     LlmFinished,
     LlmSentence,
     LlmStarted,
@@ -415,6 +416,19 @@ class Orchestrator:
             return None
         return f"The speaker's name is {self._session_name}."
 
+    def _make_chunker(self) -> SentenceChunker:
+        """One place the chunker is configured.
+
+        `speakable_end()` re-segments the finished reply to find where spoken
+        content ends, and it must use the identical settings the live pipeline
+        used or the two disagree about where the last spoken segment ended.
+        """
+        return SentenceChunker(
+            min_chars=self._settings.conversation.sentence_min_chars,
+            max_chars=self._settings.conversation.sentence_max_chars,
+            first_chunk_min_chars=self._settings.conversation.first_sentence_min_chars,
+        )
+
     # ── external control (platform API — same event loop as run()) ──
 
     async def interrupt(self) -> bool:
@@ -583,7 +597,9 @@ class Orchestrator:
         except Exception:
             logger.exception("Auto-titling conversation failed (left untitled)")
 
-    def _store_turns(self, user_text: str, reply: str) -> None:
+    def _store_turns(
+        self, user_text: str, reply: str, finish_reason: FinishReason = "stop"
+    ) -> None:
         """Persist the completed exchange and — when an embedding provider is
         wired — embed both turns immediately so semantic retrieval can find
         them in later conversations (M5.4: nothing embedded new turns before,
@@ -597,7 +613,13 @@ class Orchestrator:
                 self._conversation.id, "user", user_text, language=self._language_code
             ),
             self._memory.add_turn(
-                self._conversation.id, "assistant", reply, language=self._language_code
+                self._conversation.id,
+                "assistant",
+                reply,
+                language=self._language_code,
+                # Only recorded when it is not the ordinary case, so existing
+                # turns and every other reason keep an empty metadata dict.
+                metadata={"finish_reason": "length"} if finish_reason == "length" else None,
             ),
         ]
         if self._embedding is None:
@@ -746,6 +768,8 @@ class Orchestrator:
         )
         messages = built_context.messages
 
+        finish_reason: FinishReason = "stop"
+
         def produce() -> None:
             def push(item: str | None) -> None:
                 # A blocking put (not put_nowait) applies real backpressure to
@@ -759,14 +783,27 @@ class Orchestrator:
                     except TimeoutError:
                         logger.warning("Token queue backpressure timeout; dropping token")
 
+            nonlocal finish_reason
+            stream = self._llm.stream(
+                messages, self._params, should_abort=lambda: self._controller.is_stale(epoch)
+            )
             try:
-                for token in self._llm.stream(
-                    messages, self._params, should_abort=lambda: self._controller.is_stale(epoch)
-                ):
+                # Driven by hand rather than `for`: the FinishReason arrives as
+                # the generator's return value, and a `for` loop swallows it.
+                # An adapter that returns nothing is treated as "stop".
+                while True:
+                    try:
+                        token = next(stream)
+                    except StopIteration as done:
+                        finish_reason = done.value or "stop"
+                        break
                     push(token)
             except Exception:
                 logger.exception("LLM generation failed")
+                finish_reason = "error"
             finally:
+                with contextlib.suppress(Exception):
+                    stream.close()
                 push(None)
 
         producer = asyncio.create_task(asyncio.to_thread(produce))
@@ -916,11 +953,7 @@ class Orchestrator:
         speaker = asyncio.create_task(speak_worker())
 
         # ── token consumer ──
-        chunker = SentenceChunker(
-            min_chars=self._settings.conversation.sentence_min_chars,
-            max_chars=self._settings.conversation.sentence_max_chars,
-            first_chunk_min_chars=self._settings.conversation.first_sentence_min_chars,
-        )
+        chunker = self._make_chunker()
         reply_parts: list[str] = []
         token_count = 0
         ttft_ms = 0
@@ -977,13 +1010,23 @@ class Orchestrator:
             return TurnMetrics(
                 epoch=epoch, asr_ms=asr_ms, ttft_ms=ttft_ms, tokens=token_count, cancelled=True
             )
+        if finish_reason == "length":
+            logger.warning(
+                "Turn %d truncated at the %d-token ceiling", epoch, self._params.max_tokens
+            )
         self._bus.publish(
             LlmFinished(
-                epoch=epoch, text=reply, tokens=token_count, ttft_ms=ttft_ms, duration_ms=llm_ms
+                epoch=epoch,
+                text=reply,
+                tokens=token_count,
+                ttft_ms=ttft_ms,
+                duration_ms=llm_ms,
+                finish_reason=finish_reason,
+                speakable_end=speakable_end(reply, self._make_chunker),
             )
         )
         if reply:
-            await asyncio.to_thread(self._store_turns, user_text, reply)
+            await asyncio.to_thread(self._store_turns, user_text, reply, finish_reason)
             if not self._conversation_titled:
                 # First completed exchange: auto-title the conversation
                 # (M5.4 §2). Runs while TTS playback is still draining, so

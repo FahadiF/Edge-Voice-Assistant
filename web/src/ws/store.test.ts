@@ -66,6 +66,105 @@ describe("WebSocket store reducers", () => {
     expect(useWsStore.getState().liveTurn?.assistantText).toBe("Hello there");
   });
 
+  describe("trailing display-only reveal (M7.3)", () => {
+    // Measured from a real session: a spoken preamble followed by a fenced
+    // code block left the code invisible for 13 seconds, because the cursor
+    // only advances on TtsSentenceStarted and no marker ever fires for a
+    // segment the speech filter drops. Revealing it cannot put prose ahead
+    // of playback — it is never spoken.
+    const PROSE = "Here is the file. ";
+    const FENCE = "```";
+    const CODE = [FENCE + "html", "<p>hi</p>", FENCE].join("\n");
+    const FULL = PROSE + CODE;
+
+    it("reveals a trailing code block once the last spoken sentence starts", () => {
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({ type: "LlmToken", data: { epoch: 1, token: FULL } });
+      s.handleMessage({
+        type: "LlmFinished",
+        data: {
+          epoch: 1,
+          text: FULL,
+          tokens: 9,
+          ttft_ms: 5,
+          duration_ms: 9,
+          finish_reason: "stop",
+          speakable_end: "Here is the file.".length,
+        },
+      });
+      // Generation finished first; the prose has not been spoken yet.
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(0);
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 1, text: "Here is the file." },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(FULL.length);
+    });
+
+    it("reveals a code-only reply immediately, since no marker will ever fire", () => {
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({
+        type: "LlmFinished",
+        data: {
+          epoch: 1,
+          text: CODE,
+          tokens: 9,
+          ttft_ms: 5,
+          duration_ms: 9,
+          finish_reason: "stop",
+          speakable_end: 0,
+        },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(CODE.length);
+    });
+
+    it("still holds back unspoken prose (ADR-028 is not weakened)", () => {
+      const s = useWsStore.getState();
+      const text = "Hi there. All good.";
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({ type: "LlmToken", data: { epoch: 1, token: text } });
+      s.handleMessage({
+        type: "LlmFinished",
+        data: {
+          epoch: 1,
+          text,
+          tokens: 4,
+          ttft_ms: 5,
+          duration_ms: 9,
+          finish_reason: "stop",
+          speakable_end: text.length,
+        },
+      });
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe(0);
+      s.handleMessage({
+        type: "TtsSentenceStarted",
+        data: { epoch: 1, index: 1, text: "Hi there." },
+      });
+      // Only the first sentence — the second is generated but unheard.
+      expect(useWsStore.getState().liveTurn?.spokenChars).toBe("Hi there.".length);
+    });
+
+    it("records a length-truncated generation", () => {
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "TurnStarted", data: { epoch: 1 } });
+      s.handleMessage({
+        type: "LlmFinished",
+        data: {
+          epoch: 1,
+          text: "cut off",
+          tokens: 2048,
+          ttft_ms: 5,
+          duration_ms: 9,
+          finish_reason: "length",
+          speakable_end: 7,
+        },
+      });
+      expect(useWsStore.getState().liveTurn?.finishReason).toBe("length");
+    });
+  });
+
   describe("speech-synchronized reveal (M7.1, ADR-028)", () => {
     /** Streams two sentences, then reports them spoken one at a time. */
     function generateTwoSentences() {
