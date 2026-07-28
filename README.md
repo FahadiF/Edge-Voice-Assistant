@@ -51,20 +51,29 @@ git clone https://github.com/FahadiF/Edge-Voice-Assistant.git
 cd Edge-Voice-Assistant
 pip install -e .
 eva setup
-eva run
 ```
 
 `eva setup` detects your hardware, installs the matching LLM runtime, and downloads a
 model set that fits your GPU (roughly 3–5 GB). It is interactive and explains each step.
-`eva run` starts the conversation.
+
+### Running EVA
+
+You can run EVA in your local web browser or as a native desktop app. Use the following primary commands to operate the assistant smoothly:
+
+| Command | Purpose |
+|---|---|
+| `eva start` | Starts the local server and web UI on `127.0.0.1:8765` for browser access |
+| `eva stop` | Stops the running voice assistant local server |
+| `eva desktop` | Launches the native desktop application with a system tray |
+
+**Additional Utilities:**
 
 | Command | Purpose |
 |---|---|
 | `eva diagnose` | Hardware and configuration report |
 | `eva devices` | List audio input/output devices |
-| `eva listen` | Live voice-activity monitor — start here when the microphone misbehaves |
 | `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
-| `eva desktop` | Native desktop window with system tray |
+| `eva listen` | Live voice-activity monitor — helpful for microphone troubleshooting |
 
 Full instructions: **[docs/INSTALLATION.md](docs/INSTALLATION.md)** ·
 Something not working? **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
