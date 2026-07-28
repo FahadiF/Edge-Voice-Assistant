@@ -70,9 +70,9 @@ You can run EVA in your local web browser or as a native desktop app. Use the fo
 
 | Command | Purpose |
 |---|---|
+| `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
 | `eva diagnose` | Hardware and configuration report |
 | `eva devices` | List audio input/output devices |
-| `eva serve` | REST + WebSocket API and web UI on `127.0.0.1:8765` |
 | `eva listen` | Live voice-activity monitor — helpful for microphone troubleshooting |
 
 Full instructions: **[docs/INSTALLATION.md](docs/INSTALLATION.md)** ·
