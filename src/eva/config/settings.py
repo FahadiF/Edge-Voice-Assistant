@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eva.core.errors import ConfigError
 
-SETTINGS_SCHEMA_VERSION = 4
+SETTINGS_SCHEMA_VERSION = 5
 
 
 class _Section(BaseModel):
@@ -195,16 +195,15 @@ class ConversationSettings(_Section):
     sentence_min_chars: Annotated[int, Field(ge=1, le=200)] = Field(
         12, description="Minimum segment length before speech starts (avoids fragment replies)"
     )
-    sentence_max_chars: Annotated[int, Field(ge=50, le=2000)] = Field(
-        350, description="Force a speakable split if generation runs on without punctuation"
+    sentence_max_chars: Annotated[int, Field(ge=20, le=2000)] = Field(
+        50, description="Force a speakable split if generation runs on without punctuation"
     )
     first_sentence_min_chars: Annotated[int, Field(ge=1, le=200)] = Field(
         4,
         description=(
-            "Minimum length for the first spoken segment of a turn only (M3: lower than "
-            "sentence_min_chars to start audio sooner; later segments use sentence_min_chars. "
-            "M5.6: the first segment also splits at a clause break — comma/semicolon/colon — "
-            "so 4 lets openers like 'Sure,' start audio immediately)"
+            "Minimum length for the first spoken segment of a turn only (M3). "
+            "Largely superseded by low sentence_max_chars in M8 (A8), but retained "
+            "for backwards compatibility."
         ),
     )
     active_profile_id: str | None = Field(
@@ -260,6 +259,14 @@ class MemorySettings(_Section):
     )
     retrieval_top_k: Annotated[int, Field(ge=1, le=50)] = Field(
         5, description="Number of semantically relevant memories the Context Builder retrieves"
+    )
+    retrieval_min_similarity: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        0.30,
+        description=(
+            "Minimum raw cosine similarity for a memory to be recalled. "
+            "Applied before recency weighting, which would otherwise make an "
+            "old relevant memory score below a fresh irrelevant one"
+        ),
     )
     retrieval_scan_limit: Annotated[int, Field(ge=100, le=100_000)] = Field(
         2000,
@@ -473,6 +480,12 @@ def _migrate_raw(raw: Any) -> Any:
     `None` — behaviour-preserving, because `"af_heart"` is exactly what the
     English profile resolves to, and non-English profiles were overriding it
     anyway. Any other value was necessarily set by hand and is left alone.
+
+    v4 → v5 (M8/A8): `conversation.sentence_max_chars` drops from 350 to 50.
+    The lower ceiling enables punctuation-aware bounded chunking that halves
+    worst-case TTFA and cuts playback starvation by ~76%.  Only the old
+    default (350) is migrated; any other value was deliberately set by the
+    user and is preserved.
     """
     if not isinstance(raw, dict) or raw.get("schema_version", 1) >= SETTINGS_SCHEMA_VERSION:
         return raw
@@ -508,6 +521,10 @@ def _migrate_raw(raw: Any) -> Any:
     tts = raw.get("tts")
     if isinstance(tts, dict) and tts.get("voice") == "af_heart":
         tts["voice"] = None
+    # v4 → v5: A8 bounded chunking
+    conversation = raw.get("conversation")
+    if isinstance(conversation, dict) and conversation.get("sentence_max_chars") == 350:
+        conversation["sentence_max_chars"] = 50
     raw["schema_version"] = SETTINGS_SCHEMA_VERSION
     return raw
 

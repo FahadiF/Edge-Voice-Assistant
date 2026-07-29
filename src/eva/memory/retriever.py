@@ -8,12 +8,16 @@ drop-in replacement if scale ever demands it — see ADR-020's rationale.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import numpy as np
 
 from eva.memory.base import MemoryRetriever, MemoryStore
-from eva.memory.models import MemorySearchResult
+from eva.memory.models import MemorySearchResult, Speaker
+
+logger = logging.getLogger(__name__)
 
 
 class NumpyMemoryRetriever(MemoryRetriever):
@@ -25,12 +29,16 @@ class NumpyMemoryRetriever(MemoryRetriever):
         pinned_boost: float = 0.3,
         favorite_boost: float = 0.15,
         scan_limit: int = 2000,
+        min_similarity: float = -1.0,  # -1 = keep everything; policy comes from settings
+        speakers: Sequence[Speaker] | None = None,
     ) -> None:
         self._store = store
         self._half_life_days = recency_half_life_days
         self._pinned_boost = pinned_boost
         self._favorite_boost = favorite_boost
         self._scan_limit = scan_limit
+        self._min_similarity = min_similarity
+        self._speakers = frozenset(speakers) if speakers else None
 
     def retrieve(
         self,
@@ -59,6 +67,12 @@ class NumpyMemoryRetriever(MemoryRetriever):
         # contract), so the dot product alone is cosine similarity.
         similarities = matrix @ query
 
+        # Descending similarity order is required by the duplicate filter
+        # below, which keeps whichever copy of a repeated text it sees first.
+        order = np.argsort(-similarities)
+        turn_ids = [turn_ids[i] for i in order]
+        similarities = similarities[order]
+
         # One bulk fetch, not one query per candidate (measured: an N+1
         # get_turn() loop here made retrieval scale linearly with total
         # embedded turns instead of staying flat — see eva.benchmark.memory).
@@ -66,10 +80,25 @@ class NumpyMemoryRetriever(MemoryRetriever):
 
         now = datetime.now(UTC)
         scored: list[MemorySearchResult] = []
+        seen_texts: set[str] = set()
         for turn_id, similarity in zip(turn_ids, similarities, strict=True):
             turn = turns_by_id.get(turn_id)
             if turn is None:
                 continue  # forgotten between embeddings_for() and here
+            # Thresholded on raw similarity, never on the blended score: the
+            # recency factor scales relevance by age, so a single cutoff
+            # applied afterwards would reject old-but-relevant memories and
+            # admit recent-but-irrelevant ones.
+            if float(similarity) < self._min_similarity:
+                continue
+            if self._speakers is not None and turn.speaker not in self._speakers:
+                continue
+            # Keeping the first occurrence retains the highest-scoring copy,
+            # because candidates are traversed in descending similarity.
+            normalized = " ".join(turn.text.split()).casefold()
+            if normalized in seen_texts:
+                continue
+            seen_texts.add(normalized)
             age_days = max((now - turn.created_at).total_seconds() / 86400.0, 0.0)
             recency = 0.5 ** (age_days / self._half_life_days) if self._half_life_days > 0 else 1.0
             boost = (self._pinned_boost if turn.pinned else 0.0) + (

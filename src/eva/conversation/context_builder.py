@@ -27,6 +27,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from eva.config.settings import Settings
 from eva.conversation.language import resolve_language
@@ -145,6 +146,33 @@ class ContextTrace:
 class BuiltContext:
     messages: list[ChatMessage]
     trace: ContextTrace
+
+
+def _age_phrase(then: datetime, now: datetime) -> str:
+    """How long ago, in the words a person would use.
+
+    Returns "" when the timestamps cannot be compared — a naive `created_at`
+    from an imported or pre-migration row — so rendering degrades to an
+    undated statement rather than guessing an age or raising.
+    """
+    if then.tzinfo is None or now.tzinfo is None:
+        return ""
+    seconds = max((now - then).total_seconds(), 0.0)
+    days = seconds / 86400.0
+    if days >= 365:
+        years = int(days // 365)
+        return "a year ago" if years == 1 else f"{years} years ago"
+    if days >= 60:
+        return f"{int(days // 30)} months ago"
+    if days >= 2:
+        return f"{int(days)} days ago"
+    if days >= 1:
+        return "yesterday"
+    if seconds >= 7200:
+        return f"{int(seconds // 3600)} hours ago"
+    if seconds >= 120:
+        return f"{int(seconds // 60)} minutes ago"
+    return "just now"
 
 
 def _estimate_tokens(text: str) -> int:
@@ -547,31 +575,60 @@ class ContextBuilder:
         words = [w.strip(".,!?;:'\"()") for w in user_text.split()]
         salient = [w for w in words if len(w) >= 4][:4]
         merged: dict[int, MemorySearchResult] = {}
+        seen_texts: set[str] = set()
         top_k = self._settings.memory.retrieval_top_k
         for word in salient:
             try:
                 for result in self._memory.search_text(word, limit=top_k):
-                    if result.turn.id is not None and result.turn.id not in merged:
-                        merged[result.turn.id] = result
+                    turn = result.turn
+                    if turn.id is None or turn.id in merged:
+                        continue
+                    # The same personal-memory policy the semantic path
+                    # applies, so behaviour does not shift depending on
+                    # whether the embedding model happens to be installed.
+                    if turn.speaker != "user":
+                        continue
+                    normalized = " ".join(turn.text.split()).casefold()
+                    if normalized in seen_texts:
+                        continue
+                    seen_texts.add(normalized)
+                    merged[turn.id] = result
             except Exception:
                 logger.debug("Keyword fallback search failed for %r", word, exc_info=True)
         return list(merged.values())[:top_k]
 
     def _format_memory_block(self, results: list[MemorySearchResult]) -> tuple[str, bool]:
-        """Retrieved memories, highest-scored first (the retriever's order is
-        preserved). Framed as things the assistant *remembers* — to be woven
-        in naturally when relevant — not as a document to recite (ADR-021
-        Amendment 3; manual testing found mechanical 'according to earlier
-        context' phrasing)."""
+        """Retrieved memories as dated statements, newest first.
+
+        Framed as things the assistant *remembers* — woven in when relevant,
+        not recited (ADR-021 Amendment 3).
+
+        Every line states who said it and how long ago. Retrieval order alone
+        cannot express supersession: when a later statement corrects an
+        earlier one, both are relevant and both are recalled, so the block
+        itself has to say which is current. Provenance plus newest-first
+        ordering is what makes a correction legible as a correction.
+        """
         if not results:
             return "", False
-        lines = [f"- {r.turn.text}" for r in results]
+        # Sorted by timestamp, not score: position is what communicates
+        # recency to the model.
+        ordered = sorted(results, key=lambda r: r.turn.created_at, reverse=True)
+        now = datetime.now(UTC)
+        lines = [f"- {self._render_memory(r.turn, now)}" for r in ordered]
         block = (
-            "You remember these things from earlier conversations. Use them "
-            "naturally when relevant — don't announce that you are recalling "
-            "them, and ignore any that don't apply:\n" + "\n".join(lines)
+            "You remember these things from earlier conversations, most "
+            "recent first. Use them naturally when relevant — don't announce "
+            "that you are recalling them, and ignore any that don't "
+            "apply:\n" + "\n".join(lines)
         )
         budget = self._settings.memory.max_memory_chars
         if len(block) > budget:
             return block[:budget], True
         return block, False
+
+    def _render_memory(self, turn: MemoryTurn, now: datetime) -> str:
+        """One memory as a dated sentence: `You said 3 days ago: …`."""
+        who = "You" if turn.speaker == "user" else "You told the user"
+        age = _age_phrase(turn.created_at, now)
+        return f"{who} said {age}: {turn.text}" if age else f"{who} said: {turn.text}"

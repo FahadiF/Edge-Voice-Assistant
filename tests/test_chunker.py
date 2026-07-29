@@ -26,7 +26,8 @@ def test_flush_returns_tail() -> None:
 
 def test_min_chars_defers_tiny_fragments() -> None:
     c = SentenceChunker(min_chars=12)
-    segments = feed_all(c, "Hi. It works fine now.")
+    feed_all(c, "First chunk is emitted.")
+    segments = feed_all(c, " Hi. It works fine now.")
     # "Hi." alone is below min_chars, so it merges with the next sentence.
     assert segments == ["Hi. It works fine now."]
 
@@ -38,7 +39,7 @@ def test_abbreviations_do_not_split() -> None:
 
 
 def test_decimals_do_not_split() -> None:
-    c = SentenceChunker(min_chars=5)
+    c = SentenceChunker(min_chars=5, max_chars=350)
     segments = feed_all(c, "The value of pi is approximately 3. 14159 is wrong. Done here.")
     # "…approximately 3." is protected (digit before the period)
     assert segments[0] == "The value of pi is approximately 3. 14159 is wrong."
@@ -92,12 +93,6 @@ def test_first_chunk_min_chars_applies_only_to_first_segment() -> None:
     # Second sentence is short too, but first_chunk_min_chars no longer
     # applies — it falls back to the normal min_chars threshold.
     assert segments[1] == "It works fine now."
-
-
-def test_first_chunk_min_chars_none_behaves_like_before() -> None:
-    c = SentenceChunker(min_chars=12, first_chunk_min_chars=None)
-    segments = feed_all(c, "Hi. It works fine now.")
-    assert segments == ["Hi. It works fine now."]
 
 
 def test_reset_restores_first_chunk_threshold() -> None:

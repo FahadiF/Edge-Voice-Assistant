@@ -97,6 +97,7 @@ export interface MemorySettings {
   auto_cleanup_enabled: boolean;
   encrypt_at_rest: boolean;
   retrieval_top_k: number;
+  retrieval_min_similarity: number;
   retrieval_scan_limit: number;
   max_memory_chars: number;
   max_summary_chars: number;

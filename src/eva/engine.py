@@ -219,6 +219,10 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
             pinned_boost=settings.memory.pinned_boost,
             favorite_boost=settings.memory.favorite_boost,
             scan_limit=settings.memory.retrieval_scan_limit,
+            min_similarity=settings.memory.retrieval_min_similarity,
+            # Recall user-authored facts only; the assistant's own replies are
+            # not an authoritative source for personal memory.
+            speakers=("user",),
         )
 
     context_builder = ContextBuilder(

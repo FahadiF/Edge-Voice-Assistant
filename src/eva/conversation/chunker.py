@@ -39,7 +39,7 @@ class SentenceChunker:
     def __init__(
         self,
         min_chars: int = 12,
-        max_chars: int = 350,
+        max_chars: int = 50,
         first_chunk_min_chars: int | None = None,
     ) -> None:
         self._min_chars = min_chars
@@ -76,27 +76,28 @@ class SentenceChunker:
 
     def _extract_segment(self) -> str | None:
         min_chars = self._active_min_chars()
+
         for match in _SENTENCE_END.finditer(self._buffer):
             end = match.end()
-            if end < min_chars:
-                continue
-            if self._is_abbreviation(self._buffer[:end]):
-                continue
-            segment = self._buffer[:end].strip()
-            self._buffer = self._buffer[end:].lstrip()
-            self._emitted_any = True
-            return segment
-        # First segment only (M5.6): a clause break is good enough to start
-        # audio — the user is waiting in silence; see the module docstring.
-        if not self._emitted_any and self._first_chunk_min_chars is not None:
-            for match in _CLAUSE_BREAK.finditer(self._buffer):
-                end = match.end()
-                if end < min_chars:
-                    continue
+            if min_chars <= end <= self._max_chars and not self._is_abbreviation(
+                self._buffer[:end]
+            ):
                 segment = self._buffer[:end].strip()
                 self._buffer = self._buffer[end:].lstrip()
                 self._emitted_any = True
                 return segment
+
+        # First segment clause-break splitting (M5.6 compatibility) is mostly superseded by
+        # the low max_chars, but kept to honour first_chunk_min_chars if explicitly requested.
+        if not self._emitted_any and self._first_chunk_min_chars is not None:
+            for match in _CLAUSE_BREAK.finditer(self._buffer):
+                end = match.end()
+                if min_chars <= end <= self._max_chars:
+                    segment = self._buffer[:end].strip()
+                    self._buffer = self._buffer[end:].lstrip()
+                    self._emitted_any = True
+                    return segment
+
         if len(self._buffer) >= self._max_chars:
             return self._force_split()
         return None
