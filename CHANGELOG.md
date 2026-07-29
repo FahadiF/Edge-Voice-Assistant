@@ -6,6 +6,28 @@ first release onward.
 
 ## [Unreleased]
 
+## [v0.7.0-alpha.1] — 2026-07-29
+
+### 2026-07-29 — Release v0.7.0-alpha.1: Refreshed visual identity, About modal, safer memory operations, retention CLI & Tool Foundation Batch 1
+
+This release delivers the visual identity and surface refresh for EVA (Direction A structural base, logo, full-width About surface, standalone favicon), memory deletion safety, automated memory retention management, and the foundational contracts for tool and capability integration.
+
+**Added — Refreshed UI & visual identity:**
+- Modernized layout structure based on Direction A (`Layout.tsx`), featuring dark surfaces, green local-first privacy status indicators, and clean rounded containers.
+- Redrawn logo component (`EvaLogo.tsx`) and standalone favicon asset (`favicon.ico`).
+- Redesigned full-width About modal (`AboutModal.tsx` & `about.css`) with 440px container width, interactive link cards for Developer Website ([fahadibnefahian.com](https://www.fahadibnefahian.com/)), GitHub repository, and Issue reporting, plus an explicit thesis supervisor acknowledgement to Jani Boutellier.
+- CSS rotation behavior for `.spin-icon` loaders, flex-centered status indicators, and full `prefers-reduced-motion` compliance.
+
+**Added — Double-submit protection & memory deletion safety:**
+- `ConfirmDialog` in `common.tsx` now enforces an async `submitting` lock that disables confirmation buttons and inputs during execution, preventing accidental double-triggers on single-conversation and memory record deletions.
+
+**Added — Memory Retention Cleanup CLI & Hook:**
+- Automated retention cleanup command (`eva memory cleanup`) and startup hook to prune expired memory records and suppress duplicates safely.
+
+**Added — Tool & Capability Foundation (Batch 1):**
+- Schema validation, capability contracts, tool registry infrastructure, and `GenerationOutcome` domain models (`eva.tools`).
+- *Note:* Runtime tool execution, online web search, and external API providers are not active in this release and remain scheduled for future milestones.
+
 ### 2026-07-28 — Generation limits, truncation honesty, and trailing display reveal
 
 A voice request for a single-file HTML page was cut off three times in a row and

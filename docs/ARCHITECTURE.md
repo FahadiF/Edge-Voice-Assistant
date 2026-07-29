@@ -12,7 +12,7 @@ Status: Accepted. Decisions are recorded in [adr/](adr/).
    (`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`,
    `UserProfileStore`, `MemoryRetriever`, `EmbeddingProvider`, `Summarizer`,
    `AudioOutput`). Models are adapters; swapping one is a config change.
-   *A `Tool`/capability port is designed but not implemented — see §10.*
+   *Tool Foundation Batch 1 (neutral tool contracts, capability definitions, registry) is implemented in `eva.tools`; runtime tool execution and online search are scheduled — see §10.*
 4. **One headless engine, many frontends.** CLI, web UI, and desktop app are thin
    clients over the same engine API (WebSocket + REST on localhost).
 5. **Offline by construction.** The only network code lives in the model downloader.
@@ -248,7 +248,7 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
 - Integration tests with recorded WAV fixtures driving the pipeline offline.
 - ruff (lint+format), mypy (**strict, whole package**), pytest, GitHub Actions CI
   (lint + type check + tests on Windows and Linux runners; model-free).
-  837 tests as of v0.6.0-alpha; hardware/model-dependent tests are marked
+  982 backend tests (1,067 total) as of v0.7.0-alpha.1; hardware/model-dependent tests are marked
   `integration` and excluded from CI.
 - Structured logging (optional JSON output), per-stage latency metrics exposed through
   the diagnostics snapshot. An opt-in per-sentence pipeline trace
@@ -262,7 +262,7 @@ something a contributor has to discover by reading source. Each is scheduled; se
 
 | Gap | Current state | Consequence |
 |---|---|---|
-| **No capability/tool port** | The `Tool` port in §1 is designed, not implemented | `permissions.tools.*`, `files.*`, and `general.internet` gate nothing, because nothing exists to gate. Blocks tools, online mode, and vision. |
+| **Tool Foundation Batch 1 vs Runtime Loop** | Tool contracts, capability models, and tool registry exist in `eva.tools`; runtime tool execution and online search are not yet wired into the conversation loop | Tool definitions and permissions exist, but runtime tool execution, online web search, and external API providers are deferred to future milestones |
 | **Plugin capability wiring** | Discovery, manifests, and enable/disable work (ADR-011); registering a plugin's `contributes` into the subsystem registries does not | Plugins can be listed and toggled but cannot add capabilities |
 | **`managed_by="engine"` model integrity** | Engine-managed weights (faster-whisper) have install detection, prefetch, and removal (2026-07-27) but no integrity verification | A snapshot that finalizes corrupt is reported as installed and fails later inside CTranslate2 |
 | **LLM port assumes local weights** | `LLMEngine` exposes `load`/`unload`/`device` | A remote or server-backed provider cannot implement the port honestly. Blocks the provider abstraction. |

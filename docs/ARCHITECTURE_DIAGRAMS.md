@@ -1,7 +1,7 @@
 # Architecture Diagrams
 
 Visual companions to `docs/ARCHITECTURE.md`.
-These diagrams describe the system **as implemented through M5.5 (v0.5)**
+These diagrams describe the system **as implemented through v0.7.0-alpha.1**
 unless a diagram is explicitly labeled "Future" — future diagrams describe
 intended, not-yet-built shapes and should not be mistaken for current
 behavior.

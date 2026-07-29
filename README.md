@@ -2,7 +2,7 @@
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/tests-911%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen)
 
 # Edge Voice Assistant (EVA)
 
