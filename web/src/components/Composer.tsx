@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { conversation, engine, settings } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import { toast } from "./common";
+import { Image as ImageIcon, FileText, Camera, MicOff, Mic, Square } from "lucide-react";
 import "./composer.css";
 
 interface AttachmentChip {
@@ -172,8 +173,8 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
       {attachments.length > 0 && (
         <div className="composer-chips">
           {attachments.map((chip) => (
-            <span key={chip.id} className="chip" title="Waiting for Vision support">
-              {chip.kind === "image" ? "🖼" : "📄"} {chip.name}
+            <span key={chip.id} className="chip" title="Waiting for Vision support" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              {chip.kind === "image" ? <ImageIcon size={14} /> : <FileText size={14} />} {chip.name}
               <button
                 className="tag-remove"
                 aria-label={`Remove ${chip.name}`}
@@ -196,18 +197,18 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           >
             +
           </button>
-          {menuOpen && (
+              {menuOpen && (
             <div className="composer-menu" role="menu">
               {/* Honest placeholders (M5.6): each entry says "coming soon"
                   up front instead of only after being clicked. */}
-              <button role="menuitem" onClick={() => placeholderAction("Image upload")}>
-                🖼 Attach image <span className="field-help">(coming soon)</span>
+              <button role="menuitem" onClick={() => placeholderAction("Image upload")} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <ImageIcon size={16} /> Attach image <span className="field-help">(coming soon)</span>
               </button>
-              <button role="menuitem" onClick={() => placeholderAction("Document upload")}>
-                📄 Attach document <span className="field-help">(coming soon)</span>
+              <button role="menuitem" onClick={() => placeholderAction("Document upload")} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <FileText size={16} /> Attach document <span className="field-help">(coming soon)</span>
               </button>
-              <button role="menuitem" onClick={() => placeholderAction("Screenshot capture")}>
-                📷 Capture screenshot <span className="field-help">(coming soon)</span>
+              <button role="menuitem" onClick={() => placeholderAction("Screenshot capture")} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Camera size={16} /> Capture screenshot <span className="field-help">(coming soon)</span>
               </button>
             </div>
           )}
@@ -235,7 +236,7 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
           disabled={startEngine.isPending || toggleMic.isPending || (engineRunning && !micAvailable)}
           onClick={onMicClick}
         >
-          {micMuted ? "🔇" : "🎙"}
+          {micMuted ? <MicOff size={20} /> : <Mic size={20} />}
         </button>
         {engineRunning && (pipelineState === "speaking" || pipelineState === "thinking") && (
           <button
@@ -243,8 +244,9 @@ export function Composer({ engineRunning }: { engineRunning: boolean }) {
             aria-label="Stop the current reply"
             title="Stop the current reply"
             onClick={() => interrupt.mutate()}
+            style={{ display: "flex", alignItems: "center", gap: "4px" }}
           >
-            ⏹ Stop
+            <Square size={16} fill="currentColor" /> Stop
           </button>
         )}
         <button

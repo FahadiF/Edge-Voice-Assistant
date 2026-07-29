@@ -42,13 +42,19 @@ def _chunker() -> SentenceChunker:
     return SentenceChunker(min_chars=12, max_chars=350, first_chunk_min_chars=6)
 
 
-def _drain(gen: Generator[str, None, Any]) -> tuple[str, Any]:
+def _drain(gen: Generator[str, None, Any]) -> tuple[str, str]:
+    """Consume a stream and report its text and finish reason.
+
+    `stream()` returns a `GenerationOutcome`; an adapter that returns nothing
+    is read as an ordinary completion.
+    """
     parts: list[str] = []
     while True:
         try:
             parts.append(next(gen))
         except StopIteration as done:
-            return "".join(parts), done.value
+            outcome = done.value
+            return "".join(parts), (outcome.reason if outcome is not None else "stop")
 
 
 def _engine_with(chunks: list[dict[str, Any]]) -> LlamaCppLLM:

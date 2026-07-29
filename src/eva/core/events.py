@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _SUBSCRIBER_QUEUE_SIZE = 256
 
 
-FinishReason = Literal["stop", "length", "abort", "error"]
+FinishReason = Literal["stop", "length", "abort", "error", "tool_calls"]
 """Why generation ended.
 
 - `stop`   — the model emitted its end-of-turn token: the reply is complete.

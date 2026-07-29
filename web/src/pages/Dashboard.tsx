@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { engine } from "../api/endpoints";
 import { useWsStore } from "../ws/store";
 import { Card, EmptyState, Meter, StatusPill, formatBytes } from "../components/common";
+import { Check, X, Loader2 } from "lucide-react";
 
 function MicLevel({ dbfs }: { dbfs: number }) {
   // -60 dBFS (quiet) .. 0 dBFS (max) mapped to 0..100%.
@@ -64,7 +65,13 @@ export function Dashboard() {
             <ul className="startup-progress" aria-label="Startup progress">
               {loadingEntries.map((c) => (
                 <li key={c.component} className={c.error ? "load-error" : ""}>
-                  <span aria-hidden="true">{c.done ? (c.error ? "✕" : "✓") : "⏳"}</span>{" "}
+                  <span aria-hidden="true" className="dashboard-status-icon">
+                    {c.done ? (
+                      c.error ? <X size={14} className="error-icon" /> : <Check size={14} className="success-icon" />
+                    ) : (
+                      <Loader2 size={14} className="spin-icon" />
+                    )}
+                  </span>{" "}
                   {c.label}
                   {c.done && !c.error && c.ms !== null && (
                     <span className="field-help"> {(c.ms / 1000).toFixed(1)}s</span>

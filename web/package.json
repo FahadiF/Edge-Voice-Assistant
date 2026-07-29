@@ -1,7 +1,7 @@
 {
   "name": "eva-web",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Edge Voice Assistant web UI (ADR-023) — consumes the platform API only",
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
+    "lucide-react": "^1.27.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",

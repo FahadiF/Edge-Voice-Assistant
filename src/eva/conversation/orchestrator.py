@@ -795,7 +795,9 @@ class Orchestrator:
                     try:
                         token = next(stream)
                     except StopIteration as done:
-                        finish_reason = done.value or "stop"
+                        # A generator with a bare `return` yields None.
+                        outcome = done.value
+                        finish_reason = outcome.reason if outcome is not None else "stop"
                         break
                     push(token)
             except Exception:

@@ -18,9 +18,11 @@ import {
   formatBytes,
   toast,
 } from "../components/common";
+import { Star, Heart, Trash2, Download, Pencil, Archive, Play, FileText } from "lucide-react";
 import "./memory.css";
 
 function TurnActions({ turn, onChanged }: { turn: MemoryTurn; onChanged: () => void }) {
+  const [confirmForget, setConfirmForget] = useState(false);
   const act = (fn: () => Promise<unknown>, label: string) => async () => {
     try {
       await fn();
@@ -37,8 +39,9 @@ function TurnActions({ turn, onChanged }: { turn: MemoryTurn; onChanged: () => v
       <button
         title={turn.pinned ? "Unpin" : "Pin (boosts retrieval, survives cleanup)"}
         onClick={act(() => memory.pin(id, !turn.pinned), turn.pinned ? "Unpinned" : "Pinned")}
+        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
       >
-        {turn.pinned ? "★ pinned" : "☆ pin"}
+        <Star size={14} fill={turn.pinned ? "currentColor" : "none"} /> {turn.pinned ? "pinned" : "pin"}
       </button>
       <button
         title={turn.favorite ? "Unfavorite" : "Favorite (boosts retrieval)"}
@@ -46,16 +49,27 @@ function TurnActions({ turn, onChanged }: { turn: MemoryTurn; onChanged: () => v
           () => memory.favorite(id, !turn.favorite),
           turn.favorite ? "Unfavorited" : "Favorited",
         )}
+        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
       >
-        {turn.favorite ? "♥" : "♡"}
+        <Heart size={14} fill={turn.favorite ? "currentColor" : "none"} />
       </button>
       <button
         className="danger"
         title="Forget permanently"
-        onClick={act(() => memory.forget(id), "Turn forgotten")}
+        onClick={() => setConfirmForget(true)}
+        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
       >
-        forget
+        <Trash2 size={14} /> forget
       </button>
+      <ConfirmDialog
+        open={confirmForget}
+        title="Forget this turn?"
+        body="This memory will be permanently deleted from the database. It cannot be recovered."
+        confirmLabel="Forget"
+        danger
+        onConfirm={act(() => memory.forget(id).then(() => setConfirmForget(false)), "Turn forgotten")}
+        onCancel={() => setConfirmForget(false)}
+      />
     </span>
   );
 }
@@ -276,15 +290,17 @@ export function Memory() {
                   : undefined
               }
               onClick={async () => downloadJson(await memory.exportJson(), "eva-memory-export.json")}
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
             >
-              Export all
+              <Download size={16} /> Export all
             </button>
             <button
               className="danger"
               disabled={(stats.data?.turn_count ?? 0) === 0}
               onClick={() => setConfirmDeleteAll(true)}
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
             >
-              Delete all memory
+              <Trash2 size={16} /> Delete all memory
             </button>
           </div>
         </Card>
@@ -390,7 +406,7 @@ export function Memory() {
                             setRenameDraft(entry.conversation.title);
                           }}
                         >
-                          ✎
+                          <Pencil size={14} />
                         </button>
                       </>
                     )}
@@ -411,8 +427,9 @@ export function Memory() {
                           entry.conversation.title,
                         )
                       }
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      Continue
+                      <Play size={14} fill="currentColor" /> Continue
                     </button>
                     <button
                       title="Download this conversation as JSON"
@@ -422,8 +439,9 @@ export function Memory() {
                           `eva-conversation-${(entry.conversation.title || entry.conversation.id.slice(0, 8)).replaceAll(/[^\w-]+/g, "-")}.json`,
                         )
                       }
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      Export
+                      <Download size={14} /> Export
                     </button>
                     <button
                       onClick={async () => {
@@ -438,16 +456,18 @@ export function Memory() {
                           toast("error", (e as Error).message);
                         }
                       }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      Summarize
+                      <FileText size={14} /> Summarize
                     </button>
                     <button
                       onClick={async () => {
                         await memory.archive(entry.conversation.id, !entry.conversation.archived);
                         refresh();
                       }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      {entry.conversation.archived ? "Restore" : "Archive"}
+                      <Archive size={14} /> {entry.conversation.archived ? "Restore" : "Archive"}
                     </button>
                     <button
                       className="danger"
@@ -456,8 +476,9 @@ export function Memory() {
                         toast("success", "Conversation deleted");
                         refresh();
                       }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      Delete
+                      <Trash2 size={14} /> Delete
                     </button>
                   </td>
                 </tr>

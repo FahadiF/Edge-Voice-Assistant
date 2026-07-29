@@ -20,6 +20,7 @@ import type { LiveTurn, TranscriptEntry } from "../ws/store";
 import { Card, EmptyState, downloadJson, toast } from "../components/common";
 import { Composer } from "../components/Composer";
 import { Markdown } from "../components/Markdown";
+import { Download, Upload, Trash2 } from "lucide-react";
 import "./conversation.css";
 
 const NEAR_BOTTOM_PX = 80;
@@ -161,10 +162,10 @@ export function Conversation() {
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search conversation"
             />
-            <button onClick={doExport}>Export</button>
-            <button onClick={() => fileRef.current?.click()}>Import</button>
-            <button className="danger" onClick={() => clear.mutate()}>
-              Clear
+            <button onClick={doExport} style={{ display: "flex", alignItems: "center", gap: "4px" }}><Download size={16} /> Export</button>
+            <button onClick={() => fileRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: "4px" }}><Upload size={16} /> Import</button>
+            <button className="danger" onClick={() => clear.mutate()} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <Trash2 size={16} /> Clear
             </button>
             <input
               ref={fileRef}

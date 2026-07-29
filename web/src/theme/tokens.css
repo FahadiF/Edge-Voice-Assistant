@@ -18,11 +18,17 @@
   --state-thinking: #d97706;
   --state-speaking: #2563eb;
 
-  --radius: 8px;
-  --radius-sm: 5px;
+  --radius: 10px;
+  --radius-sm: 6px;
   --shadow: 0 1px 3px rgb(0 0 0 / 0.08);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
 
   --sidebar-width: 220px;
   --header-height: 52px;
@@ -31,10 +37,10 @@
 }
 
 [data-theme="dark"] {
-  --bg: #101318;
-  --bg-raised: #181c23;
-  --bg-sunken: #0b0d11;
-  --border: #2a303a;
+  --bg: #111111;
+  --bg-raised: #1a1a1a;
+  --bg-sunken: #222222;
+  --border: #333333;
   --text: #e6e9ed;
   --text-muted: #98a1ad;
   --accent: #4f8cff;
@@ -106,10 +112,12 @@ button {
   background: var(--bg-raised);
   color: var(--text);
   padding: 6px 12px;
+  transition: border-color 0.15s ease, background-color 0.15s ease, filter 0.15s ease;
 }
 
 button:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--bg-sunken);
 }
 
 button:disabled {
@@ -123,10 +131,19 @@ button.primary {
   color: var(--accent-contrast);
 }
 
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+  background: var(--accent);
+}
+
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
+}
+
+button.danger:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 input,
@@ -138,6 +155,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 input:focus-visible,

@@ -12,7 +12,7 @@ from typing import Any
 
 from eva.core.errors import ModelError
 from eva.core.events import FinishReason
-from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
+from eva.llm.base import ChatMessage, GenerationOutcome, GenerationParams, LLMEngine
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class LlamaCppLLM(LLMEngine):
         messages: list[ChatMessage],
         params: GenerationParams,
         should_abort: Callable[[], bool],
-    ) -> Generator[str, None, FinishReason]:
+    ) -> Generator[str, None, GenerationOutcome]:
         if self._llama is None:
             self.load()
         assert self._llama is not None
@@ -136,7 +136,7 @@ class LlamaCppLLM(LLMEngine):
                 for chunk in completion:
                     if should_abort():
                         logger.debug("LLM generation aborted")
-                        return "abort"
+                        return GenerationOutcome(reason="abort")
                     choice = chunk["choices"][0]
                     reported = choice.get("finish_reason")
                     if reported in ("stop", "length"):
@@ -153,4 +153,5 @@ class LlamaCppLLM(LLMEngine):
                 logger.info(
                     "Generation hit the %d-token ceiling; reply is truncated", params.max_tokens
                 )
-            return reason
+            # No tool calls yet: this adapter does not recognise them.
+            return GenerationOutcome(reason=reason)

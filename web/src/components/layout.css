@@ -9,6 +9,8 @@
   border-right: 1px solid var(--border);
   padding: 14px 10px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
@@ -23,6 +25,12 @@
   color: var(--accent);
 }
 
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
 .nav-link {
   display: flex;
   align-items: center;
@@ -32,17 +40,19 @@
   color: var(--text);
   text-decoration: none;
   margin-bottom: 2px;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* Fixed-width so every label starts on the same x — a ragged left edge is
-   harder to scan than no icons at all. */
+.nav-link:last-child {
+  margin-top: auto;
+}
+
+/* Fixed-width so every label starts on the same x */
 .nav-icon {
   flex: 0 0 1.25em;
   font-size: 0.95em;
   line-height: 1;
   text-align: center;
-  /* Emoji carry their own colour; dim them slightly so the active row's label
-     stays the brightest thing in it. */
   opacity: 0.85;
 }
 
