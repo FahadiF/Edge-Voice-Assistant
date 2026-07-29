@@ -31,7 +31,7 @@ We take the security of this project seriously. Please **DO NOT** disclose vulne
 
 If **GitHub Private Vulnerability Reporting** is enabled for this repository (under the **Security > Advisories** tab), please use it to privately notify the maintainers.
 
-If Private Vulnerability Reporting is unavailable, please contact the repository owner (`FahadiF`) privately via direct message or another private channel before opening a public issue.
+If Private Vulnerability Reporting is unavailable, please contact the repository owner privately via direct message or another private channel before opening a public issue.
 
 ### What to include in your report
 To help us resolve the issue quickly, please include the following information:
