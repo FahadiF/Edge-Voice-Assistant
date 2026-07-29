@@ -59,6 +59,7 @@ htmlcov/
 # -----------------------------
 node_modules/
 web/dist/
+web/*.tsbuildinfo
 
 # -----------------------------
 # Operating System

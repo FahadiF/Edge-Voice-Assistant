@@ -1,7 +1,7 @@
 {
   "name": "eva-web",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.7.0-alpha.1",
   "description": "Edge Voice Assistant web UI (ADR-023) — consumes the platform API only",
   "type": "module",
   "scripts": {

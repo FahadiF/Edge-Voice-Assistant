@@ -108,6 +108,17 @@
   font-size: 0.88rem;
 }
 
+.startup-progress li {
+  display: flex;
+  align-items: center;
+}
+
+.dashboard-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .startup-progress .load-error {
   color: var(--danger);
 }

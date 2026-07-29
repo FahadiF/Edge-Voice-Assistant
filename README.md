@@ -14,7 +14,7 @@ models are downloaded you can unplug the network and nothing changes.
 
 <img width="1610" height="782" alt="image" src="https://github.com/user-attachments/assets/760f68f4-77e7-482b-9fbe-45d9afd11e97" />
 
-> **Status: alpha (v0.6.0-alpha).** Everything described below is implemented and tested.
+> **Status: alpha (v0.7.0-alpha.1).** Everything described below is implemented and tested.
 > Known limitations are listed [plainly, further down](#limitations). Interfaces may still
 > change between releases.
 

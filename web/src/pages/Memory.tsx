@@ -193,6 +193,7 @@ export function Memory() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Awaited<ReturnType<typeof memory.search>> | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmDeleteConversation, setConfirmDeleteConversation] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -471,11 +472,7 @@ export function Memory() {
                     </button>
                     <button
                       className="danger"
-                      onClick={async () => {
-                        await memory.deleteConversation(entry.conversation.id);
-                        toast("success", "Conversation deleted");
-                        refresh();
-                      }}
+                      onClick={() => setConfirmDeleteConversation(entry.conversation.id)}
                       style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
                       <Trash2 size={14} /> Delete
@@ -527,6 +524,27 @@ export function Memory() {
           </div>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={confirmDeleteConversation !== null}
+        title="Delete conversation?"
+        body="This conversation and all its turns will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={async () => {
+          if (!confirmDeleteConversation) return;
+          try {
+            await memory.deleteConversation(confirmDeleteConversation);
+            toast("success", "Conversation deleted");
+            refresh();
+          } catch (e) {
+            toast("error", (e as Error).message);
+          } finally {
+            setConfirmDeleteConversation(null);
+          }
+        }}
+        onCancel={() => setConfirmDeleteConversation(null)}
+      />
 
       <ConfirmDialog
         open={confirmDeleteAll}

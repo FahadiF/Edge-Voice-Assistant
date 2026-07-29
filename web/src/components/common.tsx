@@ -107,22 +107,37 @@ export function ConfirmDialog({
   danger?: boolean;
   /** e.g. "DELETE" — user must type it to enable the confirm button. */
   requireText?: string;
-  onConfirm: () => void;
+  onConfirm: () => unknown;
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [typed, setTyped] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) {
       setTyped("");
+      setSubmitting(false);
       dialog.showModal();
     } else if (!open && dialog.open) {
+      setSubmitting(false);
       dialog.close();
     }
   }, [open]);
+
+  const handleConfirm = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onConfirm();
+    } catch {
+      // Handled by onConfirm caller / toast; catch here to prevent unhandled promise rejection
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <dialog ref={ref} onCancel={onCancel} aria-labelledby="confirm-title">
@@ -131,15 +146,15 @@ export function ConfirmDialog({
       {requireText && (
         <label className="dialog-require">
           Type <code>{requireText}</code> to confirm:
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus disabled={submitting} />
         </label>
       )}
       <div className="dialog-buttons">
-        <button onClick={onCancel}>Cancel</button>
+        <button onClick={onCancel} disabled={submitting}>Cancel</button>
         <button
           className={danger ? "danger" : "primary"}
-          disabled={requireText !== undefined && typed !== requireText}
-          onClick={onConfirm}
+          disabled={submitting || (requireText !== undefined && typed !== requireText)}
+          onClick={handleConfirm}
         >
           {confirmLabel}
         </button>

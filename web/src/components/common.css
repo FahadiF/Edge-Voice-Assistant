@@ -177,3 +177,25 @@
   padding: 2px 8px;
   font-size: 0.8rem;
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin-icon {
+    animation: none !important;
+  }
+}
+
+.success-icon {
+  color: var(--success);
+}
+
+.error-icon {
+  color: var(--danger);
+}
