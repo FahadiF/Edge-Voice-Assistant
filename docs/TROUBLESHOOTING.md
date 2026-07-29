@@ -199,7 +199,7 @@ supported by design — EVA binds to `127.0.0.1` and does not authenticate.
 
 ## Desktop app
 
-### `eva-desktop` says the desktop extra is missing
+### `eva desktop` says the desktop extra is missing
 
 ```bash
 pip install -e ".[desktop]"

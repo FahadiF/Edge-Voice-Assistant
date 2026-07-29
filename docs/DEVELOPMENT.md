@@ -191,5 +191,5 @@ change, or the mirror drifts.
    either works or fails with actionable guidance — never `ModuleNotFoundError`
    (release gate, ADR-013).
 4. `CHANGELOG.md`, `ROADMAP.md` status, and affected docs updated.
-5. Version bumped in `pyproject.toml` and `src/eva/__init__.py`.
+5. Version bumped in `pyproject.toml`, `src/eva/__init__.py`, and `web/package.json`.
 6. Tag `vX.Y.Z-alpha`.

@@ -407,9 +407,9 @@ evidence chain.
 ### M7.3 — Architecture Stabilization
 No user-facing features. Closes the gaps in
 [ARCHITECTURE.md §10](ARCHITECTURE.md#10-known-architectural-gaps) that block
-everything after it: documentation refresh, ASR model lifecycle (install detection,
+everything after it: documentation refresh (**shipped in v0.7.0-alpha.1**), ASR model lifecycle (install detection,
 prefetch, removal), CUDA runtime registration decoupled from the LLM adapter, the
-**capability/tool port**, and **plugin capability wiring** (completing ADR-011).
+**capability/tool port** (**Batch 1 shipped in v0.7.0-alpha.1**), and **plugin capability wiring** (completing ADR-011).
 **Exit:** no dangling documentation references; an example plugin registers a working
 capability end-to-end; engine-managed models report install state correctly and can be
 prefetched and removed; zero behavior change.

@@ -226,7 +226,7 @@ The optional desktop window:
 
 ```bash
 pip install -e ".[desktop]"
-eva-desktop
+eva desktop
 ```
 
 ---

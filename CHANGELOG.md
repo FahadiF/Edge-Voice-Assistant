@@ -8,25 +8,29 @@ first release onward.
 
 ## [v0.7.0-alpha.1] — 2026-07-29
 
-### 2026-07-29 — Release v0.7.0-alpha.1: Refreshed visual identity, About modal, safer memory operations, retention CLI & Tool Foundation Batch 1
+### ✨ Highlights
 
-This release delivers the visual identity and surface refresh for EVA (Direction A structural base, logo, full-width About surface, standalone favicon), memory deletion safety, automated memory retention management, and the foundational contracts for tool and capability integration.
+#### 🎨 Visual Identity & UI
+- Introduced a new visual identity for EVA featuring the Kinetic E-Wave logo and standalone application favicon.
+- Refined the application shell and dashboard with a modernized layout, cleaner surfaces, and local-first privacy status indicators.
+- Replaced emoji actions with consistent application icons throughout the interface.
+- Redesigned the About surface to clearly present version details, project information, developer links, and acknowledgements.
+- Improved the accessibility and presentation of loading states, status indicators, and reduced-motion compliance.
 
-**Added — Refreshed UI & visual identity:**
-- Modernized layout structure based on Direction A (`Layout.tsx`), featuring dark surfaces, green local-first privacy status indicators, and clean rounded containers.
-- Redrawn logo component (`EvaLogo.tsx`) and standalone favicon asset (`favicon.ico`).
-- Redesigned full-width About modal (`AboutModal.tsx` & `about.css`) with 440px container width, interactive link cards for Developer Website ([fahadibnefahian.com](https://www.fahadibnefahian.com/)), GitHub repository, and Issue reporting, plus an explicit thesis supervisor acknowledgement to Jani Boutellier.
-- CSS rotation behavior for `.spin-icon` loaders, flex-centered status indicators, and full `prefers-reduced-motion` compliance.
+#### 🔒 Privacy & Data Safety
+- Added `eva memory cleanup` to safely prune expired memory records and improve retention behavior.
+- Implemented double-submit protection on all destructive actions (like conversation and memory record deletions) to prevent accidental duplicate confirmations.
 
-**Added — Double-submit protection & memory deletion safety:**
-- `ConfirmDialog` in `common.tsx` now enforces an async `submitting` lock that disables confirmation buttons and inputs during execution, preventing accidental double-triggers on single-conversation and memory record deletions.
+#### 🧰 Tools & Capabilities Foundation
+- Introduced the core architectural contracts and domain models required for future EVA tools.
+- Added neutral representations for tool calls, execution results, and data sources.
+- Established shared tool registration infrastructure.
+- Prepared the generation contracts to handle future tool-call outcomes seamlessly.
 
-**Added — Memory Retention Cleanup CLI & Hook:**
-- Automated retention cleanup command (`eva memory cleanup`) and startup hook to prune expired memory records and suppress duplicates safely.
+> **Note:** Runtime tool execution, online web search, external API provider integrations, and multimodal attachments are **NOT** active in this release. They remain future capabilities.
 
-**Added — Tool & Capability Foundation (Batch 1):**
-- Schema validation, capability contracts, tool registry infrastructure, and `GenerationOutcome` domain models (`eva.tools`).
-- *Note:* Runtime tool execution, online web search, and external API providers are not active in this release and remain scheduled for future milestones.
+#### 🖥️ Application & Runtime
+- Synchronized frontend and backend version metadata.
 
 ### 2026-07-28 — Generation limits, truncation honesty, and trailing display reveal
 

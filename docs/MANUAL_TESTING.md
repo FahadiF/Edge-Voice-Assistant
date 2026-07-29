@@ -204,6 +204,7 @@ eva memory import snapshot.json
 eva memory forget <turn_id>
 eva memory delete-conversation <conversation_id>
 eva memory delete-all --yes             # destructive — wipes everything
+eva memory cleanup                      # prune expired memory records
 eva memory stats
 ```
 
@@ -451,7 +452,7 @@ reload work and match `curl .../api/v1/plugins`.
 
 ```bash
 pip install -e ".[desktop]"
-eva-desktop
+eva desktop
 ```
 Confirm a native window opens showing the same UI, and that closing the
 window also stops the backend process (no orphaned `eva serve` left
@@ -823,16 +824,16 @@ eva status         # "not running", exit code 1
 ## 18. Desktop shell & system tray (M6.1–M6.2)
 
 Requires the desktop extra and a real desktop session:
-`pip install -e ".[desktop]"` then `eva-desktop`. (Headless CI cannot
+`pip install -e ".[desktop]"` then `eva desktop`. (Headless CI cannot
 exercise the window/tray; the supervisor, window-state, tray-controller, and
 client logic are unit-tested with fakes — this checklist covers the native
 pieces only.)
 
 ### 18.1 Launch & supervision (M6.1)
-- [ ] `eva-desktop` opens a native window showing the web UI. With no server
+- [ ] `eva desktop` opens a native window showing the web UI. With no server
       running, it starts one; run `eva status` in a terminal — it reports the
       same server (shared PID/port).
-- [ ] Start `eva start` FIRST, then `eva-desktop`: the app **attaches** (logs
+- [ ] Start `eva start` FIRST, then `eva desktop`: the app **attaches** (logs
       "Attached to an already-running server"); closing the app leaves that
       server running (it only stops servers it started).
 - [ ] Kill the shell-owned server process (Task Manager); within a few seconds
@@ -841,7 +842,7 @@ pieces only.)
       and stops retrying (no CPU-spinning restart loop).
 - [ ] Resize/move the window, quit, relaunch → it reopens at the same size and
       position, on the last page you were viewing.
-- [ ] Without the extra, `eva-desktop` prints the "install the desktop extra"
+- [ ] Without the extra, `eva desktop` prints the "install the desktop extra"
       remedy and exits — no traceback.
 
 ### 18.2 System tray (M6.2)
@@ -883,7 +884,7 @@ Set these on the **Desktop** settings page (verify the category is titled
       taskbar button); tray **Restore Window** (or left-click) restores it
       **normal and focused** (not visible-but-minimized). With the setting OFF,
       minimize behaves normally (stays on the taskbar).
-- [ ] **Start Minimized ON:** relaunch `eva-desktop` → it starts hidden in the
+- [ ] **Start Minimized ON:** relaunch `eva desktop` → it starts hidden in the
       tray (no window shown); tray **Restore Window** reveals it. (With no tray
       available it starts normally — nowhere to hide.)
 - [ ] **Auto Start Engine ON:** relaunch → the engine starts on its own (the
@@ -899,7 +900,7 @@ Set these on the **Desktop** settings page (verify the category is titled
 
 ### 18.4 Event Log export — native Save-As (M6.2)
 
-On the **desktop** app (`eva-desktop`), interact so the Diagnostics Event Log
+On the **desktop** app (`eva desktop`), interact so the Diagnostics Event Log
 has a few entries, then:
 
 - [ ] **Export .txt / Export .log** each open a **native Save-As dialog** with

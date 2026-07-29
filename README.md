@@ -69,7 +69,7 @@ Once set up, you can run EVA in your browser or as a native desktop app:
 |---|---|
 | `eva start` | Start the server in the background; open `http://127.0.0.1:8765` in your browser |
 | `eva stop` | Stop the background server |
-| `eva-desktop` | Launch the native desktop app with a system tray icon |
+| `eva desktop` | Launch the native desktop app with a system tray icon |
 
 > **Desktop app prerequisite:** `pip install -e ".[desktop]"` (one-time, adds the `pywebview` and `pystray` extras)
 
