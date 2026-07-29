@@ -344,7 +344,11 @@ class ToolsPermissions(_Section):
 class PrivacyPermissions(_Section):
     remember_conversations: bool = Field(
         True,
-        description="Store conversations in memory — off means nothing is saved after a turn",
+        title="Save conversations to memory",
+        description=(
+            "When off, new conversation turns are not saved. Memories already "
+            "stored stay available until you delete them"
+        ),
     )
     learn_preferences: bool = Field(
         True,

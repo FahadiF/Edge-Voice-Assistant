@@ -14,6 +14,7 @@ of depending on which engine grabbed VRAM first.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +35,7 @@ from eva.llm.base import LLMEngine
 from eva.llm.registry import create_llm
 from eva.memory.base import MemoryStore, UserProfileStore
 from eva.memory.registry import create_stores
+from eva.memory.retention import apply_retention_policy
 from eva.memory.retriever import NumpyMemoryRetriever
 from eva.models.manager import ModelManager
 from eva.tts.base import TTSEngine
@@ -142,6 +144,39 @@ class Assistant:
             self._load_component("asr", self.asr.load)
             for future in cpu_futures:
                 future.result()  # re-raise the first CPU-side load failure
+        self.start_retention_cleanup()
+
+    def start_retention_cleanup(self) -> None:
+        """Apply the retention policy once, off the startup path.
+
+        Deleting a turn is an individually committed statement, so culling a
+        long history costs time proportional to the number of turns removed —
+        enough to be felt if it ran before the first conversation. It is
+        therefore dispatched to a daemon thread: nothing downstream waits on
+        it, and an interrupted pass simply resumes on the next start, since
+        the policy is idempotent.
+
+        A no-op when `auto_cleanup_enabled` is off, which is the default;
+        `eva memory cleanup` applies the same policy on demand.
+        """
+        if not self.settings.memory.auto_cleanup_enabled:
+            return
+
+        def run() -> None:
+            try:
+                report = apply_retention_policy(self.memory, self.settings.memory)
+                if report.total_deleted:
+                    logger.info(
+                        "Retention removed %d turn(s): %d past the age limit, %d over the "
+                        "per-conversation cap",
+                        report.total_deleted,
+                        report.turns_deleted_by_age,
+                        report.turns_deleted_by_cap,
+                    )
+            except Exception:  # a maintenance failure must never break startup
+                logger.exception("Retention cleanup failed")
+
+        threading.Thread(target=run, name="retention-cleanup", daemon=True).start()
 
     def _load_tts(self) -> None:
         self.tts.load()

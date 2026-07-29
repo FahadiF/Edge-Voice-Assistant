@@ -681,6 +681,30 @@ def _cmd_memory(args: argparse.Namespace) -> int:
             print(f"Imported {imported} turn(s).")
             return 0
 
+        if cmd == "cleanup":
+            from eva.memory.retention import apply_retention_policy
+
+            policy = settings.memory
+            if policy.retention_days is None and policy.max_turns_per_conversation is None:
+                print("No retention policy configured — nothing to apply.")
+                print(
+                    "  Set memory.retention_days and/or memory.max_turns_per_conversation "
+                    "to enable cleanup."
+                )
+                return 0
+            print(
+                f"Applying retention: "
+                f"age limit {policy.retention_days or 'none'} day(s), "
+                f"per-conversation cap {policy.max_turns_per_conversation or 'none'}"
+            )
+            report = apply_retention_policy(memory, policy)
+            print(f"Removed {report.total_deleted} turn(s):")
+            print(f"  past the age limit      {report.turns_deleted_by_age}")
+            print(f"  over the per-conv cap   {report.turns_deleted_by_cap}")
+            if report.total_deleted:
+                print("Pinned turns are never removed.")
+            return 0
+
         if cmd == "delete-all":
             if not args.yes:
                 print(
@@ -1273,6 +1297,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_mexport.add_argument("--out", default=None, help="Write to a file instead of stdout")
     p_mimport = memory_sub.add_parser("import", help="Import a previously exported JSON snapshot")
     p_mimport.add_argument("file")
+    memory_sub.add_parser(
+        "cleanup",
+        help="Apply the configured retention policy now (age limit and per-conversation cap)",
+    )
     p_mdelall = memory_sub.add_parser("delete-all", help="Delete ALL memory (privacy)")
     p_mdelall.add_argument("--yes", action="store_true", help="Confirm the deletion")
     p_msum = memory_sub.add_parser("summarize", help="LLM-summarize a conversation (loads the LLM)")
