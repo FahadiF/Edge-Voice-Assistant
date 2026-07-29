@@ -485,6 +485,13 @@ def _migrate_raw(raw: Any) -> Any:
     English profile resolves to, and non-English profiles were overriding it
     anyway. Any other value was necessarily set by hand and is left alone.
 
+    v3 → v4 (M7.3): `conversation.max_tokens` rises from 512 to 2048. The cap
+    is a ceiling rather than a reservation, so a short reply is unaffected,
+    but 512 truncated generated code mid-file. Because `save_settings` writes
+    every field, an existing install carries the old default explicitly and
+    would keep truncating unless it is rewritten; only that value is migrated,
+    and a custom one is preserved.
+
     v4 → v5 (M8/A8): `conversation.sentence_max_chars` drops from 350 to 50.
     The lower ceiling enables punctuation-aware bounded chunking that halves
     worst-case TTFA and cuts playback starvation by ~76%.  Only the old

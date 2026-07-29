@@ -96,21 +96,18 @@ class Assistant:
         self.unload_models()
 
     def unload_models(self) -> None:
-        """Release model memory now, rather than whenever the GC gets to it.
+        """Release model memory explicitly rather than leaving it to the GC.
 
-        Dropping the `Assistant` is not enough: the adapters sit in reference
-        cycles, so refcounting never frees them and the weights survive until
-        a full `gc.collect()`. Measured on the reference platform, an engine
-        holds 4541 MB of 6144 MB VRAM and `stop()` + dropping the reference
-        released *zero* of it.
+        The adapters participate in reference cycles, so dropping the
+        `Assistant` does not free their weights — they stay resident until a
+        full collection runs. Nulling each adapter's model releases them by
+        refcount even while the adapter itself is still cycle-trapped.
 
-        That is invisible until the engine is restarted in the same process,
-        at which point the second engine loads on top of the first: 9 GB
-        requested on a 6 GB card. Windows' WDDM driver does not fail that
-        allocation — it silently pages GPU memory to system RAM, and every
-        GPU stage slows by roughly 30x with no error and no device fallback.
-        Nulling each adapter's model drops the weights by refcount even while
-        the adapter itself is still cycle-trapped.
+        This matters when an engine is restarted in the same process: the
+        replacement loads while the previous weights are still held. On
+        Windows that allocation does not fail — the driver pages GPU memory
+        to host RAM, so the symptom is uniform slowdown across every GPU
+        stage, with no exception and no device fallback to signal it.
         """
         for name, engine in (("llm", self.llm), ("asr", self.asr), ("tts", self.tts)):
             try:
