@@ -1,0 +1,82 @@
+name: Bug Report
+description: File a bug report to help us improve EVA.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! 
+        Please remember that EVA is currently in **Alpha** status.
+        
+        ⚠️ **IMPORTANT**: Please ensure you remove any private conversation content, secrets, tokens, API keys, credentials, or sensitive personal data from your logs before posting them here.
+  - type: input
+    id: version
+    attributes:
+      label: EVA Version
+      description: What version of EVA are you running? You can find this in the About modal or by running `eva --version`.
+      placeholder: e.g., v0.7.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux (Ubuntu/Debian)
+        - Linux (Other)
+        - macOS (Unsupported, but select if attempting to run)
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware / Environment (if relevant)
+      description: Briefly describe your hardware (e.g., CPU, GPU model, VRAM, RAM) and environment (e.g., Python version) if this is a performance, audio, or model-loading issue.
+      placeholder: e.g., RTX 3060 6GB, Ryzen 9, Python 3.12
+    validations:
+      required: false
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: How can we reproduce this bug? Please be as specific as possible.
+      placeholder: |
+        1. Start the server using `eva start`
+        2. Open the desktop app with `eva desktop`
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Errors / `eva diagnose` Output
+      description: |
+        Please paste the output of `eva diagnose` and any relevant error logs.
+        **Do not forget to redact sensitive information.**
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here (screenshots, etc.).
+      required: false

@@ -118,7 +118,13 @@ Stated up front so nothing is a surprise in review:
 
 Be respectful and constructive. Assume good faith. Technical disagreement is welcome and
 expected; personal hostility is not. Maintainers may remove comments or contributions
-that do not meet this standard.
+that do not meet this standard. Please review our full **[Code of Conduct](CODE_OF_CONDUCT.md)** for detailed guidelines and enforcement policies.
+
+---
+
+## Security
+
+If you discover a potential security issue, please do not report it in the public issue tracker. Instead, review our **[Security Policy](SECURITY.md)** for instructions on how to privately report vulnerabilities.
 
 ---
 

@@ -1,0 +1,38 @@
+name: Feature Request
+description: Suggest an idea or new feature for EVA.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your interest in improving EVA!
+        
+        Please note that EVA is currently in **Alpha**, and we have a very specific architectural roadmap focused on a strong local-first, offline foundation, with optional online capabilities (like search and retrieval) planned for later milestones. Please check `docs/ROADMAP.md` and `docs/BACKLOG.md` before submitting to see if your idea is already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case
+      description: Is your feature request related to a problem? Please describe it clearly.
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Behavior
+      description: Describe the solution or feature you'd like to see implemented.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or workarounds you've considered.
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context or screenshots about the feature request here.
+      required: false
