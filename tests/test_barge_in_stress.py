@@ -16,12 +16,46 @@ import numpy as np
 import pytest
 
 from eva.audio.segmenter import BargeIn, UtteranceEnd
-from eva.core.events import BargeInLatencyMeasured, TurnCancelled, TurnFinished
+from eva.core.events import BargeInLatencyMeasured, EventBus, TurnCancelled, TurnFinished
 from tests.test_orchestrator import FakeLLM, drive, make_orchestrator
 
 AUDIO = np.ones(16_000, dtype=np.int16)
 
 N_INTERRUPTIONS = 20  # M3 exit criterion: 20 consecutive rapid interruptions
+
+# Ceiling for "the final turn never completed", not a duration to wait out.
+# That turn takes ~1.3 s unloaded, so any fixed sleep near it is a coin toss
+# under a loaded full-suite run; the wait below ends the moment the turn lands
+# and only fails if it never does.
+FINAL_TURN_TIMEOUT_S = 20.0
+
+
+async def _await_clean_turn(bus: EventBus, timeout: float = FINAL_TURN_TIMEOUT_S) -> TurnFinished:
+    """Block until a turn finishes without error, or fail the test.
+
+    Synchronizes on the exact fact the assertions check rather than on elapsed
+    time. Subscribe *before* feeding the utterance that triggers the turn, so
+    the event cannot land in the gap; the queue is drained in a tight loop
+    because subscriber queues are bounded and `EventBus.publish` drops their
+    oldest entry when full, which a sampling waiter would race.
+    """
+    queue = bus.subscribe()
+
+    async def wait() -> TurnFinished:
+        while True:
+            event = await queue.get()
+            if isinstance(event, TurnFinished) and event.error is None:
+                return event
+
+    try:
+        return await asyncio.wait_for(wait(), timeout)
+    except TimeoutError:
+        raise AssertionError(
+            f"no turn completed cleanly within {timeout}s — barge-in left the "
+            "orchestrator unable to finish a later uninterrupted turn"
+        ) from None
+    finally:
+        bus.unsubscribe(queue)
 
 
 def test_twenty_consecutive_interruptions_leave_a_clean_state() -> None:
@@ -37,8 +71,12 @@ def test_twenty_consecutive_interruptions_leave_a_clean_state() -> None:
                 orch.feed_audio_event(BargeIn(speech_ms=200))
                 await asyncio.sleep(0.02)
             # One final, uninterrupted turn must still complete normally.
+            # Watch for it before triggering it, then wait for the completion
+            # itself — shutdown must not race a turn that is merely slow.
+            waiter = asyncio.create_task(_await_clean_turn(bus))
+            await asyncio.sleep(0)
             orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
-            await asyncio.sleep(3.0)
+            await waiter
 
         events = await drive(orch, bus, script, timeout=30)
 
@@ -59,6 +97,22 @@ def test_twenty_consecutive_interruptions_leave_a_clean_state() -> None:
         assert not orch._tasks.active()  # TaskManager owns them now (M5.5)
         assert orch.state in ("listening", "idle")
         assert orch._turn_task is None or orch._turn_task.done()
+
+    asyncio.run(scenario())
+
+
+def test_the_clean_turn_wait_fails_when_no_turn_completes() -> None:
+    """Guards the guard: the deterministic wait replaced a fixed sleep, so it
+    must still fail when the orchestrator never finishes a turn. Without this,
+    a helper that silently returned would make the stress test vacuous."""
+
+    async def scenario() -> None:
+        bus = EventBus()
+        # A cancelled turn and an errored one are both "not a clean finish".
+        bus.publish(TurnCancelled(epoch=1, reason="barge-in"))
+        bus.publish(TurnFinished(epoch=1, error="asr broken"))
+        with pytest.raises(AssertionError, match="no turn completed cleanly"):
+            await _await_clean_turn(bus, timeout=0.2)
 
     asyncio.run(scenario())
 

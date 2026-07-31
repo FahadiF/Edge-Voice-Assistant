@@ -156,7 +156,13 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
-    "integration: tests that need real audio devices or models (deselected in CI)",
+    # Declared so `--strict-markers` accepts the marker the moment a test
+    # needs it. Nothing carries it today: real-hardware validation is the
+    # manual protocol in docs/MANUAL_TESTING.md, and the automated suite
+    # reaches optional dependencies through `pytest.importorskip` instead.
+    # So `-m "not integration"` currently selects the whole suite, and stays
+    # in CI to keep excluding such tests automatically once they exist.
+    "integration: needs a real audio device or model weights; run manually",
 ]
 
 [tool.coverage.run]

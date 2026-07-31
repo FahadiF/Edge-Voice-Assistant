@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from eva.core.tools import ToolResult
+from eva.core.tools import ToolDefinition, ToolResult
 
 
 class Tool(ABC):
@@ -35,6 +35,18 @@ class Tool(ABC):
     Checked before the tool is offered to the model and again before it runs,
     so a permission revoked mid-turn still takes effect.
     """
+
+    def definition(self) -> ToolDefinition:
+        """What the model may be told about this tool.
+
+        The one-way narrowing that lets an LLM adapter describe a capability
+        without being able to invoke it: `ToolDefinition` has no `execute`.
+        Callers decide *which* tools to derive definitions for, so permission
+        filtering happens before this point, not inside an adapter.
+        """
+        return ToolDefinition(
+            name=self.id, description=self.description, parameters=self.parameters
+        )
 
     @abstractmethod
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:

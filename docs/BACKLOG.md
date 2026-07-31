@@ -63,6 +63,7 @@ one. See ADR-003 § Model Selection History for the measurements taken so far.
 | E4 | **README test-count badge is hardcoded** | `837 passing` will rot. Either wire it to CI or drop it. |
 | E5 | **`docs/adr/README.md` is hand-maintained** | 28 entries with titles and dates, updated by hand per ADR. Fine now; generate it if the count grows. |
 | E7 | **Subsystem dependency direction is unenforced** | ADR-010's inward-only rule is stated in docs and reviewed by eye. An import-direction test would make it structural. M1 plans one for `acquire`/`verify`; consider generalising it. |
+| E8 | **Five LLM test fakes have drifted from the `LLMEngine.stream` port** | `tests/server_fakes.py`, `tests/test_orchestrator.py` (two), `tests/test_summarizer.py`, and `tests/test_benchmark.py` declare `Iterator[str]` where the port returns `Generator[str, None, GenerationOutcome]`, and none accepts the `tools` keyword added for the capability contract. They pass today only because no caller supplies `tools` and the return value is discarded — and CI cannot see it, because `mypy` is scoped to `packages = ["eva"]`. The drift stays invisible until something passes `tools`, at which point all five break at once. Realign them together rather than one at a time. |
 
 ## Deferred to M1 (not backlog — scheduled)
 

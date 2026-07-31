@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from eva.core.errors import InvalidChatSequenceError
 from eva.core.events import FinishReason as FinishReason
-from eva.core.tools import ToolCall
+from eva.core.tools import ToolCall, ToolDefinition
 
 
 class ChatMessage(BaseModel):
@@ -33,16 +33,80 @@ class ChatMessage(BaseModel):
     than tracked separately because it is what makes a `tool` message
     verifiable — without it, a tool result is only positionally plausible.
     """
+    call_id: str | None = None
+    """On a `tool` message, the `ToolCall.id` this one answers.
+
+    Correlation lives here rather than on `ToolResult` because the ambiguity
+    it resolves is one of message *sequence*, and this is the type that models
+    the sequence. One generation can request several tools at once, and their
+    answers need not come back in the order they were issued; position alone
+    then attributes an answer to the wrong request, silently.
+
+    Not a copy of a provider wire field — adapters that need an id read it,
+    and adapters whose format is purely ordered (Qwen's `<tool_response>`)
+    ignore it. Optional so a single-call exchange stays as simple as it reads;
+    `validate_chat_messages` requires it exactly when position stops being
+    sufficient.
+    """
+
+
+def _reject_stray_call_id(message: ChatMessage) -> None:
+    """`call_id` names the tool call a message answers, so only a `tool`
+    message can carry one meaningfully. Checked for the leading system
+    message too, which the main loop never visits."""
+    if message.call_id is not None:
+        raise InvalidChatSequenceError(
+            f"Only a 'tool' message may set call_id; got one on '{message.role}'"
+        )
+
+
+def _check_tool_correlation(
+    message: ChatMessage, governing: ChatMessage | None, answered: list[str]
+) -> None:
+    """Verify that a `tool` message names the call it answers.
+
+    Required only once the governing turn issued more than one call: with a
+    single outstanding request there is nothing to confuse it with, and
+    demanding an id there would make the common exchange noisier for no gain.
+    With two or more, arrival order is not request order — a slow first tool
+    and a fast second one swap places — so an uncorrelated answer would be
+    attributed by position to the wrong request, and the model would be told
+    a plausible, wrong thing. `answered` accumulates the ids already used
+    under `governing`, so the same call cannot be answered twice.
+    """
+    if governing is None:  # unreachable via validate_chat_messages; defensive
+        return
+    issued = [call.id for call in governing.tool_calls]
+    if message.call_id is None:
+        if len(issued) > 1:
+            raise InvalidChatSequenceError(
+                f"This turn issued {len(issued)} tool calls, so each 'tool' message "
+                f"must set call_id (one of: {', '.join(issued)})"
+            )
+        return
+    if message.call_id not in issued:
+        raise InvalidChatSequenceError(
+            f"call_id '{message.call_id}' answers no call issued by the preceding "
+            f"assistant message (issued: {', '.join(issued) or '<none>'})"
+        )
+    if message.call_id in answered:
+        raise InvalidChatSequenceError(f"call_id '{message.call_id}' is answered more than once")
+    answered.append(message.call_id)
 
 
 def validate_chat_messages(messages: list[ChatMessage]) -> None:
     """Enforce the chat-format contract every template-based chat engine
     needs — Qwen, Llama, and Mistral's GGUF-embedded Jinja templates all
     reject a message list that isn't: exactly one system message, first,
-    then strictly alternating user/assistant turns. This is a generic
-    contract (no model-specific logic), so one validator call at message
-    composition time (`ContextBuilder.build()`) protects every current and
-    future `LLMEngine` adapter without each adapter needing its own check.
+    then alternating user/assistant turns, where an assistant turn that
+    issued tool calls may be answered by one or more `tool` messages before
+    the next assistant turn. This is a generic contract (no model-specific
+    logic), so one validator call at message composition time
+    (`ContextBuilder.build()`) protects every current and future
+    `LLMEngine` adapter without each adapter needing its own check.
+
+    It also enforces call/answer correlation, which no chat template checks
+    but every multi-call exchange depends on: see `_check_tool_correlation`.
     """
     if not messages:
         raise InvalidChatSequenceError("Message list must not be empty")
@@ -50,8 +114,13 @@ def validate_chat_messages(messages: list[ChatMessage]) -> None:
         raise InvalidChatSequenceError(
             f"The first message must have role 'system', got '{messages[0].role}'"
         )
+    _reject_stray_call_id(messages[0])
     expected: tuple[Literal["user", "assistant", "tool"], ...] = ("user",)
     previous: ChatMessage | None = None
+    # The assistant turn whose calls the current run of `tool` messages is
+    # answering; reset when an ordinary turn ends the run.
+    governing: ChatMessage | None = None
+    answered: list[str] = []
     for message in messages[1:]:
         if message.role == "system":
             raise InvalidChatSequenceError(
@@ -72,6 +141,12 @@ def validate_chat_messages(messages: list[ChatMessage]) -> None:
                     "A 'tool' message must follow an assistant message that issued "
                     "tool calls, or another 'tool' message"
                 )
+            if issuing:
+                governing, answered = previous, []
+            _check_tool_correlation(message, governing, answered)
+        elif message.role != "tool":
+            _reject_stray_call_id(message)
+            governing, answered = None, []
 
         if message.role == "user":
             expected = ("assistant",)
@@ -135,6 +210,8 @@ class LLMEngine(ABC):
         messages: list[ChatMessage],
         params: GenerationParams,
         should_abort: Callable[[], bool],
+        *,
+        tools: tuple[ToolDefinition, ...] = (),
     ) -> Generator[str, None, GenerationOutcome]:
         """Yield response text incrementally; honor `should_abort` per token.
 
@@ -142,4 +219,12 @@ class LLMEngine(ABC):
         body) the `GenerationOutcome`. Callers that only iterate keep working;
         a generator with a bare `return` yields `None`, which callers treat as
         an ordinary `stop` with no tool calls.
+
+        `tools` are the capabilities the model may be offered this pass —
+        descriptions only, never invocable objects, so implementing this port
+        never confers the ability to run one. Deciding *which* tools to offer
+        (permissions, context) happens before the call. Keyword-only with an
+        empty default: omitting it must generate exactly as it always has.
+        An adapter that cannot yet offer tools should say so rather than
+        ignore a non-empty tuple, which would silently answer without them.
         """

@@ -12,6 +12,7 @@ from typing import Any
 
 from eva.core.errors import ModelError
 from eva.core.events import FinishReason
+from eva.core.tools import ToolDefinition
 from eva.llm.base import ChatMessage, GenerationOutcome, GenerationParams, LLMEngine
 
 logger = logging.getLogger(__name__)
@@ -114,13 +115,28 @@ class LlamaCppLLM(LLMEngine):
         messages: list[ChatMessage],
         params: GenerationParams,
         should_abort: Callable[[], bool],
+        *,
+        tools: tuple[ToolDefinition, ...] = (),
     ) -> Generator[str, None, GenerationOutcome]:
         if self._llama is None:
             self.load()
         assert self._llama is not None
+        if tools:
+            # Say so rather than generating a tool-less answer that looks like
+            # the model declined to use them. Recognising Qwen's call markup
+            # and reporting `tool_calls` is a later milestone.
+            logger.warning(
+                "This adapter cannot offer tools to the model yet; generating "
+                "without the %d offered (%s)",
+                len(tools),
+                ", ".join(t.name for t in tools),
+            )
         with self._infer_lock:
             completion = self._llama.create_chat_completion(
-                messages=[m.model_dump() for m in messages],
+                # `exclude_none` keeps the payload exactly what it was before
+                # `call_id` existed: an unset correlation id is absent from
+                # the dict the chat template renders, not a null in it.
+                messages=[m.model_dump(exclude_none=True) for m in messages],
                 temperature=params.temperature,
                 top_p=params.top_p,
                 max_tokens=params.max_tokens,

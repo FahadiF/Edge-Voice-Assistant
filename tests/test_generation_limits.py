@@ -10,7 +10,9 @@ to run".
 
 from __future__ import annotations
 
+import inspect
 import json
+import logging
 import threading
 from collections.abc import Generator, Iterator
 from pathlib import Path
@@ -22,7 +24,8 @@ from eva.config.settings import SETTINGS_SCHEMA_VERSION, Settings, load_settings
 from eva.conversation.chunker import SentenceChunker
 from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.markdown import speakable_end
-from eva.llm.base import ChatMessage, GenerationParams
+from eva.core.tools import ToolDefinition
+from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.llm.llamacpp import LlamaCppLLM
 from eva.memory import db
 from eva.memory.sqlite_store import SQLiteMemoryStore
@@ -128,6 +131,74 @@ class TestFinishReason:
             engine.stream([ChatMessage(role="system", content="s")], GenerationParams(), abort)
         )
         assert reason == "abort", "a barge-in must not look like a finished answer"
+
+
+class TestToolAvailability:
+    """The LLM port can be *offered* tools, not handed executable ones.
+
+    Batch 1 could report a tool call through `GenerationOutcome` but had no
+    way to tell an adapter which tools existed, so the contract could only
+    ever describe an answer, never a question.
+    """
+
+    def _recording_engine(self) -> tuple[LlamaCppLLM, dict[str, Any]]:
+        engine = LlamaCppLLM.__new__(LlamaCppLLM)
+        seen: dict[str, Any] = {}
+
+        class _Fake:
+            def create_chat_completion(self, **kwargs: Any) -> Iterator[dict[str, Any]]:
+                seen.update(kwargs)
+                yield {"choices": [{"delta": {"content": "hi"}, "finish_reason": "stop"}]}
+
+        engine._llama = _Fake()  # type: ignore[attr-defined]
+        engine._infer_lock = threading.Lock()  # type: ignore[attr-defined]
+        return engine, seen
+
+    def test_omitting_tools_sends_the_payload_it_always_did(self) -> None:
+        """The correlation field must not leak into the chat template as a
+        null: an ordinary turn has to serialize exactly as before."""
+        engine, seen = self._recording_engine()
+        text, reason = _drain(
+            engine.stream(
+                [ChatMessage(role="system", content="s")], GenerationParams(), lambda: False
+            )
+        )
+        assert (text, reason) == ("hi", "stop")
+        # Exactly the two keys the template saw before correlation existed,
+        # plus the already-present `tool_calls`; no `call_id: None` alongside.
+        assert seen["messages"] == [{"role": "system", "content": "s", "tool_calls": ()}]
+
+    def test_definitions_reach_the_adapter(self, caplog: pytest.LogCaptureFixture) -> None:
+        """This adapter cannot offer tools yet, so it must say so rather than
+        answer as though the model declined to use them."""
+        engine, _seen = self._recording_engine()
+        definition = ToolDefinition(
+            name="get_weather", description="Look up the weather.", parameters={"type": "object"}
+        )
+        with caplog.at_level(logging.WARNING):
+            _drain(
+                engine.stream(
+                    [ChatMessage(role="system", content="s")],
+                    GenerationParams(),
+                    lambda: False,
+                    tools=(definition,),
+                )
+            )
+        assert "get_weather" in caplog.text
+        assert "cannot offer tools" in caplog.text
+
+    def test_the_port_takes_descriptions_not_executables(self) -> None:
+        """Dependency direction: `eva.llm` must not reach into `eva.tools`,
+        and an adapter must not receive anything it could invoke."""
+        annotation = inspect.signature(LLMEngine.stream).parameters["tools"].annotation
+        assert "ToolDefinition" in str(annotation)
+        assert "eva.tools" not in Path("src/eva/llm/base.py").read_text(encoding="utf-8")
+
+    def test_tools_is_keyword_only_with_an_empty_default(self) -> None:
+        """Existing adapters and fakes keep working untouched."""
+        parameter = inspect.signature(LLMEngine.stream).parameters["tools"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default == ()
 
 
 class TestTruncationReachesTheModel:

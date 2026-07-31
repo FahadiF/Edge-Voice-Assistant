@@ -61,12 +61,15 @@ npm test                     # vitest
 `pre-commit install` wires lint and format to every commit, and mypy to every push
 (mypy is slow enough that gating each commit hurts the edit loop).
 
-**Tests marked `integration`** need real audio hardware or model weights. They are
-excluded from CI and from the command above. Run them deliberately:
+**Tests marked `integration`** need real audio hardware or model weights, and are
+excluded from CI and from the command above. **No test carries the marker today**, so
+`-m "not integration"` currently runs the whole suite — the filter stays in CI so that
+such a test is excluded the moment someone writes one. Anything the automated suite
+needs but cannot assume is installed is reached through `pytest.importorskip`, which
+skips per test rather than per category.
 
-```bash
-pytest -m integration
-```
+Validation that genuinely needs a microphone, speaker, or GPU is not automated at
+all: it is the manual protocol in [MANUAL_TESTING.md](MANUAL_TESTING.md).
 
 ---
 

@@ -12,10 +12,11 @@ import asyncio
 from typing import Any, ClassVar
 
 import pytest
+from pydantic import ValidationError
 
 from eva.core.errors import RegistryError
 from eva.core.registry import Registry
-from eva.core.tools import Source, ToolCall, ToolResult
+from eva.core.tools import Source, ToolCall, ToolDefinition, ToolResult
 from eva.tools import Tool, tool_registry
 
 
@@ -120,6 +121,48 @@ class TestNeutralTypes:
         translating into them belongs in an adapter."""
         assert "tool_call_id" not in ToolCall.model_fields
         assert ToolCall.model_fields["arguments"].annotation is not str
+
+
+class TestToolDefinition:
+    """What an adapter is allowed to know about a tool.
+
+    The narrowing is the point: an LLM adapter must be able to describe a
+    capability to the model without being able to run one.
+    """
+
+    def test_a_definition_carries_what_the_model_needs_to_choose(self) -> None:
+        definition = _EchoTool().definition()
+        assert definition.name == "echo"
+        assert definition.description == "Return the text it is given."
+        assert definition.parameters["properties"]["text"]["type"] == "string"
+
+    def test_the_name_is_the_registry_id(self) -> None:
+        """The model calls a tool by the same id the registry resolves, so a
+        dispatcher can look up exactly what the model named."""
+        tool = _OtherTool()
+        assert tool.definition().name == tool.id
+
+    def test_a_definition_cannot_execute_anything(self) -> None:
+        """The whole reason the port takes definitions rather than tools:
+        handing an adapter something with `execute` would give the LLM layer
+        the ability to invoke capabilities."""
+        definition = _EchoTool().definition()
+        assert not hasattr(definition, "execute")
+        assert "execute" not in ToolDefinition.model_fields
+
+    def test_a_definition_omits_the_permission_that_gates_it(self) -> None:
+        """Permission filtering happens before a definition is derived, so the
+        model is never told about a gate it cannot see or satisfy."""
+        assert "required_permission" not in ToolDefinition.model_fields
+
+    def test_definitions_carry_no_provider_wire_fields(self) -> None:
+        """`{"type": "function", "function": {...}}` is OpenAI's envelope;
+        building it is an adapter's job, not the domain model's."""
+        assert set(ToolDefinition.model_fields) == {"name", "description", "parameters"}
+
+    def test_a_definition_is_immutable(self) -> None:
+        with pytest.raises(ValidationError):
+            _EchoTool().definition().name = "other"  # type: ignore[misc]
 
 
 class TestGlobalRegistry:
