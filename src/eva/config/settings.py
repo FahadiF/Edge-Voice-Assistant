@@ -441,6 +441,14 @@ class DesktopSettings(_Section):
     )
 
 
+class PluginsSettings(_Section):
+    enabled: list[str] = Field(
+        default_factory=list,
+        description="Ids of plugins the user has explicitly enabled; a newly "
+        "discovered plugin defaults to disabled until added here (ADR-011)",
+    )
+
+
 # ──────────────────────── Root ────────────────────────
 
 
@@ -467,6 +475,7 @@ class Settings(_Section):
     ui: UISettings = Field(default_factory=UISettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
     desktop: DesktopSettings = Field(default_factory=DesktopSettings)
+    plugins: PluginsSettings = Field(default_factory=PluginsSettings)
 
 
 def _migrate_raw(raw: Any) -> Any:

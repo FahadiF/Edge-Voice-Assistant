@@ -146,6 +146,10 @@ export interface DesktopSettings {
   hotkey_mode: "push-to-talk" | "push-to-mute" | "toggle";
 }
 
+export interface PluginsSettings {
+  enabled: string[];
+}
+
 export interface Settings {
   schema_version: number;
   profile: string;
@@ -161,6 +165,7 @@ export interface Settings {
   ui: UISettings;
   developer: DeveloperSettings;
   desktop: DesktopSettings;
+  plugins: PluginsSettings;
 }
 
 export interface ValidationErrorDetail {

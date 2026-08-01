@@ -37,6 +37,7 @@ SETTINGS_SECTIONS = {
     "ui": "UISettings",
     "developer": "DeveloperSettings",
     "desktop": "DesktopSettings",
+    "plugins": "PluginsSettings",
 }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from eva.config.settings import save_settings
 from eva.plugins.manager import PluginState
 from eva.server.deps import StateDep
 from eva.server.schemas import PluginStatusResponse
@@ -27,23 +28,27 @@ def _to_response(state: PluginState) -> PluginStatusResponse:
 
 @router.get("", response_model=list[PluginStatusResponse])
 def list_plugins(state: StateDep) -> list[PluginStatusResponse]:
-    return [_to_response(p) for p in state.plugin_manager.discover()]
+    return [_to_response(p) for p in state.plugin_manager.discover(state.settings)]
 
 
 @router.get("/{plugin_id}", response_model=PluginStatusResponse)
 def get_plugin(plugin_id: str, state: StateDep) -> PluginStatusResponse:
-    state.plugin_manager.discover()
+    state.plugin_manager.discover(state.settings)
     return _to_response(state.plugin_manager.get(plugin_id))
 
 
 @router.post("/{plugin_id}/enable", response_model=PluginStatusResponse)
 def enable_plugin(plugin_id: str, state: StateDep) -> PluginStatusResponse:
-    return _to_response(state.plugin_manager.enable(plugin_id))
+    response = _to_response(state.plugin_manager.enable(plugin_id, state.settings))
+    save_settings(state.settings, state.paths.settings_file)
+    return response
 
 
 @router.post("/{plugin_id}/disable", response_model=PluginStatusResponse)
 def disable_plugin(plugin_id: str, state: StateDep) -> PluginStatusResponse:
-    return _to_response(state.plugin_manager.disable(plugin_id))
+    response = _to_response(state.plugin_manager.disable(plugin_id, state.settings))
+    save_settings(state.settings, state.paths.settings_file)
+    return response
 
 
 @router.post("/{plugin_id}/reload", response_model=PluginStatusResponse)

@@ -25,6 +25,33 @@ EVA is designed as a local-first, offline voice assistant. The policy broadly co
 
 **Note:** Runtime tool execution, online web search, external API provider integrations, and multimodal capabilities are **NOT** currently implemented. They remain future additions. Please do not report hypothetical vulnerabilities for these unreleased capabilities until they exist in the repository.
 
+## Plugin trust model
+
+Plugins are ordinary Python packages installed with pip, discovered through the
+`eva.plugins` entry-point group (ADR-011). They run **in-process, with the same
+privileges as EVA itself** — this is ADR-011 phase 1; optional subprocess
+isolation for untrusted plugins is phase 2 and is not implemented.
+
+Two properties are worth stating precisely, because the words are easy to
+misread:
+
+- **Discovery imports the plugin.** Obtaining a plugin's manifest executes its
+  module. A plugin that is installed but has never been enabled has still had
+  its code run.
+- **Enabling gates *registration*, not *execution*.** Enabling is what lets a
+  plugin contribute a capability (today: a persona) into EVA's registries;
+  disabling withdraws it. "Disabled" therefore means *contributes nothing*, not
+  *does not run*.
+
+Consequently, **installing a plugin is the trust decision** — treat it exactly
+as you would `pip install` of any package. Newly discovered plugins default to
+disabled so that installation alone never grants a live capability, and
+registrations are namespaced per plugin so one plugin cannot overwrite a
+built-in or another plugin's contribution. Neither of those is a sandbox.
+
+Only the persona contribution kind is wired today; a plugin declaring any other
+kind is listed and toggleable, but that kind registers nothing.
+
 ## Reporting a Vulnerability
 
 We take the security of this project seriously. Please **DO NOT** disclose vulnerabilities publicly until we have had a chance to coordinate a fix.
