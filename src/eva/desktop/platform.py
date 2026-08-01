@@ -21,12 +21,27 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
+def get_icon_path(fmt: str = "ico") -> Path:
+    """Return the path to the canonical EVA desktop icon asset ('ico', 'png', 'svg')."""
+    base_dir = Path(__file__).parent / "assets" / "icon"
+    target = base_dir / f"icon.{fmt}"
+    if target.is_file():
+        return target
+    for ext in ("ico", "png", "svg"):
+        candidate = base_dir / f"icon.{ext}"
+        if candidate.is_file():
+            return candidate
+    return target
+
+
 class TrayIconState(StrEnum):
+
     """The visual states the tray icon can show (mapped from supervisor state
     by the controller, so this stays UI-only)."""
 
@@ -159,10 +174,31 @@ class PystrayDesktopPlatform(DesktopPlatform):
         from PIL import Image, ImageDraw
 
         size = 64
+        icon_path = get_icon_path("png")
+        if icon_path.is_file():
+            try:
+                resampling = getattr(Image, "Resampling", Image).LANCZOS
+                base_img = Image.open(icon_path).convert("RGBA").resize((size, size), resampling)
+                draw = ImageDraw.Draw(base_img)
+                badge_r = 8
+                cx, cy = 52, 52
+                draw.ellipse(
+                    (cx - badge_r, cy - badge_r, cx + badge_r, cy + badge_r),
+                    fill=_ICON_RGB[state],
+                    outline=(17, 17, 17, 255),
+                    width=2,
+                )
+                return base_img
+            except Exception:
+                logger.debug("Failed to render EVA tray icon", exc_info=True)
+
+
+
         image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         draw.ellipse((8, 8, size - 8, size - 8), fill=_ICON_RGB[state])
         return image
+
 
 
 def create_platform() -> DesktopPlatform | None:

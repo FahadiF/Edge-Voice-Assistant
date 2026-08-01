@@ -25,7 +25,7 @@ from typing import Any, Protocol
 
 from eva.config import get_app_paths, load_settings
 from eva.desktop.client import DesktopClient
-from eva.desktop.platform import create_platform
+from eva.desktop.platform import create_platform, get_icon_path
 from eva.desktop.state import MIN_HEIGHT, MIN_WIDTH, DesktopState
 from eva.desktop.supervisor import ServerSupervisor
 from eva.desktop.tray import TrayController
@@ -33,6 +33,23 @@ from eva.desktop.window import WindowController, should_start_hidden
 from eva.service import display_host
 
 logger = logging.getLogger(__name__)
+
+APP_USER_MODEL_ID = "FahadiF.EdgeVoiceAssistant.EVA.0.7"
+
+
+def _setup_windows_app_user_model_id() -> None:
+    """Set the Windows Application User Model ID (AppUserModelID) so Windows
+    taskbar groups the process as EVA instead of generic Python.exe."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        except Exception:
+            logger.debug("Could not set AppUserModelID", exc_info=True)
+
+
+
 
 
 class _WindowLike(Protocol):
@@ -228,6 +245,10 @@ def main() -> int:
     tray_available = platform is not None
     start_hidden = should_start_hidden(settings.desktop, tray_available=tray_available)
 
+    # Set Windows AppUserModelID before window creation so the taskbar decouples
+    # from python.exe and groups under EVA.
+    _setup_windows_app_user_model_id()
+
     # Keep the renderer alive while hidden to the tray (see helper) — must be set
     # before the window/WebView2 environment is created.
     _keep_webview_awake_while_hidden()
@@ -251,6 +272,7 @@ def main() -> int:
         js_api=bridge,
     )
     bridge._window = window  # the bridge needs the window for the Save dialog
+
 
     controller = WindowController(
         window,

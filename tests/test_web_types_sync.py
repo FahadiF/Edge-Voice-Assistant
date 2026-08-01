@@ -1,16 +1,15 @@
-"""`web/src/api/types.ts` must not drift from the backend it mirrors.
+"""`web/src/api/types.generated.ts` must not drift from the backend it mirrors.
 
-The TypeScript types are hand-maintained (ADR-023) and have silently gone stale
-before — `tts.lazy_load` was missing for two milestones, and `recommendation`
-would have been missed the same way. Drift here is invisible: TypeScript is
-perfectly happy with an interface that omits a field the server sends, so the
-UI just never shows it, and nothing fails.
+The settings portion is now generated (Batch 3, `npm run generate:types`), but
+generation only guarantees sync at the moment someone runs it — a later
+backend change with no regeneration, or a stale committed file, drifts exactly
+as silently as the old hand-written mirror did (`tts.lazy_load` was missing
+for two milestones; `recommendation` would have been missed the same way).
+These tests remain the actual CI enforcement.
 
-These tests compare the mirror against the real backend shapes — the pydantic
-settings models and an actual `describe()` response — so a field added on the
-server fails CI until the mirror is updated. Generating the types from OpenAPI
-would remove the duplication entirely; that is a build-pipeline change, and
-this is the lightweight guard until someone takes it on (see BACKLOG.md).
+`ModelCard` still has no backend schema to generate from (`ModelManager.
+describe()` returns a plain dict) and lives in
+`web/src/api/manual/dict-response-types.ts`, checked separately below.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import pytest
 
 from eva.config.settings import Settings
 
-TYPES_TS = Path(__file__).resolve().parents[1] / "web" / "src" / "api" / "types.ts"
+TYPES_TS = Path(__file__).resolve().parents[1] / "web" / "src" / "api" / "types.generated.ts"
 
 # Settings section → the TypeScript interface mirroring it.
 SETTINGS_SECTIONS = {
@@ -42,14 +41,22 @@ SETTINGS_SECTIONS = {
 
 
 def _interface_fields(source: str, name: str) -> set[str]:
-    """Top-level field names of `export interface <name> { … }`.
+    """Top-level field names of an interface, wherever it's declared.
+
+    Hand-maintained files declare `export interface <name> { … }` directly.
+    `types.generated.ts` instead exports `type <name> = components['schemas']
+    ['<name>']`, an alias into the nested `<name>: { … }` block under
+    `components.schemas` — so that indented form is tried as a fallback.
 
     Brace-depth aware so inline object literals (PermissionsSettings) do not
     leak their members into the parent's field set.
     """
     match = re.search(rf"export interface {re.escape(name)}\s*\{{", source)
     if match is None:
+        match = re.search(rf"(?:\r?\n)\s*{re.escape(name)}:\s*\{{", source)
+    if match is None:
         raise AssertionError(f"types.ts has no `export interface {name}`")
+
     fields: set[str] = set()
     depth = 0
     for line in source[match.end() :].splitlines():
@@ -68,7 +75,13 @@ def _interface_fields(source: str, name: str) -> set[str]:
 def types_source() -> str:
     if not TYPES_TS.exists():  # pragma: no cover - source checkouts always have it
         pytest.skip("web/ sources not present in this checkout")
-    return TYPES_TS.read_text(encoding="utf-8")
+    api_dir = TYPES_TS.parent
+    contents = []
+    for p in api_dir.rglob("*.ts"):
+        if not p.name.endswith(".test.ts"):
+            contents.append(p.read_text(encoding="utf-8"))
+    return "\n".join(contents)
+
 
 
 @pytest.mark.parametrize(("section", "interface"), sorted(SETTINGS_SECTIONS.items()))

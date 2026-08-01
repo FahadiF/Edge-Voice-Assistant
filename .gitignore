@@ -60,6 +60,7 @@ htmlcov/
 node_modules/
 web/dist/
 web/*.tsbuildinfo
+web/openapi.json
 
 # -----------------------------
 # Operating System

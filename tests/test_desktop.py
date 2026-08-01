@@ -328,3 +328,18 @@ def test_main_reports_missing_desktop_extra_without_traceback(
     out = capsys.readouterr().out
     assert 'pip install -e ".[desktop]"' in out
     assert "Traceback" not in out
+
+
+def test_get_icon_path_resolves_desktop_assets() -> None:
+    from eva.desktop.platform import get_icon_path
+
+    ico = get_icon_path("ico")
+    png = get_icon_path("png")
+    svg = get_icon_path("svg")
+    assert ico.is_file()
+    assert png.is_file()
+    assert svg.is_file()
+    assert ico.name == "icon.ico"
+    assert png.name == "icon.png"
+    assert svg.name == "icon.svg"
+
