@@ -259,7 +259,7 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
 
 Recorded here so the difference between the design and the implementation is never
 something a contributor has to discover by reading source. Each is scheduled; see
-[ROADMAP.md](ROADMAP.md).
+[ROADMAP.md](../project/ROADMAP.md).
 
 | Gap | Current state | Consequence |
 |---|---|---|

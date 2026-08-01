@@ -21,7 +21,7 @@ models are downloaded you can unplug the network and nothing changes.
 **Jump to:** [Why EVA](#why-eva) · [Quick start](#quick-start) ·
 [What it does](#what-it-does-today) · [Architecture](#architecture) ·
 [Hardware](#hardware-and-platform-support) · [Limitations](#limitations) ·
-[Contributing](#for-contributors) · [Documentation](#documentation)
+[Documentation](docs/index.md) · [Contributing](#for-contributors)
 
 ---
 
@@ -83,8 +83,8 @@ Once set up, you can run EVA in your browser or as a native desktop app:
 | `eva devices` | List audio input/output devices |
 | `eva listen` | Live voice-activity monitor — helpful for microphone troubleshooting |
 
-Full instructions: **[docs/INSTALLATION.md](docs/INSTALLATION.md)** ·
-Something not working? **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
+Full instructions: **[docs/development/INSTALLATION.md](docs/development/INSTALLATION.md)** ·
+Something not working? **[docs/development/TROUBLESHOOTING.md](docs/development/TROUBLESHOOTING.md)**
 
 ---
 
@@ -139,9 +139,9 @@ None of these names appear in the conversation engine. Each sits behind a port
 (`ASREngine`, `LLMEngine`, `TTSEngine`, `VADEngine`, `MemoryStore`, `EmbeddingProvider`)
 and is resolved from a registry at runtime.
 
-Deeper detail: **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** ·
-**[diagrams](docs/ARCHITECTURE_DIAGRAMS.md)** ·
-**[architecture decision records](docs/adr/README.md)**
+Deeper detail: **[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)** ·
+**[diagrams](docs/architecture/ARCHITECTURE_DIAGRAMS.md)** ·
+**[architecture decision records](docs/architecture/adr/README.md)**
 
 ---
 
@@ -209,7 +209,7 @@ and remote models interchangeable → an **optional, off-by-default** online mod
 search, retrieval, and citations.
 
 Online features will never be required, and enabling them will never reduce what works
-offline. See **[ROADMAP.md](docs/ROADMAP.md)** for detail and **[CHANGELOG.md](CHANGELOG.md)**
+offline. See **[ROADMAP.md](docs/project/ROADMAP.md)** for detail and **[CHANGELOG.md](CHANGELOG.md)**
 for what has already shipped.
 
 ---
@@ -217,7 +217,7 @@ for what has already shipped.
 ## For contributors
 
 Contributions are genuinely welcome. **[CONTRIBUTING.md](CONTRIBUTING.md)** covers the
-process; **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the working environment.
+process; **[docs/development/DEVELOPMENT.md](docs/development/DEVELOPMENT.md)** covers the working environment.
 
 ```bash
 pip install -e ".[dev]"
@@ -235,7 +235,7 @@ Five rules shape every change:
 
 1. Core code never names a concrete implementation — register it, resolve it by id.
 2. Dependencies point inward: subsystems depend on `core` and `config`, never the reverse.
-3. Every significant design decision gets an [ADR](docs/adr/README.md).
+3. Every significant design decision gets an [ADR](docs/architecture/adr/README.md).
 4. New behavior needs tests. Hardware- and model-dependent tests are marked `integration`
    and excluded from CI.
 5. Documentation is part of the change, not a follow-up.
@@ -247,20 +247,12 @@ non-NVIDIA acceleration, macOS packaging.
 
 ## Documentation
 
-| Document | For |
-|---|---|
-| [INSTALLATION.md](docs/INSTALLATION.md) | Installing and running EVA |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | When something doesn't work |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the system is built |
-| [ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | Sequence and component diagrams |
-| [API.md](docs/API.md) | REST + WebSocket reference |
-| [adr/README.md](docs/adr/README.md) | Architecture decision records |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
-| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Developer environment and workflow |
-| [ROADMAP.md](docs/ROADMAP.md) | Milestones and status |
-| [BACKLOG.md](docs/BACKLOG.md) | Unscheduled ideas, with rationale |
-| [MANUAL_TESTING.md](docs/MANUAL_TESTING.md) | Validation scenarios |
-| [CHANGELOG.md](CHANGELOG.md) | Release history |
+The full documentation suite is available at **[docs/index.md](docs/index.md)**, including:
+
+- **[Installation](docs/development/INSTALLATION.md)** and **[Development](docs/development/DEVELOPMENT.md)** guides
+- Detailed **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** and **[ADRs](docs/architecture/adr/README.md)**
+- Complete **[REST & WebSocket API Reference](docs/reference/API.md)**
+- Project **[Roadmap](docs/project/ROADMAP.md)** and **[Backlog](docs/project/BACKLOG.md)**
 
 ---
 
@@ -288,9 +280,7 @@ I would like to express my sincere gratitude to my thesis supervisor,
 for his guidance, valuable feedback, and support throughout the research that inspired
 this project.
 
-I am also grateful to the open-source community and the developers behind **llama.cpp**,
-**faster-whisper**, **Kokoro ONNX**, **Silero VAD**, **ONNX Runtime**, **CTranslate2**,
-and **FastAPI**, whose work makes modern local AI accessible to everyone.
+I am also grateful to the open-source community and the developers behind, whose work makes modern local AI accessible to everyone.
 
 ---
 
@@ -300,4 +290,4 @@ Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE).
 
 Model weights carry their own licenses; run `eva models list` to see each. `pystray`
 (system tray) is LGPL-3.0 and dynamically imported, per
-[ADR-027](docs/adr/ADR-027-native-desktop-shell.md).
+[ADR-027](docs/architecture/adr/ADR-027-native-desktop-shell.md).

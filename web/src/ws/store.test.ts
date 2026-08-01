@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerServerStateListener, useWsStore } from "./store";
+import { registerEventGapListener, registerServerStateListener, useWsStore } from "./store";
 
 function reset() {
   useWsStore.setState({
@@ -11,6 +11,7 @@ function reset() {
     downloads: {},
     eventLog: [],
     lastError: null,
+    lastSeq: null,
   });
 }
 
@@ -330,6 +331,73 @@ describe("WebSocket store reducers", () => {
       expect(listener).not.toHaveBeenCalled(); // first connect: caches are fresh
       useWsStore.getState().handleMessage({ type: "snapshot", data: { state: "idle", epoch: 0 } });
       expect(listener).toHaveBeenCalledTimes(1); // reconnect: invalidate
+    });
+  });
+
+  describe("event-sequence gap detection", () => {
+    afterEach(() => registerEventGapListener(null));
+
+    const evt = (seq: number) => ({ type: "StateChanged", data: { state: "idle", seq } });
+
+    it("does not fire while the sequence is contiguous", () => {
+      const onGap = vi.fn();
+      registerEventGapListener(onGap);
+      const s = useWsStore.getState();
+      s.handleMessage(evt(1));
+      s.handleMessage(evt(2));
+      s.handleMessage(evt(3));
+      expect(onGap).not.toHaveBeenCalled();
+    });
+
+    it("does not fire on the first event, which has nothing to compare against", () => {
+      const onGap = vi.fn();
+      registerEventGapListener(onGap);
+      useWsStore.getState().handleMessage(evt(4211)); // mid-stream join
+      expect(onGap).not.toHaveBeenCalled();
+    });
+
+    it("fires when the sequence skips", () => {
+      const onGap = vi.fn();
+      registerEventGapListener(onGap);
+      const s = useWsStore.getState();
+      s.handleMessage(evt(1));
+      s.handleMessage(evt(5)); // 2, 3, 4 were dropped by the bounded queue
+      expect(onGap).toHaveBeenCalledTimes(1);
+    });
+
+    it("still applies the event that revealed the gap", () => {
+      registerEventGapListener(vi.fn());
+      const s = useWsStore.getState();
+      s.handleMessage({ type: "StateChanged", data: { state: "idle", seq: 1 } });
+      s.handleMessage({ type: "StateChanged", data: { state: "speaking", seq: 9 } });
+      // The reconnect's snapshot will supersede this, but dropping a real,
+      // current event in the meantime would freeze the UI for no reason.
+      expect(useWsStore.getState().pipelineState).toBe("speaking");
+    });
+
+    it("treats a snapshot as a fresh baseline, not a gap", () => {
+      const onGap = vi.fn();
+      registerEventGapListener(onGap);
+      const s = useWsStore.getState();
+      s.handleMessage(evt(1));
+      // Reconnect: the server's counter kept running while we were away.
+      s.handleMessage({ type: "snapshot", data: { state: "idle", epoch: 0 } });
+      s.handleMessage(evt(8000));
+      expect(onGap).not.toHaveBeenCalled();
+    });
+
+    it("coalesces a burst of gaps into a single notification per gap", () => {
+      // The transport's own re-entry guard collapses concurrent reconnects;
+      // this pins the store half — each detected gap notifies exactly once,
+      // so three successive gaps are three calls, not nine.
+      const onGap = vi.fn();
+      registerEventGapListener(onGap);
+      const s = useWsStore.getState();
+      s.handleMessage(evt(1));
+      s.handleMessage(evt(3));
+      s.handleMessage(evt(6));
+      s.handleMessage(evt(10));
+      expect(onGap).toHaveBeenCalledTimes(3);
     });
   });
 

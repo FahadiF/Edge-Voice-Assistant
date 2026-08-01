@@ -238,7 +238,7 @@ curl -X POST http://127.0.0.1:8765/api/v1/voices/af_heart/preview \
   --output preview.pcm   # raw 16 kHz mono int16 PCM, no container
 ```
 Every response should be JSON (or raw PCM for the voice preview) — full
-endpoint list in [API.md](API.md). Errors follow
+endpoint list in [API.md](../reference/API.md). Errors follow
 `{"detail": ..., "error_type": ...}`.
 
 ---

@@ -22,22 +22,42 @@ export interface WsEnvelope {
  * Named here because several frontend files import it directly. */
 export type PipelineState = "idle" | "listening" | "thinking" | "speaking";
 
-export interface TurnStartedEvent { epoch: number }
-export interface TurnFinishedEvent { epoch: number; error: string | null }
-export interface TurnCancelledEvent {
+/**
+ * Fields every event payload carries, from `eva.core.events.Event`.
+ *
+ * `seq` is the bus's monotonic publication counter, stamped in
+ * `EventBus.publish()`. Subscriber queues are bounded and silently drop their
+ * oldest entry when full, so a gap in `seq` is the only signal a client gets
+ * that it missed something — `ws/store.ts` watches for one and forces a
+ * reconnect, which replays a fresh snapshot.
+ */
+export interface EventBase {
+  seq: number;
+}
+
+export interface TurnStartedEvent extends EventBase { epoch: number }
+export interface TurnFinishedEvent extends EventBase { epoch: number; error: string | null }
+export interface TurnCancelledEvent extends EventBase {
   epoch: number;
   reason: "barge-in" | "superseded" | "shutdown" | "manual";
 }
-export interface SpeechStartedEvent { epoch: number }
-export interface SpeechFinishedEvent { epoch: number; duration_ms: number }
-export interface BargeInDetectedEvent { epoch: number }
-export interface BargeInLatencyMeasuredEvent { epoch: number; detected_to_silent_ms: number }
-export interface PartialTranscriptEvent { epoch: number; text: string }
-export interface FinalTranscriptEvent { epoch: number; text: string; asr_ms: number }
-export interface LlmStartedEvent { epoch: number }
-export interface LlmTokenEvent { epoch: number; token: string }
-export interface LlmSentenceEvent { epoch: number; text: string }
-export interface LlmFinishedEvent {
+export interface SpeechStartedEvent extends EventBase { epoch: number }
+export interface SpeechFinishedEvent extends EventBase { epoch: number; duration_ms: number }
+export interface BargeInDetectedEvent extends EventBase { epoch: number }
+export interface BargeInLatencyMeasuredEvent extends EventBase {
+  epoch: number;
+  detected_to_silent_ms: number;
+}
+export interface PartialTranscriptEvent extends EventBase { epoch: number; text: string }
+export interface FinalTranscriptEvent extends EventBase {
+  epoch: number;
+  text: string;
+  asr_ms: number;
+}
+export interface LlmStartedEvent extends EventBase { epoch: number }
+export interface LlmTokenEvent extends EventBase { epoch: number; token: string }
+export interface LlmSentenceEvent extends EventBase { epoch: number; text: string }
+export interface LlmFinishedEvent extends EventBase {
   epoch: number;
   text: string;
   tokens: number;
@@ -48,18 +68,22 @@ export interface LlmFinishedEvent {
   /** Offset after which nothing in `text` is ever spoken; -1 if not computed. */
   speakable_end: number;
 }
-export interface TtsStartedEvent { epoch: number }
-export interface TtsAudioReadyEvent { epoch: number; ttfa_ms: number }
-export interface TtsFinishedEvent { epoch: number }
-export interface StateChangedEvent { state: PipelineState }
-export interface ModelDownloadProgressEvent {
+export interface TtsStartedEvent extends EventBase { epoch: number }
+export interface TtsAudioReadyEvent extends EventBase { epoch: number; ttfa_ms: number }
+export interface TtsFinishedEvent extends EventBase { epoch: number }
+export interface StateChangedEvent extends EventBase { state: PipelineState }
+export interface ModelDownloadProgressEvent extends EventBase {
   model_id: string;
   filename: string;
   bytes_done: number;
   bytes_total: number;
 }
-export interface ModelDownloadCompletedEvent { model_id: string }
-export interface ModelDownloadFailedEvent { model_id: string; error: string }
-export interface ErrorOccurredEvent { message: string; context: string }
-export interface ComponentLoadStartedEvent { component: string; label: string }
-export interface ComponentLoadFinishedEvent { component: string; ms: number; error: string }
+export interface ModelDownloadCompletedEvent extends EventBase { model_id: string }
+export interface ModelDownloadFailedEvent extends EventBase { model_id: string; error: string }
+export interface ErrorOccurredEvent extends EventBase { message: string; context: string }
+export interface ComponentLoadStartedEvent extends EventBase { component: string; label: string }
+export interface ComponentLoadFinishedEvent extends EventBase {
+  component: string;
+  ms: number;
+  error: string;
+}

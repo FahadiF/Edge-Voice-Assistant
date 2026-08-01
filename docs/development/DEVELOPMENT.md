@@ -2,7 +2,7 @@
 
 Working environment, quality gate, and codebase orientation for people changing EVA's
 code. For contribution *process* — issues, PRs, review expectations — see
-[CONTRIBUTING.md](../CONTRIBUTING.md).
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ---
 
@@ -118,7 +118,7 @@ port (ADR-010 amendment).
 
 ## 4. Architecture rules
 
-The five rules in [CONTRIBUTING.md](../CONTRIBUTING.md#the-five-architecture-rules) are
+The five rules in [CONTRIBUTING.md](../../CONTRIBUTING.md#the-five-architecture-rules) are
 the contract. The two that catch people most often:
 
 **Never name a concrete implementation in core code.** If you find yourself writing

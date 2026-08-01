@@ -140,7 +140,7 @@ is this same problem.
 
 Roughly 3.5 s to first audio is expected on the 6 GB reference platform. About 1.6 s of
 that is speech synthesis on CPU and about 1.65 s is language-model prefill — see
-[Limitations](../README.md#limitations). Options today:
+[Limitations](../../README.md#limitations). Options today:
 
 - Use the **Fast** preset (smaller models).
 - Shorten replies — the system prompt asks for brevity, but small models drift; a persona
@@ -160,7 +160,7 @@ set `asr.device` to `cpu` to keep recognition off the GPU.
 
 Known and measured: Whisper `small` confuses acoustically similar consonants (`fox`/`box`)
 on far-field laptop microphones. Investigated in depth — see
-[Limitations](../README.md#limitations). What helps today:
+[Limitations](../../README.md#limitations). What helps today:
 
 - **Get closer to the microphone**, or use a headset. Distance is the strongest factor.
 - **Disable Windows "Audio Enhancements"** on the microphone (Sound settings → device
@@ -234,4 +234,4 @@ sudo apt-get install libportaudio2
 
 Open an issue with your `eva diagnose` output, what you expected, what happened, and the
 relevant portion of the log from the directory `eva diagnose` prints. See
-[CONTRIBUTING.md](../CONTRIBUTING.md).
+[CONTRIBUTING.md](../../CONTRIBUTING.md).

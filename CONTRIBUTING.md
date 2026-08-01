@@ -5,7 +5,7 @@ local conversational AI, and it is built to be extended — most useful contribu
 new adapters and registry entries rather than changes to core code.
 
 This document covers **process**. For setting up your environment, running the quality
-gate, and understanding the codebase, see **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+gate, and understanding the codebase, see **[docs/DEVELOPMENT.md](docs/development/DEVELOPMENT.md)**.
 
 ---
 
@@ -25,10 +25,10 @@ gate, and understanding the codebase, see **[docs/DEVELOPMENT.md](docs/DEVELOPME
 ## Before you start
 
 **For anything beyond a bug fix or documentation edit, open an issue first.** EVA has a
-deliberate architecture recorded in [28 ADRs](docs/adr/README.md), and a design
+deliberate architecture recorded in [28 ADRs](docs/architecture/adr/README.md), and a design
 discussion before implementation saves rework for both of us.
 
-Please check [ROADMAP.md](docs/ROADMAP.md) and [BACKLOG.md](docs/BACKLOG.md) — the change
+Please check [ROADMAP.md](docs/project/ROADMAP.md) and [BACKLOG.md](docs/project/BACKLOG.md) — the change
 you have in mind may already be planned, or deliberately deferred for a reason worth
 knowing.
 
@@ -85,7 +85,7 @@ plausible-sounding changes that measured as noise. So:
 
 - **One logical change per PR.** Unrelated fixes bundled together are hard to review and
   harder to revert.
-- **The quality gate must pass** (see [DEVELOPMENT.md](docs/DEVELOPMENT.md)). CI runs it
+- **The quality gate must pass** (see [DEVELOPMENT.md](docs/development/DEVELOPMENT.md)). CI runs it
   on Windows and Linux.
 - **Write a description that explains *why*.** The diff shows what changed; the
   description should say what problem it solves and what alternatives you rejected.
@@ -136,4 +136,4 @@ same terms.
 If you add a dependency, check its license is compatible and note it in your PR.
 Copyleft dependencies need explicit discussion — the one existing case (`pystray`,
 LGPL-3.0) is dynamically imported and replaceable by design, per
-[ADR-027](docs/adr/ADR-027-native-desktop-shell.md).
+[ADR-027](docs/architecture/adr/ADR-027-native-desktop-shell.md).

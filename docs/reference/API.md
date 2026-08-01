@@ -110,7 +110,7 @@ profile shortcut; not to be confused with the unrelated, pre-existing `eva
 profiles`, the hardware/model presets). The CLI commands open the memory
 database directly (the same way `eva models` opens `ModelManager` directly)
 rather than going through HTTP — see
-[MANUAL_TESTING.md](MANUAL_TESTING.md) for a full walkthrough of both.
+[MANUAL_TESTING.md](../development/MANUAL_TESTING.md) for a full walkthrough of both.
 
 ## WebSocket event stream
 
@@ -147,6 +147,16 @@ orchestrator has always published; this is not a separate protocol. Clients
 never poll: settings changes, model downloads, and conversation activity are
 all observable purely by staying connected.
 
+Every `data` object also carries **`seq`**, a monotonic counter stamped when
+the event is published (omitted from the examples above for brevity). Each
+subscriber's queue is bounded and drops its oldest entry when full, so a slow
+client can miss events with no other indication — a break in `seq` is the only
+evidence. Clients should watch for one and reconnect: every connection opens
+with a fresh `snapshot`, which is the resynchronisation. `seq` restarts from
+the server's current counter, so treat the first event after any `snapshot` as
+a new baseline rather than comparing it to what came before the reconnect. The
+web UI does exactly this (`web/src/ws/store.ts`).
+
 `TtsSentenceStarted` (M7.1, ADR-028) is the one event published from the audio
 callback rather than the turn pipeline: it fires when a sentence starts coming
 out of the speaker, which is what lets a client display text at speaking pace
@@ -165,8 +175,8 @@ keeps the reply intact.
 - **No duplicated business logic.** Every router calls existing services
   (`ModelManager`, `eva.config.service`, `eva.onboarding`, the `Orchestrator`)
   — the API and the CLI are two thin clients of the same engine.
-- See [ADR-017](adr/ADR-017-platform-api.md) for the full rationale, and
-  [ADR-019](adr/ADR-019-memory-subsystem-and-sqlite-storage.md)–
-  [ADR-022](adr/ADR-022-personas-user-profiles-voices.md) for the M4 memory/
+- See [ADR-017](../architecture/adr/ADR-017-platform-api.md) for the full rationale, and
+  [ADR-019](../architecture/adr/ADR-019-memory-subsystem-and-sqlite-storage.md)–
+  [ADR-022](../architecture/adr/ADR-022-personas-user-profiles-voices.md) for the M4 memory/
   personalization endpoints specifically — they're additive to this API,
   not a new one.

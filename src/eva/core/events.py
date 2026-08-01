@@ -47,6 +47,18 @@ importing a subsystem: dependencies point inward (ADR-010).
 class Event(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    seq: int = 0
+    """Monotonic publication order, stamped by `EventBus.publish()`.
+
+    A subscriber's queue is bounded and drops its oldest entry when full, so a
+    slow consumer can miss events with no other signal that it happened. With
+    `seq`, a gap is arithmetic: the web UI notices `seq` skipping and forces a
+    reconnect, which replays a fresh snapshot (M7.3). Left at the 0 default on
+    an event that never went through `publish()` — notably `STREAM_CLOSED`,
+    which is handed to subscribers directly and is not part of the
+    client-visible sequence.
+    """
+
     @property
     def name(self) -> str:
         return type(self).__name__
@@ -260,6 +272,7 @@ class EventBus:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._history: deque[Event] = deque(maxlen=history_size)
         self._closed = False
+        self._seq = 0
 
     def recent_events(self) -> list[Event]:
         """The most recent published events (diagnostics; newest last)."""
@@ -302,7 +315,15 @@ class EventBus:
                 queue.put_nowait(STREAM_CLOSED)
 
     def publish(self, event: Event) -> None:
-        """Publish from the event-loop thread. Never blocks."""
+        """Publish from the event-loop thread. Never blocks.
+
+        Stamps a monotonic `seq` so a subscriber can tell a dropped event from
+        a quiet stream. `model_copy` rather than assignment because events are
+        frozen — and stamping here, rather than at construction, keeps all ~31
+        publish call sites unaware that sequencing exists.
+        """
+        self._seq += 1
+        event = event.model_copy(update={"seq": self._seq})
         self._history.append(event)
         for queue in self._subscribers:
             if queue.full():

@@ -6,7 +6,7 @@
  * `{type, data}` envelope, dispatched into the zustand store.
  */
 
-import { useWsStore } from "./store";
+import { registerEventGapListener, useWsStore } from "./store";
 
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 10_000;
@@ -53,20 +53,25 @@ function connect(): void {
 }
 
 /**
- * When the page becomes visible again (window restored from the tray / tab
- * refocused), reconnect immediately if the socket isn't open. A renderer that
- * was frozen while hidden can have a dropped or half-open socket with a pending
- * backoff timer; on restore we want the live stream back at once, not after a
- * multi-second backoff. No-op when the socket is already open.
+ * Drop the current socket (if any) and connect a fresh one, immediately.
+ *
+ * Shared by the two callers that need it — visibility restore and event-gap
+ * recovery — so the teardown sequence and its re-entry guard exist in exactly
+ * one place rather than being duplicated and drifting apart.
+ *
+ * Re-entry guard: a reconnect already in flight leaves `socket` in CONNECTING,
+ * and a burst of callers (several gaps detected within one tick, before any
+ * socket callback can run) must collapse into a single reconnect, not one
+ * apiece.
  */
-function onVisibilityChange(): void {
-  if (!started || document.visibilityState !== "visible") return;
-  if (socket && socket.readyState === WebSocket.OPEN) return;
+function forceReconnect(): void {
+  if (!started) return;
+  if (socket && socket.readyState === WebSocket.CONNECTING) return;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  backoff = INITIAL_BACKOFF_MS; // restore should feel instant
+  backoff = INITIAL_BACKOFF_MS; // a deliberate reconnect should feel instant
   if (socket) {
     socket.onclose = null; // don't let the old socket schedule a competing reconnect
     socket.onerror = null;
@@ -81,10 +86,35 @@ function onVisibilityChange(): void {
   connect();
 }
 
+/**
+ * When the page becomes visible again (window restored from the tray / tab
+ * refocused), reconnect immediately if the socket isn't open. A renderer that
+ * was frozen while hidden can have a dropped or half-open socket with a pending
+ * backoff timer; on restore we want the live stream back at once, not after a
+ * multi-second backoff. No-op when the socket is already open.
+ */
+function onVisibilityChange(): void {
+  if (!started || document.visibilityState !== "visible") return;
+  if (socket && socket.readyState === WebSocket.OPEN) return;
+  forceReconnect();
+}
+
+/**
+ * Force a reconnect after the store detects a gap in the event sequence
+ * (M7.3). Unlike visibility restore this deliberately reconnects an
+ * apparently-healthy OPEN socket: the connection is fine, but events were
+ * dropped, and the only way to resynchronise is a new connection — the server
+ * sends a fresh `snapshot` as the first message of every one.
+ */
+export function reconnectNow(): void {
+  forceReconnect();
+}
+
 /** Idempotent: called once from App mount. */
 export function startWebSocket(): void {
   if (started) return;
   started = true;
+  registerEventGapListener(reconnectNow);
   document.addEventListener("visibilitychange", onVisibilityChange);
   connect();
 }
@@ -94,6 +124,7 @@ export function startWebSocket(): void {
 export function stopWebSocket(): void {
   started = false;
   backoff = INITIAL_BACKOFF_MS;
+  registerEventGapListener(null);
   document.removeEventListener("visibilitychange", onVisibilityChange);
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);

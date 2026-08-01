@@ -1539,7 +1539,7 @@ any of M4's underlying design.
 - Startup banner (`eva run`) and `eva serve` now print the active persona,
   user profile, voice, and memory stats. `RuntimeSnapshot` gained
   `active_persona_id`, `active_profile_id`, `active_voice`.
-- [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md): step-by-step
+- [`docs/MANUAL_TESTING.md`](docs/development/MANUAL_TESTING.md): step-by-step
   end-to-end validation guide covering every M4 acceptance item.
 
 ### 2026-07-05 — M4: Memory, Personalization & Intelligence

@@ -45,7 +45,7 @@ Installation has three stages:
 > no packages on PyPI — only a source archive that would require a C++ compiler.
 > Prebuilt CPU and CUDA wheels live on the llama.cpp wheel index instead, and
 > `eva setup` selects the correct one for your machine automatically (see
-> [ADR-013](adr/ADR-013-llm-runtime-installation.md)). The base install therefore
+> [ADR-013](../architecture/adr/ADR-013-llm-runtime-installation.md)). The base install therefore
 > stays compiler-free and cross-platform.
 
 ---

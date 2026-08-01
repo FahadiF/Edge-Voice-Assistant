@@ -10,7 +10,7 @@ order of magnitude. The M6.2 pipeline trace measured the gap directly: the LLM
 produced all seven sentences of a reply within ~1.8 s while sentence 1 was
 still being synthesized, and playback stayed 2–10 s behind, its buffer growing
 throughout. The web UI appends every `LlmToken` to the live bubble as it
-arrives ([`web/src/ws/store.ts`](../../web/src/ws/store.ts)) and `eva run`
+arrives ([`web/src/ws/store.ts`](../../../web/src/ws/store.ts)) and `eva run`
 prints tokens inline, so in practice:
 
 - the user reads the entire answer,

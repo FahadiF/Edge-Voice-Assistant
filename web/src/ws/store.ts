@@ -83,6 +83,16 @@ export function registerServerStateListener(listener: (() => void) | null): void
   onServerStateChanged = listener;
 }
 
+/** Called when a break in the event `seq` shows the bus dropped events on the
+ * way here (M7.3). `socket.ts` registers its reconnect here rather than the
+ * store importing it: socket.ts already imports this module, and the reverse
+ * import would make that a cycle. Same indirection as the listener above. */
+let onEventGap: (() => void) | null = null;
+
+export function registerEventGapListener(listener: (() => void) | null): void {
+  onEventGap = listener;
+}
+
 export interface WsState {
   connected: boolean;
   snapshot: RuntimeSnapshot | null;
@@ -95,6 +105,10 @@ export interface WsState {
   componentLoading: Record<string, ComponentLoadState>;
   eventLog: EventLogEntry[];
   lastError: string | null;
+  /** `seq` of the last event applied, or null when there is nothing to compare
+   * against yet (before the first event, and after every snapshot). A jump
+   * away from `lastSeq + 1` means the bus dropped events on the way here. */
+  lastSeq: number | null;
 
   setConnected: (connected: boolean) => void;
   handleMessage: (envelope: WsEnvelope) => void;
@@ -142,6 +156,7 @@ export const useWsStore = create<WsState>((set, get) => ({
   componentLoading: {},
   eventLog: [],
   lastError: null,
+  lastSeq: null,
 
   setConnected: (connected) => set({ connected }),
 
@@ -180,11 +195,28 @@ export const useWsStore = create<WsState>((set, get) => ({
       }));
     }
 
+    // Gap detection (M7.3). Subscriber queues on the server are bounded and
+    // drop their oldest entry when full, so a slow client silently misses
+    // events; a break in `seq` is the only evidence. Reconnecting is the
+    // recovery — every new connection opens with a fresh snapshot. The event
+    // is still applied: it is real and current, and the snapshot that follows
+    // supersedes whatever this leaves inconsistent.
+    if (type !== "snapshot" && typeof data.seq === "number") {
+      const previous = get().lastSeq;
+      set({ lastSeq: data.seq });
+      if (previous !== null && data.seq !== previous + 1) {
+        onEventGap?.();
+      }
+    }
+
     switch (type) {
       case "snapshot": {
         const snapshot = data as unknown as RuntimeSnapshot;
         const isReconnect = get().snapshot !== null;
         set({
+          // A snapshot is a fresh baseline: whatever `seq` arrives next is by
+          // definition the first of this connection, not a gap from the last.
+          lastSeq: null,
           snapshot,
           pipelineState: snapshot.state,
           microphoneAvailable: snapshot.microphone_available,
