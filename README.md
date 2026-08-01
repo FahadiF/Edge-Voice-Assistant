@@ -18,14 +18,14 @@ models are downloaded you can unplug the network and nothing changes.
 > Known limitations are listed [plainly, further down](#limitations). Interfaces may still
 > change between releases.
 
-**Jump to:** [Why EVA](#why-eva) · [Quick start](#quick-start) ·
-[What it does](#what-it-does-today) · [Architecture](#architecture) ·
+**Jump to:** [Why EVA?](#why-eva) · [Who is it for?](#who-is-eva-for) · [Quick start](#quick-start) ·
+[Features](#what-it-does-today) · [Architecture](#architecture) ·
 [Hardware](#hardware-and-platform-support) · [Limitations](#limitations) ·
 [Documentation](docs/index.md) · [Contributing](#for-contributors)
 
 ---
 
-## Why EVA
+## Why EVA?
 
 Most voice assistants send your voice to someone else's computer. EVA doesn't — and it
 tries to do that without feeling like a compromise:
@@ -39,6 +39,14 @@ tries to do that without feeling like a compromise:
   resolved through a registry. Changing the language model is a setting, not a patch.
 - **It is honest about itself.** Asked to do something it cannot do, EVA says so instead
   of inventing an answer.
+
+---
+
+## Who is EVA for?
+
+- **Privacy-conscious users:** Your voice and data never leave your machine.
+- **Offline AI enthusiasts:** Run a full conversational stack entirely locally.
+- **Developers & Researchers:** A hackable, modular architecture built in Python to experiment with local LLMs, TTS, and VAD.
 
 ---
 
@@ -247,7 +255,7 @@ non-NVIDIA acceleration, macOS packaging.
 
 ## Documentation
 
-The full documentation suite is available at **[docs/index.md](docs/index.md)**, including:
+The full documentation suite is available at the **[Documentation Homepage](docs/index.md)**, including:
 
 - **[Installation](docs/development/INSTALLATION.md)** and **[Development](docs/development/DEVELOPMENT.md)** guides
 - Detailed **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** and **[ADRs](docs/architecture/adr/README.md)**
