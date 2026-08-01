@@ -58,7 +58,6 @@ one. See ADR-003 § Model Selection History for the measurements taken so far.
 
 | # | Item | Rationale |
 |---|---|---|
-| E1 | **Generate `web/src/api/types.ts` from OpenAPI** | The mirror is hand-maintained and has drifted twice. `tests/test_web_types_sync.py` now fails CI on drift, which removes the *risk*; generation would remove the *duplication*. A build-pipeline change (openapi-typescript + a check-in step), so it needs its own scoping. |
 | E3 | **pre-commit strips Markdown hard line breaks** | `trailing-whitespace` removed an intentional two-space break in README during the documentation milestone. Fix: `args: [--markdown-linebreak-ext=md]`. |
 | E4 | **README test-count badge is hardcoded** | `837 passing` will rot. Either wire it to CI or drop it. |
 | E5 | **`docs/adr/README.md` is hand-maintained** | 28 entries with titles and dates, updated by hand per ADR. Fine now; generate it if the count grows. |

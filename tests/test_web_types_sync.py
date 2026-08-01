@@ -83,7 +83,6 @@ def types_source() -> str:
     return "\n".join(contents)
 
 
-
 @pytest.mark.parametrize(("section", "interface"), sorted(SETTINGS_SECTIONS.items()))
 def test_settings_section_matches_typescript(
     types_source: str, section: str, interface: str

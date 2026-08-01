@@ -29,7 +29,13 @@ class MemoryConversation(BaseModel):
 
 
 class MemoryTurn(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    # EXPERIMENTAL (see investigation): json_schema_serialization_defaults_required
+    # makes the OpenAPI *response* schema mark `id` as required (it is always
+    # present once served) while `MemoryTurn(...)` construction can still omit
+    # it (the genuine "None before insert" case). Validation-mode schema and
+    # runtime construction are unaffected — only the serialization-mode schema
+    # changes, which is what FastAPI's response docs are generated from.
+    model_config = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
 
     id: int | None = None  # None before insert
     conversation_id: str
@@ -56,7 +62,12 @@ class MemorySummary(BaseModel):
 
 
 class UserProfile(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    # preferred_* default to None but are always present once served —
+    # json_schema_serialization_defaults_required makes the OpenAPI response
+    # schema say so without affecting construction. Deliberately NOT applied to
+    # CreateUserProfileRequest/UpdateUserProfileRequest — those are genuinely
+    # partial (create/PATCH) input shapes, not response shapes.
+    model_config = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
 
     id: str
     nickname: str = ""

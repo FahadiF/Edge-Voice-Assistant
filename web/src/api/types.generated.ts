@@ -1627,7 +1627,7 @@ export interface components {
         /** MemoryTurn */
         MemoryTurn: {
             /** Id */
-            id?: number | null;
+            id: number | null;
             /** Conversation Id */
             conversation_id: string;
             /**
@@ -1648,7 +1648,7 @@ export interface components {
              */
             language: string;
             /** Metadata */
-            metadata?: {
+            metadata: {
                 [key: string]: unknown;
             };
             /**
@@ -1862,11 +1862,11 @@ export interface components {
             /** Ram Total Mb */
             ram_total_mb: number;
             /** Gpu Percent */
-            gpu_percent?: number | null;
+            gpu_percent: number | null;
             /** Vram Used Mb */
-            vram_used_mb?: number | null;
+            vram_used_mb: number | null;
             /** Vram Total Mb */
-            vram_total_mb?: number | null;
+            vram_total_mb: number | null;
         };
         /**
          * ResumeConversationRequest
@@ -1913,8 +1913,11 @@ export interface components {
             devices: {
                 [key: string]: string;
             };
-            /** State */
-            state: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "idle" | "listening" | "thinking" | "speaking";
             /** Epoch */
             epoch: number;
             /** Microphone Available */
@@ -2221,11 +2224,11 @@ export interface components {
              */
             nickname: string;
             /** Preferred Language */
-            preferred_language?: string | null;
+            preferred_language: string | null;
             /** Preferred Voice */
-            preferred_voice?: string | null;
+            preferred_voice: string | null;
             /** Preferred Llm Model */
-            preferred_llm_model?: string | null;
+            preferred_llm_model: string | null;
             /**
              * Conversation Style
              * @default
@@ -2243,7 +2246,7 @@ export interface components {
              */
             timezone: string;
             /** Extra */
-            extra?: {
+            extra: {
                 [key: string]: unknown;
             };
             /**

@@ -180,8 +180,41 @@ Adding a field with a default requires no migration. Renaming, removing, or rest
 does: bump `SETTINGS_SCHEMA_VERSION` and add a case to `_migrate_raw()`. The v1→v2
 permissions regroup is the worked example.
 
-The web UI mirrors the schema by hand in `web/src/api/types.ts`. Update it in the same
-change, or the mirror drifts.
+The web UI's `Settings` type is generated, not hand-mirrored — see "Regenerating API
+types" below. Regenerate in the same change as a settings-schema edit, or the mirror
+drifts (`tests/test_web_types_sync.py` fails CI until you do).
+
+---
+
+## 7a. Regenerating API types
+
+Most of `web/src/api/types.generated.ts` comes from the backend's OpenAPI schema
+(ADR-023's schema-generation amendment). After changing any REST-facing pydantic model:
+
+```bash
+cd web
+npm run generate:types    # dumps openapi.json, regenerates types.generated.ts
+```
+
+Commit the regenerated file — it's committed output, not built fresh in CI, so CI's
+existing Python/Node job split never needs a cross-language step.
+
+Two files stay hand-maintained on purpose, in `web/src/api/manual/`:
+
+- **`websocket-types.ts`** — WebSocket event payloads. These travel over `/ws`, not as
+  an HTTP response, so `/openapi.json` has no knowledge of them regardless of backend
+  schema quality.
+- **`dict-response-types.ts`** — `ModelCard` and `MemoryExport`. Their endpoints return
+  a plain `dict[str, Any]` with no `response_model`, so there's no schema to generate
+  from until one is added.
+
+If a response field is always present once served but shows up as optional (`field?:`)
+in the generated output, the backend model likely has a `= None`/`default_factory`
+default that Pydantic correctly treats as "not required to construct" — which is a
+different question from "always present in the response." Add
+`json_schema_serialization_defaults_required=True` to that model's `model_config`
+(see `MemoryTurn`, `ResourceUsage`, `UserProfile` for examples) rather than adding a
+frontend-side type override or a parallel response-only class.
 
 ---
 

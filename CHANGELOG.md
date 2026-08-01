@@ -6,6 +6,24 @@ first release onward.
 
 ## [Unreleased]
 
+### 🔧 Developer Experience
+
+- The web UI's REST-facing TypeScript types (`web/src/api/types.generated.ts`) are now
+  generated from the backend's OpenAPI schema (`npm run generate:types`) instead of
+  hand-transcribed, closing a class of drift that had already caused two silent gaps
+  (`tts.lazy_load` missing for two milestones; `ChatMessage.tool_calls`/`call_id` absent
+  from the mirror since Batch 2). WebSocket event payloads and the two schema-less dict
+  responses (`ModelCard`, `MemoryExport`) remain hand-maintained in
+  `web/src/api/manual/`, since neither has an OpenAPI representation to generate from.
+- Several backend response models (`MemoryTurn`, `ResourceUsage`, `UserProfile`) now
+  declare `json_schema_serialization_defaults_required=True`, so fields that are always
+  present once served (but optional for in-process construction) are correctly marked
+  required in `/openapi.json` — matching the actual wire contract without adding
+  parallel response-only model classes.
+- `RuntimeSnapshot.state` is now typed as a precise `Literal["idle", "listening",
+  "thinking", "speaking"]` instead of a bare `str`, so the pipeline state enum is
+  generatable rather than needing a hand-maintained frontend override.
+
 ## [v0.7.0-alpha.1] — 2026-07-29
 
 ### ✨ Highlights

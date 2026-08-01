@@ -17,9 +17,15 @@ The web UI (`web/`, M5, ADR-023) is the reference consumer of this whole
 API — every endpoint and WebSocket event below has a corresponding page or
 live element in it (`eva serve --open` after `npm run build` in `web/`).
 Its TypeScript type mirror (`web/src/api/types.ts`) is a second, executable
-description of these shapes; if you change a schema here, that file (and
-its pinned test in `web/src/components/SchemaForm.test.tsx`) needs the
-matching update.
+description of these shapes. Most of it is generated from `/openapi.json`
+(`npm run generate:types` — ADR-023's schema-generation amendment); if you
+change a REST-facing schema here, regenerate rather than hand-edit. The
+exceptions are `web/src/api/manual/websocket-types.ts` (WebSocket event
+payloads, invisible to OpenAPI by transport, not by absence of a schema)
+and `manual/dict-response-types.ts` (`ModelCard`/`MemoryExport`, endpoints
+that genuinely return a schema-less dict) — those two files are still
+hand-maintained, and `tests/test_web_types_sync.py` is what fails CI if
+either the generated or the manual half drifts from the backend.
 
 ## Conventions
 

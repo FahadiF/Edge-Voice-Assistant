@@ -111,6 +111,52 @@ default browser) is the zero-extra-dependency alternative.
 - The M6 desktop milestone shrinks to: tray, global PTT hotkey, engine
   process supervision, first-run wizard window, installers.
 
+## Amendment (Batch 3, schema generation): the hand-maintained mirror is reversed
+
+§1 argued against OpenAPI codegen: *"a hand-maintained mirror, deliberately:
+an OpenAPI codegen step would add a generator dependency and a build-order
+coupling for ~40 interfaces that change rarely and fail loudly in tests when
+they drift."* Both premises turned out false. The mirror grew to ~60
+interfaces (not ~40), and it drifted silently more than once despite the
+"fail loudly" test (`tts.lazy_load` missing for two milestones; the
+`ChatMessage.tool_calls`/`call_id` fields added by Batch 2's tool contracts
+were absent from the hand mirror until this batch — the drift test only
+catches settings-section fields and `ModelCard`, not the rest of the surface
+by design at the time).
+
+**Decision, reversed for the REST-facing majority of the mirror:**
+`web/src/api/types.generated.ts` is generated from `create_app().openapi()`
+via `npm run generate:types` (`openapi-typescript`, dev-only dependency, MIT
+licensed, zero production bundle impact). Generation is a **local, explicitly
+invoked, committed-output** step, not a CI build step — CI's existing
+Python/Node job separation (`.github/workflows/ci.yml`) is unchanged;
+`tests/test_web_types_sync.py` remains the actual drift enforcement,
+because generation only guarantees sync at the moment someone runs it, not
+afterward.
+
+**Not reversed, and correctly so:** two categories have no OpenAPI
+representation at all and stay hand-maintained in `web/src/api/manual/`:
+WebSocket event payloads (`websocket-types.ts` — not an HTTP response, so
+invisible to `/openapi.json` regardless of backend schema quality) and
+schema-less dict responses (`dict-response-types.ts` — `ModelCard` and
+`MemoryExport`, whose backing endpoints return `dict[str, Any]` with no
+`response_model`). `types.ts` re-exports both plus the generated file, so no
+frontend import site changed.
+
+**A related, smaller correction the same investigation surfaced:** several
+backend Pydantic models used `= None` defaults for construction convenience
+on fields that are always present once served (e.g. `MemoryTurn.id`,
+`ResourceUsage.gpu_percent`), which OpenAPI reports as "not required" by
+Pydantic v2's documented default-value semantics — correct for construction,
+inaccurate for the response contract. Fixed via Pydantic's own
+`json_schema_serialization_defaults_required` config flag on the affected
+models, not by adding parallel response-only classes: this makes FastAPI's
+serialization-mode schema (which is what it uses for `/openapi.json` response
+docs since FastAPI 0.101.0) accurately required, while validation-mode
+construction — genuinely omitting `id` before a turn is inserted — is
+unaffected. Verified directly: schema diff scoped to exactly the intended
+model each time; construction without the defaulted fields still succeeds.
+
 ## Amendment (M5.1, 2026-07-05): react-markdown is not a "component framework"
 
 The "no component framework" decision (§1) rejected broad UI kits (Tailwind,

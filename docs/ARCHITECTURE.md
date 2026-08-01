@@ -173,7 +173,8 @@ edge-voice-assistant/
 │   │                         #   /api/v1/* and the WebSocket only, never an eva.* import
 │   └── src/
 │       ├── api/              # typed REST client (client.ts, endpoints.ts, types.ts —
-│       │                     #   a hand-maintained mirror of the pydantic schemas)
+│       │                     #   generated from /openapi.json, plus manual/ for the
+│       │                     #   WebSocket events and dict responses OpenAPI can't describe)
 │       ├── ws/                # WebSocket connection + zustand live-state store
 │       ├── theme/             # design tokens + dark/light/system ThemeProvider
 │       ├── components/        # shared UI (Layout, SchemaForm, dialogs, toasts)

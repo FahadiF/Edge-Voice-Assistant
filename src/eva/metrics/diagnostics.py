@@ -7,7 +7,7 @@ cheap enough to sample at UI refresh rates.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import psutil
 from pydantic import BaseModel, ConfigDict
@@ -21,7 +21,10 @@ if TYPE_CHECKING:
 
 
 class ResourceUsage(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    # gpu_percent/vram_*_mb default to None (no nvidia-smi) but are always
+    # present once served — json_schema_serialization_defaults_required makes
+    # the OpenAPI response schema say so without affecting construction.
+    model_config = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
 
     cpu_percent: float
     ram_used_mb: int
@@ -73,7 +76,7 @@ class RuntimeSnapshot(BaseModel):
     models: dict[str, str]  # kind → model id
     devices: dict[str, str]  # kind → device actually in use
     # Pipeline
-    state: str  # idle / listening / thinking / speaking
+    state: Literal["idle", "listening", "thinking", "speaking"]
     epoch: int
     microphone_available: bool  # mic permission on AND capturing (M5.7)
     microphone_muted: bool  # user muted capture; typed chat still works (M5.7)
