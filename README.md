@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 ![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen)
 
-# Edge Voice Assistant (EVA)
+# Edge Voice Assistant (EVA) <img width="25" height="25" alt="icon" src="https://github.com/user-attachments/assets/71fe0186-e329-4410-98e9-b1287b17b382" />
 
 **A private voice assistant that runs entirely on your own computer.**
 
