@@ -549,12 +549,27 @@ def _segment(settings: Settings, processed: Frame) -> SegmentationReport:
 def _record(settings: Settings, seconds: float) -> tuple[Frame, Frame, int, int]:
     """One pass of the real capture chain → (raw, processed, ms, dropped).
 
+    `seconds` is a ceiling, not a fixed duration. A live VAD + `SpeechSegmenter`
+    (the same endpointing `_segment()` replays afterward for the report) is
+    fed the processed stream as it arrives; recording stops the instant an
+    utterance completes — `utterance_active` transitioning True → False,
+    which happens only inside `_finish()` and only ever produces `UtteranceEnd`
+    or `UtteranceDiscarded` — so speech still in progress at the `seconds`
+    mark is never severed. If no utterance is active once the ceiling is
+    reached, recording stops there. If one is active, the segmenter's own
+    `max_utterance_s` safety timeout is what eventually ends it, which is why
+    the ring is sized for `seconds + max_utterance_s` rather than `seconds`
+    alone: that is the true worst case, not the ceiling by itself.
+
     Both rings are sized for the whole recording so nothing is dropped, and
     both are drained in step, which keeps the two streams sample-aligned:
     `DuplexAudioStream` pushes the raw and the processed copy of every frame
     in the same callback tick.
     """
-    capacity = int(seconds * 100) + 200  # 10 ms frames, generous headroom
+    from eva.vad.registry import create_vad
+
+    worst_case_s = seconds + settings.vad.max_utterance_s
+    capacity = int(worst_case_s * 100) + 200  # 10 ms frames, generous headroom
     processor = create_processor(settings.audio)
     clean_ring, raw_ring = FrameRing(capacity), FrameRing(capacity)
     stream = DuplexAudioStream(
@@ -566,17 +581,29 @@ def _record(settings: Settings, seconds: float) -> tuple[Frame, Frame, int, int]
         mic_gain=settings.audio.mic_gain,
         raw_tap=raw_ring,
     )
+    vad = create_vad(settings.vad.engine)
+    segmenter = SpeechSegmenter(settings.vad)
+    chunker = FrameChunker(vad.chunk_samples)
     raw_frames: list[Frame] = []
     clean_frames: list[Frame] = []
     started = time.perf_counter()
     stream.start()
     try:
-        while time.perf_counter() - started < seconds:
+        utterance_complete = False
+        while not utterance_complete:
+            if time.perf_counter() - started >= seconds and not segmenter.utterance_active:
+                break
             raw, clean = raw_ring.pop(), clean_ring.pop()
             if raw is not None:
                 raw_frames.append(raw)
             if clean is not None:
                 clean_frames.append(clean)
+                for chunk in chunker.push(clean):
+                    was_active = segmenter.utterance_active
+                    segmenter.feed(chunk, vad.process(chunk), False)
+                    if was_active and not segmenter.utterance_active:
+                        utterance_complete = True
+                        break
             if raw is None and clean is None:
                 time.sleep(_IDLE_SLEEP_S)
     except KeyboardInterrupt:
@@ -632,7 +659,7 @@ def run_capture_test(
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
-    print(f"Recording {seconds:.0f} s — say the phrase now (Ctrl+C to stop early).")
+    print(f"Recording (up to {seconds:.0f} s) — stops once you finish speaking (Ctrl+C to stop).")
     raw_pcm, clean_pcm, capture_ms, dropped = _record(settings, seconds)
     if raw_pcm.size == 0:
         print("No audio captured — is the microphone available and unmuted?")

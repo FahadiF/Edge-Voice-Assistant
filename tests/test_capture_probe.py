@@ -1,16 +1,24 @@
 """Capture-probe measurement logic (M7.2 diagnostic).
 
-The device-dependent half (`_record`, `run_capture_test`) needs a microphone
-and is exercised by hand, like `eva listen` / `eva echo-test`. Everything a
+The fully device-dependent half (`run_capture_test`) needs a microphone and is
+exercised by hand, like `eva listen` / `eva echo-test`. Everything a
 conclusion is drawn from — the signal metrics, WER, and the verdict the report
 prints — is pure and tested here, because those are what the investigation
 will actually be believed on.
+
+`_record`'s stop-condition logic (Batch 4A) is the exception: it is tested
+below by faking `DuplexAudioStream` and the VAD engine so the real
+`SpeechSegmenter` state machine can be driven deterministically, without a
+microphone or real wall-clock delay.
 """
 
 from __future__ import annotations
 
 import contextlib
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -23,12 +31,14 @@ from eva.audio.capture_probe import (
     SignalMetrics,
     VariantReport,
     _asr_config,
+    _record,
     _spy_on_transcribe,
     normalize_words,
     signal_metrics,
     word_error_rate,
 )
 from eva.audio.frames import SAMPLE_RATE
+from eva.audio.ring import FrameRing
 from eva.config.settings import Settings
 
 
@@ -348,3 +358,314 @@ class TestProvenance:
 class _StubAsr:
     _model_name = "small"
     device = "cpu"
+
+
+# ──────────────── _record() stop-condition harness ────────────────
+#
+# `_record` drives the real `SpeechSegmenter` live over the processed stream,
+# so these tests fake only the device boundary (`DuplexAudioStream`, the VAD
+# engine) and a controllable clock — the segmenter itself, `FrameChunker`, and
+# `FrameRing` are the genuine article. A chunk's speech/silence classification
+# is a marker (`chunk[0]`), not real signal analysis: that decision already has
+# its own test suite (Silero/`vad.base`); here only the segmenter's state
+# transitions and the timing around them are under test.
+
+_CHUNK_SAMPLES = 160  # 10 ms @ 16 kHz — chunk_ms comes out to a clean integer
+
+
+def _speech_chunk(n: int = _CHUNK_SAMPLES) -> np.ndarray:
+    return np.ones(n, dtype=np.int16)
+
+
+def _silence_chunk(n: int = _CHUNK_SAMPLES) -> np.ndarray:
+    return np.zeros(n, dtype=np.int16)
+
+
+class _FakeVad:
+    chunk_samples = _CHUNK_SAMPLES
+
+    def process(self, chunk: np.ndarray) -> float:
+        return 1.0 if chunk[0] == 1 else 0.0
+
+    def reset(self) -> None:
+        pass
+
+
+class _FakeDuplexStream:
+    """Replaces `DuplexAudioStream`: no device, just exposes the real rings
+    `_record` constructed so the fake clock/sleep can push scripted frames."""
+
+    instances: ClassVar[list[_FakeDuplexStream]] = []
+    pending_straggler_raw: ClassVar[np.ndarray | None] = None
+    pending_straggler_clean: ClassVar[np.ndarray | None] = None
+
+    def __init__(
+        self,
+        processor: object,
+        playback: object,
+        capture_ring: FrameRing,
+        *,
+        input_device: object = None,
+        output_device: object = None,
+        mic_gain: float = 1.0,
+        raw_tap: FrameRing | None = None,
+    ) -> None:
+        assert raw_tap is not None
+        self.capture_ring = capture_ring
+        self.raw_ring = raw_tap
+        self.stopped = False
+        _FakeDuplexStream.instances.append(self)
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        # Simulates the audio-callback thread pushing one more frame in the
+        # brief window between the main loop's last pop and the stream
+        # actually closing — the reason the post-loop drain exists at all.
+        if _FakeDuplexStream.pending_straggler_raw is not None:
+            self.raw_ring.push(_FakeDuplexStream.pending_straggler_raw)
+        if _FakeDuplexStream.pending_straggler_clean is not None:
+            self.capture_ring.push(_FakeDuplexStream.pending_straggler_clean)
+        self.stopped = True
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def perf_counter(self) -> float:
+        return self.now
+
+
+def _scripted_sleep(
+    clock: _FakeClock, script: Sequence[tuple[float, np.ndarray | None]]
+) -> Callable[[float], None]:
+    """Each real `time.sleep()` call in `_record`'s idle branch consumes one
+    `(advance_seconds, frame_or_None)` entry: advances the fake clock, and —
+    if a frame is given — pushes it into the most recently constructed fake
+    stream's rings, standing in for the next audio-callback tick. Once the
+    script runs out, sleep just advances the clock, like a quiet microphone."""
+    state = {"i": 0}
+
+    def fake_sleep(requested_s: float) -> None:
+        i = state["i"]
+        if i >= len(script):
+            clock.now += requested_s
+            return
+        advance, frame = script[i]
+        state["i"] += 1
+        clock.now += advance
+        if frame is not None:
+            stream = _FakeDuplexStream.instances[-1]
+            stream.raw_ring.push(frame)
+            stream.capture_ring.push(frame)
+
+    return fake_sleep
+
+
+def _vad_settings(**overrides: object) -> object:
+    return Settings().vad.model_copy(update=overrides)
+
+
+def _run_record(
+    monkeypatch: pytest.MonkeyPatch,
+    script: Sequence[tuple[float, np.ndarray | None]],
+    *,
+    seconds: float = 10.0,
+    vad_overrides: dict[str, object] | None = None,
+) -> tuple[np.ndarray, np.ndarray, int, int]:
+    import eva.audio.capture_probe as capture_probe_module
+
+    _FakeDuplexStream.instances = []
+    clock = _FakeClock()
+    settings = Settings().model_copy(update={"vad": _vad_settings(**(vad_overrides or {}))})
+    monkeypatch.setattr(time, "perf_counter", clock.perf_counter)
+    monkeypatch.setattr(time, "sleep", _scripted_sleep(clock, script))
+    monkeypatch.setattr(capture_probe_module, "DuplexAudioStream", _FakeDuplexStream)
+    monkeypatch.setattr("eva.vad.registry.create_vad", lambda engine_id: _FakeVad())
+    return _record(settings, seconds)
+
+
+class TestRecordingStopCondition:
+    """Batch 4A: `_record` stops on the segmenter's terminal-state invariant
+    (`utterance_active` True → False) instead of severing a fixed wall-clock
+    window mid-utterance."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_stragglers(self) -> None:
+        _FakeDuplexStream.pending_straggler_raw = None
+        _FakeDuplexStream.pending_straggler_clean = None
+
+    def test_stops_right_after_utterance_end(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        script = [(0.001, _speech_chunk()) for _ in range(5)] + [
+            (0.001, _silence_chunk()) for _ in range(5)
+        ]
+        raw, clean, capture_ms, dropped = _run_record(
+            monkeypatch, script, vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 20}
+        )
+        assert clean.size == 10 * _CHUNK_SAMPLES  # exactly what was needed, nothing more
+        assert raw.size == clean.size
+        assert capture_ms < 1000  # nowhere near the 10 s ceiling used by default
+        assert dropped == 0
+
+    def test_stops_right_after_utterance_discarded_as_noise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The invariant is `utterance_active` flipping False, not a specific
+        event type — a too-short burst (`UtteranceDiscarded`) must stop
+        recording exactly as promptly as a real `UtteranceEnd`."""
+        script = [(0.001, _speech_chunk()) for _ in range(2)] + [
+            (0.001, _silence_chunk()) for _ in range(5)
+        ]
+        _raw, clean, capture_ms, _dropped = _run_record(
+            monkeypatch, script, vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 30}
+        )
+        assert clean.size == 7 * _CHUNK_SAMPLES
+        assert capture_ms < 1000
+
+    def test_ceiling_does_not_cut_off_speech_in_progress(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bug this batch fixes: a fixed window severed speech that was
+        still in progress. Here the `seconds` ceiling elapses while the
+        segmenter is still mid-utterance (no frame pushed, clock alone
+        advances past it) — recording must keep going and capture every
+        speech chunk regardless."""
+        script = (
+            [(0.001, _speech_chunk()) for _ in range(3)]
+            + [(0.5, None)]  # ceiling (50 ms) elapses here — still mid-utterance
+            + [(0.001, _silence_chunk()) for _ in range(5)]
+        )
+        raw, clean, capture_ms, dropped = _run_record(
+            monkeypatch,
+            script,
+            seconds=0.05,
+            vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 10},
+        )
+        assert capture_ms > 50  # ran past the ceiling instead of stopping at it
+        assert clean.size == 8 * _CHUNK_SAMPLES  # all 3 speech + 5 silence chunks preserved
+        assert raw.size == clean.size
+        assert dropped == 0
+
+    def test_ceiling_stops_recording_when_no_utterance_is_active(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No speech ever starts: the ceiling is the only thing that can
+        stop recording, exactly like the old fixed-window behavior."""
+        script = [(0.03, None)]  # nothing but silence/no data, past the ceiling
+        raw, clean, capture_ms, _dropped = _run_record(monkeypatch, script, seconds=0.02)
+        assert capture_ms >= 20
+        assert raw.size == 0
+        assert clean.size == 0
+
+    def test_max_utterance_s_forced_finish_is_the_ultimate_backstop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Continuous speech that never pauses is bounded by the segmenter's
+        own `max_utterance_s` safety timeout, not by the recording ceiling —
+        proving recording can never hang even if speech never stops."""
+        chunk_count = 500  # 500 * 10 ms = 5 s = the minimum allowed max_utterance_s
+        script = [(0.0001, _speech_chunk()) for _ in range(chunk_count)]
+        raw, clean, _capture_ms, dropped = _run_record(
+            monkeypatch,
+            script,
+            seconds=0.01,
+            vad_overrides={"max_utterance_s": 5, "silence_timeout_ms": 800},
+        )
+        assert clean.size == chunk_count * _CHUNK_SAMPLES
+        assert raw.size == clean.size
+        assert dropped == 0
+
+    def test_only_the_first_utterance_is_captured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The probe records one utterance per run: once the first completes,
+        a second utterance's frames must never even be consumed."""
+        first = [(0.001, _speech_chunk()) for _ in range(5)] + [
+            (0.001, _silence_chunk()) for _ in range(5)
+        ]
+        second = [(0.001, _speech_chunk()) for _ in range(3)]
+        _raw, clean, _capture_ms, _dropped = _run_record(
+            monkeypatch,
+            first + second,
+            vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 20},
+        )
+        assert clean.size == 10 * _CHUNK_SAMPLES  # not 13 — the second batch was never touched
+
+    def test_ring_capacity_covers_ceiling_plus_max_utterance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The true worst case is speech starting just before the ceiling and
+        running the full `max_utterance_s` — the ring must be sized for that
+        sum, not for the ceiling alone, or a long utterance could overflow it."""
+        import eva.audio.capture_probe as capture_probe_module
+
+        capacities: list[int] = []
+
+        def spy_ring(capacity_frames: int) -> FrameRing:
+            capacities.append(capacity_frames)
+            return FrameRing(capacity_frames)
+
+        monkeypatch.setattr(capture_probe_module, "FrameRing", spy_ring)
+        _run_record(monkeypatch, [(0.01, None)], seconds=6.0, vad_overrides={"max_utterance_s": 30})
+        assert capacities == [int((6.0 + 30) * 100) + 200] * 2  # raw ring, clean ring
+
+    def test_post_stop_drain_still_collects_a_straggler_frame(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A frame the fake callback pushes only inside `stop()` — modeling
+        the real race between the main loop's last pop and the stream
+        actually closing — must still end up in the final recording."""
+        script = [(0.001, _speech_chunk()) for _ in range(5)] + [
+            (0.001, _silence_chunk()) for _ in range(5)
+        ]
+        _FakeDuplexStream.pending_straggler_raw = _silence_chunk()
+        _FakeDuplexStream.pending_straggler_clean = _silence_chunk()
+        raw, clean, _capture_ms, _dropped = _run_record(
+            monkeypatch, script, vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 20}
+        )
+        assert clean.size == 11 * _CHUNK_SAMPLES
+        assert raw.size == 11 * _CHUNK_SAMPLES
+
+    def test_raw_and_clean_stay_aligned_when_only_one_ring_gets_a_straggler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A race that lands a straggler in only one ring must not desync the
+        two recordings — the existing `min(...)` trim has to absorb it."""
+        script = [(0.001, _speech_chunk()) for _ in range(5)] + [
+            (0.001, _silence_chunk()) for _ in range(5)
+        ]
+        _FakeDuplexStream.pending_straggler_raw = _silence_chunk()  # clean ring gets none
+        raw, clean, _capture_ms, _dropped = _run_record(
+            monkeypatch, script, vad_overrides={"silence_timeout_ms": 50, "min_speech_ms": 20}
+        )
+        assert raw.size == clean.size == 10 * _CHUNK_SAMPLES
+
+    def test_keyboard_interrupt_still_stops_the_stream_cleanly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ctrl+C must still work exactly as before: caught, the stream is
+        stopped, and whatever was captured so far is returned rather than
+        raising out of `_record`."""
+        import eva.audio.capture_probe as capture_probe_module
+
+        clock = _FakeClock()
+        _FakeDuplexStream.instances = []
+        _FakeDuplexStream.pending_straggler_raw = None
+        _FakeDuplexStream.pending_straggler_clean = None
+
+        def raising_sleep(_requested_s: float) -> None:
+            stream = _FakeDuplexStream.instances[-1]
+            stream.raw_ring.push(_speech_chunk())
+            stream.capture_ring.push(_speech_chunk())
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(time, "perf_counter", clock.perf_counter)
+        monkeypatch.setattr(time, "sleep", raising_sleep)
+        monkeypatch.setattr(capture_probe_module, "DuplexAudioStream", _FakeDuplexStream)
+        monkeypatch.setattr("eva.vad.registry.create_vad", lambda engine_id: _FakeVad())
+
+        raw, clean, _capture_ms, _dropped = _record(Settings(), 10.0)
+
+        assert _FakeDuplexStream.instances[-1].stopped is True
+        assert raw.size == _CHUNK_SAMPLES  # the one frame pushed before the interrupt
+        assert clean.size == _CHUNK_SAMPLES
