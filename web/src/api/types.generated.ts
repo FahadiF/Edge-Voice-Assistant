@@ -1457,6 +1457,18 @@ export interface components {
              * @default qwen3.5-4b-instruct-q4_k_m
              */
             model: string;
+            providers: components["schemas"]["ProvidersSettings"];
+            /**
+             * Chain
+             * @description Provider fallback order, tried on construction/load failure only (never mid-stream — ADR-006 turn epochs do not model a mid-turn provider swap). Schema-only this batch: `engine` above remains the sole active-provider selector; automatic chain-walking is a future addition, not wired into build_assistant yet.
+             */
+            chain: string[];
+        };
+        /**
+         * LocalProviderSettings
+         * @description Runtime knobs for the local llama.cpp provider (Batch 8 / H7).
+         */
+        LocalProviderSettings: {
             /**
              * Context Length
              * @description Context window in tokens (VRAM grows with this)
@@ -1699,6 +1711,32 @@ export interface components {
             kind: ("llm" | "asr" | "tts" | "vad" | "embedding") | null;
         };
         /**
+         * OpenAICompatibleProviderSettings
+         * @description Config for the OpenAI-compatible adapter (Ollama/LM Studio/vLLM/...).
+         *
+         *     Local-only this milestone (Batch 8 decision 8.3): `base_url` must resolve
+         *     to loopback — the adapter's constructor enforces this, not just the UI.
+         */
+        OpenAICompatibleProviderSettings: {
+            /**
+             * Base Url
+             * @description OpenAI-compatible API base URL (loopback only this milestone)
+             * @default http://127.0.0.1:11434/v1
+             */
+            base_url: string;
+            /**
+             * Model
+             * @description Model name as the endpoint expects it (e.g. an Ollama tag)
+             * @default
+             */
+            model: string;
+            /**
+             * Api Key Ref
+             * @description Opaque secret reference (never a raw key), resolved via eva.core.secrets
+             */
+            api_key_ref: string | null;
+        };
+        /**
          * PermissionsSettings
          * @description What the assistant is allowed to know about / do on this machine
          *     (ADR-025, regrouped in M5.4). Read-only local facts default ON (they
@@ -1833,6 +1871,18 @@ export interface components {
              * @default true
              */
             learn_preferences: boolean;
+        };
+        /**
+         * ProvidersSettings
+         * @description Per-provider configuration, one fixed field per provider (Batch 8
+         *     decision 8.2) — not a `dict[str, ...]`. The Settings UI renders nested
+         *     settings only by resolving a `$ref` to a named schema; a dict of objects
+         *     has no such schema for the UI to resolve, so a fixed-key model is what
+         *     keeps this batch's schema change UI-safe with zero frontend edits.
+         */
+        ProvidersSettings: {
+            local: components["schemas"]["LocalProviderSettings"];
+            openai_compatible: components["schemas"]["OpenAICompatibleProviderSettings"];
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -2012,7 +2062,7 @@ export interface components {
             /**
              * Schema Version
              * @description Settings document version (for migration)
-             * @default 5
+             * @default 6
              */
             schema_version: number;
             /**
@@ -2418,6 +2468,7 @@ export type HardwareSummary = components['schemas']['HardwareSummary'];
 export type HealthResponse = components['schemas']['HealthResponse'];
 export type InterruptResponse = components['schemas']['InterruptResponse'];
 export type LLMSettings = components['schemas']['LLMSettings'];
+export type LocalProviderSettings = components['schemas']['LocalProviderSettings'];
 export type MemorySearchRequest = components['schemas']['MemorySearchRequest'];
 export type MemorySearchResult = components['schemas']['MemorySearchResult'];
 export type MemorySettings = components['schemas']['MemorySettings'];
@@ -2427,12 +2478,14 @@ export type MergeConversationsRequest = components['schemas']['MergeConversation
 export type MicrophoneRequest = components['schemas']['MicrophoneRequest'];
 export type MicrophoneResponse = components['schemas']['MicrophoneResponse'];
 export type ModelActivateRequest = components['schemas']['ModelActivateRequest'];
+export type OpenAICompatibleProviderSettings = components['schemas']['OpenAICompatibleProviderSettings'];
 export type PermissionsSettings = components['schemas']['PermissionsSettings'];
 export type PersonaProfile = components['schemas']['PersonaProfile'];
 export type PersonaSettingsEntry = components['schemas']['PersonaSettingsEntry'];
 export type PluginStatusResponse = components['schemas']['PluginStatusResponse'];
 export type PluginsSettings = components['schemas']['PluginsSettings'];
 export type PrivacyPermissions = components['schemas']['PrivacyPermissions'];
+export type ProvidersSettings = components['schemas']['ProvidersSettings'];
 export type ReadinessResponse = components['schemas']['ReadinessResponse'];
 export type RenameConversationRequest = components['schemas']['RenameConversationRequest'];
 export type ResourceUsage = components['schemas']['ResourceUsage'];

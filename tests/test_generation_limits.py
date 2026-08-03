@@ -264,7 +264,7 @@ class TestHistoryTokenBudget:
 
         built = ContextBuilder(settings, store).build(conv, "one more please")
         total = sum(_estimate(m.content) for m in built.messages)
-        ceiling = settings.llm.context_length - settings.conversation.max_tokens
+        ceiling = settings.llm.providers.local.context_length - settings.conversation.max_tokens
         assert total <= ceiling, (
             f"prompt is {total} tokens, leaving no room for "
             f"{settings.conversation.max_tokens} of generation"
@@ -374,4 +374,4 @@ class TestGenerationCapMigration:
 
     def test_the_cap_still_leaves_room_for_prompt_and_history(self) -> None:
         settings = Settings()
-        assert settings.conversation.max_tokens < settings.llm.context_length // 2
+        assert settings.conversation.max_tokens < settings.llm.providers.local.context_length // 2

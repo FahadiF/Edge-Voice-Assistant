@@ -249,8 +249,8 @@ See ADR-002…ADR-005 for full rationale and rejected alternatives.
 - Integration tests with recorded WAV fixtures driving the pipeline offline.
 - ruff (lint+format), mypy (**strict, whole package**), pytest, GitHub Actions CI
   (lint + type check + tests on Windows and Linux runners; model-free).
-  982 backend tests (1,067 total) as of v0.7.0-alpha.1; hardware/model-dependent tests are marked
-  `integration` and excluded from CI.
+  1156 backend tests (1251 total with the frontend suite) as of v0.7.0-alpha.1;
+  hardware/model-dependent tests are marked `integration` and excluded from CI.
 - Structured logging (optional JSON output), per-stage latency metrics exposed through
   the diagnostics snapshot. An opt-in per-sentence pipeline trace
   (`EVA_CONVERSATION_TRACE=1`) logs every streaming hand-off on one turn-relative clock.
@@ -266,10 +266,7 @@ something a contributor has to discover by reading source. Each is scheduled; se
 | **Tool Foundation Batch 1 vs Runtime Loop** | Tool contracts, capability models, and tool registry exist in `eva.tools`; runtime tool execution and online search are not yet wired into the conversation loop | Tool definitions and permissions exist, but runtime tool execution, online web search, and external API providers are deferred to future milestones |
 | **Plugin capability wiring — personas only** | Discovery, manifests, enable/disable, and capability registration all work (ADR-011): an enabled plugin's `setup(ctx)` registers into `persona_registry` through a narrow context, and disabling unregisters it. Only the **persona** contribution kind is wired; `contributes` may also name `tool`, `llm-engine`, and others, which stay declarative until their own batches | A plugin can contribute a persona end-to-end today. A plugin declaring any other kind is listed and toggleable, but that kind registers nothing |
 | **`managed_by="engine"` model integrity** | Engine-managed weights (faster-whisper) have install detection, prefetch, and removal (2026-07-27) but no integrity verification | A snapshot that finalizes corrupt is reported as installed and fails later inside CTranslate2 |
-| **LLM port assumes local weights** | `LLMEngine` exposes `load`/`unload`/`device` | A remote or server-backed provider cannot implement the port honestly. Blocks the provider abstraction. |
 | **Auto-summarization not wired** | `LLMSummarizer` and `summarize_after_turns` exist; nothing invokes them during a live conversation | Long conversations grow the prompt until the recent-turn window truncates it |
-| **Settings is one flat document** | Single pydantic model, strict keys | No structure for per-provider configuration, credentials, or fallback chains |
-| **No secret storage** | None anywhere in the project | Prerequisite for any authenticated provider |
 
 **Offline-by-construction is enforced by test, not by convention** (Batch 6). Two kinds of
 network traffic exist and must not be confused:
@@ -279,12 +276,14 @@ network traffic exist and must not be confused:
   audited egress point, and engine-managed weights through `huggingface_hub`, which owns
   its own HTTP stack. Nothing else in the codebase opens an outbound connection.
 - **Loopback IPC** — traffic to `127.0.0.1`/`::1`/`localhost`, which never leaves the
-  machine and is *not* egress. Three components rely on it and deliberately keep calling
+  machine and is *not* egress. Four components rely on it and deliberately keep calling
   `urllib.request` directly: `eva.desktop.client` (the desktop shell drives the engine
   over `/api/v1`), `eva.service` (the supervisor's health and graceful-shutdown probes
-  behind `eva start`/`stop`/`restart`), and `eva.cli`'s `eva status` probe. Routing local
-  IPC through the egress boundary would misfile it as the very thing that boundary exists
-  to contain.
+  behind `eva start`/`stop`/`restart`), `eva.cli`'s `eva status` probe, and
+  `eva.llm.openai_compat` (Batch 8, ADR-029) — the local OpenAI-compatible provider
+  (Ollama/LM Studio/vLLM), whose constructor rejects a non-loopback `base_url` outright.
+  Routing local IPC through the egress boundary would misfile it as the very thing that
+  boundary exists to contain.
 
 `eva.core.net.is_loopback_host()` is the single definition of that distinction, shared by
 production code and the test fixture so the two cannot drift.

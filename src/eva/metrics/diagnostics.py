@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from eva.config.settings import Settings
 from eva.hardware.detect import run_probe
+from eva.llm.base import engine_device
 from eva.metrics.turn import ResourceUsage, TurnMetrics
 
 if TYPE_CHECKING:
@@ -181,7 +182,7 @@ class DiagnosticsProvider:
             language=a.settings.conversation.language,
             models=a.active_models(),
             devices={
-                "llm": a.llm.device,
+                "llm": engine_device(a.llm),
                 "asr": a.asr.device,
                 "tts": a.tts.device,
                 "vad": "cpu",

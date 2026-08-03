@@ -41,3 +41,15 @@ map hardware → model (CPU-only: Qwen3-1.7B/Phi-4-mini class; 12 GB+: 7–9B cl
 - LLM port is defined around async token streams + abort; any backend implementing
   that contract (Ollama adapter, transformers adapter) can be added later.
 - Exact default model is re-validated in the M2 benchmark before being locked in.
+
+## Amendment (Batch 8, ADR-029): the port split, and the Ollama adapter arrives
+
+The "Alternatives rejected" section above predicted an Ollama adapter could be
+added later without disturbing this decision — ADR-029 (M7.4) delivers exactly
+that. `LlamaCppLLM` now additionally implements a `LocalWeights` protocol
+(`load`/`unload`/`device`), split out from the transport-neutral `LLMEngine`
+port every adapter (including the new OpenAI-compatible one, which covers
+Ollama) implements. Nothing about llama.cpp's own runtime, wheel selection, or
+generation contract changes here — this decision's rationale for choosing
+llama.cpp stands unmodified; only the shape of the port it implements grew a
+second, optional facet.

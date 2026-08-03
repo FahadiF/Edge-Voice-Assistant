@@ -417,10 +417,14 @@ prefetched and removed; zero behavior change.
 ### M7.4 — Provider Abstraction (fully offline)
 Split `LLMEngine` into a transport-neutral port plus an optional local-weights
 lifecycle, so the orchestrator stops assuming models are local files. Adds a provider
-chain with fallback, OS-keychain secret storage, an OpenAI-compatible adapter (which
+chain setting, OS-keychain secret storage, an OpenAI-compatible adapter (which
 covers Ollama, LM Studio, vLLM and most cloud vendors at once), and a nested settings
 structure. **Ships with local providers only** — this milestone proves the abstraction
-without touching privacy.
+without touching privacy. The provider chain exists as a settings field
+(`llm.chain`); fallback *execution* — actually walking the chain on a failed
+provider — is intentionally deferred past this milestone, since building it
+correctly would disturb `Assistant.preload()`'s pinned GPU-ownership load
+order (ADR-015 §4-5). See ADR-029 for the full rationale.
 **Exit:** llama.cpp runs as a registered provider with no orchestrator change; a local
 Ollama endpoint works through the OpenAI-compatible adapter; the full test suite passes
 with networking disabled; no credential material appears in any export or diagnostic.

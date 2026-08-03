@@ -27,6 +27,7 @@ picks between real alternatives. Copy the structure of any existing record:
 |---|---|
 | [006](ADR-006-concurrency-turn-epochs.md) | asyncio orchestration, worker threads, turn-epoch cancellation |
 | [002](ADR-002-llamacpp-llm-runtime.md) | llama.cpp (GGUF) as the LLM runtime |
+| [029](ADR-029-provider-abstraction.md) | Provider abstraction — transport-neutral LLM port, nested provider settings, secrets |
 | [021](ADR-021-context-builder.md) | Deterministic prompt composition |
 | [024](ADR-024-markdown-presentation-layer.md) | Markdown canonical everywhere except two presentation boundaries |
 | [016](ADR-016-multilingual-architecture.md) | Language profiles as registry data |
@@ -98,6 +99,7 @@ picks between real alternatives. Copy the structure of any existing record:
 | [026](ADR-026-engine-lifecycle-and-supervision.md) | Engine lifecycle — startup, shutdown, cancellation, supervision | Accepted | 2026-07-06 |
 | [027](ADR-027-native-desktop-shell.md) | Native desktop shell | Accepted | 2026-07-12 |
 | [028](ADR-028-speech-synchronized-text-display.md) | Speech-synchronized text display | Accepted | 2026-07-26 |
+| [029](ADR-029-provider-abstraction.md) | Provider abstraction — transport-neutral LLM port, nested provider settings, secrets | Accepted | 2026-08-03 |
 
 ---
 
@@ -106,10 +108,11 @@ picks between real alternatives. Copy the structure of any existing record:
 Recorded here rather than left for a contributor to discover:
 
 - **[ADR-011](ADR-011-plugin-sdk.md) is partially implemented.** Plugin discovery,
-  manifests, and enable/disable work. The mechanism by which a plugin's declared
-  `contributes` actually registers entries into the subsystem registries **does not exist
-  yet** — plugins can be listed and toggled, but cannot currently add capabilities.
-  Scheduled for the Architecture Stabilization milestone.
+  manifests, and enable/disable work. Of the contribution kinds a plugin can declare,
+  only **persona** is wired into the subsystem registries — an enabled plugin's persona
+  really registers. Other declared kinds (`tool`, `llm-engine`, ...) are listed and
+  toggleable but currently register nothing. Completing the remaining kinds is
+  scheduled for the Architecture Stabilization milestone.
 - **[ADR-025](ADR-025-permissions-and-system-information.md) permissions are partly
   aspirational by design.** `general.*`, `devices.microphone`, and
   `privacy.remember_conversations` are enforced. The `files`, `tools`, and
@@ -125,9 +128,11 @@ Designed but not yet written, pending the milestones that need them:
 
 | Proposed | Subject |
 |---|---|
-| ADR-029 | Provider abstraction — transport-neutral LLM port, local vs remote lifecycle |
 | ADR-030 | Capability and tool port — the abstraction behind the `tools` permissions |
 | ADR-031 | Online Mode — connection modes, consent, egress boundary, citations |
-| ADR-032 | Secret storage — OS keychain, never settings files |
 | ADR-033 | Plugin capability wiring — completing ADR-011 |
 | ADR-034 | Engine-managed model lifecycle — `ModelState`, integrity verification, repair (install state, prefetch, and removal shipped 2026-07-27 as a release fix) |
+
+ADR-029 (provider abstraction) shipped 2026-08-03 (Batch 8) — moved to the tables above.
+It also covers what was reserved here as ADR-032 ("Secret storage"): `eva.core.secrets`
+landed as part of the same coordinated change, not a separate ADR.

@@ -44,3 +44,16 @@ found three compounding architectural gaps — none of them threshold problems:
   version bumps) rides on the same persistence.
 - The settings file is created eagerly on first run, making the configuration
   inspectable/editable from day one.
+
+## Amendment (Batch 8, ADR-029): decision 4 narrowed for a non-local provider
+
+Decision 4 said plainly "engine ports expose `device`" — true for every
+adapter that existed when this was written, all of them local. ADR-029 splits
+`LLMEngine` into a transport-neutral port plus an optional `LocalWeights`
+facet (`load`/`unload`/`device`), because a remote/API-backed provider has no
+device to report. Decision 4 now reads: **local-weights-implementing ports
+expose `device`; any port reports its device via `engine_device()`, which
+returns `"remote"` for a provider that isn't `LocalWeights`** — never an
+`AttributeError`, never a guess. The startup banner, `eva run`, and the
+diagnostics API all read through `engine_device()` now; ASR and TTS are
+untouched (both remain local-only ports this batch).

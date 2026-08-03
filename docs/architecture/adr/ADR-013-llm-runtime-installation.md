@@ -51,3 +51,13 @@ universal wheels on PyPI and install cleanly with no compiler.
   fresh venv, `pip install -e ".[dev]"`, and confirm the commands either work or
   fail with actionable guidance — no `ModuleNotFoundError` may escape.
 - M8's packaged installers will bundle the runtime so end users skip `eva setup`.
+
+## Amendment (Batch 8, ADR-029): a new `[secrets]` extra follows the same shape
+
+`eva.core.secrets.KeyringSecretStore` needs the optional `keyring` package for
+OS-keychain-backed provider API keys. Rather than a new pattern, it follows
+this ADR's own optional-extra shape exactly: `pip install -e ".[secrets]"`,
+never imported at module load time, base install unaffected. The three-stage
+flow this ADR describes is otherwise untouched — `create_llm`'s factory
+signature changed (`Path` → `AppPaths`, ADR-029 §2) but still resolves the
+same installed weights the same way.

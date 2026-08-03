@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eva.core.errors import ConfigError
 
-SETTINGS_SCHEMA_VERSION = 5
+SETTINGS_SCHEMA_VERSION = 6
 
 
 class _Section(BaseModel):
@@ -102,9 +102,9 @@ class ASRSettings(_Section):
     )
 
 
-class LLMSettings(_Section):
-    engine: str = Field("llamacpp", description="LLM engine id (registry key)")
-    model: str = Field("qwen3.5-4b-instruct-q4_k_m", description="Installed LLM model id")
+class LocalProviderSettings(_Section):
+    """Runtime knobs for the local llama.cpp provider (Batch 8 / H7)."""
+
     context_length: Annotated[int, Field(ge=512, le=131072)] = Field(
         8192, description="Context window in tokens (VRAM grows with this)"
     )
@@ -114,6 +114,53 @@ class LLMSettings(_Section):
     threads: Annotated[int, Field(ge=0, le=128)] = Field(0, description="0 = auto (physical cores)")
     batch_size: Annotated[int, Field(ge=1, le=4096)] = Field(
         512, description="Prompt-processing batch size"
+    )
+
+
+class OpenAICompatibleProviderSettings(_Section):
+    """Config for the OpenAI-compatible adapter (Ollama/LM Studio/vLLM/...).
+
+    Local-only this milestone (Batch 8 decision 8.3): `base_url` must resolve
+    to loopback — the adapter's constructor enforces this, not just the UI.
+    """
+
+    base_url: str = Field(
+        "http://127.0.0.1:11434/v1",
+        description="OpenAI-compatible API base URL (loopback only this milestone)",
+    )
+    model: str = Field("", description="Model name as the endpoint expects it (e.g. an Ollama tag)")
+    api_key_ref: str | None = Field(
+        None,
+        description="Opaque secret reference (never a raw key), resolved via eva.core.secrets",
+    )
+
+
+class ProvidersSettings(_Section):
+    """Per-provider configuration, one fixed field per provider (Batch 8
+    decision 8.2) — not a `dict[str, ...]`. The Settings UI renders nested
+    settings only by resolving a `$ref` to a named schema; a dict of objects
+    has no such schema for the UI to resolve, so a fixed-key model is what
+    keeps this batch's schema change UI-safe with zero frontend edits."""
+
+    local: LocalProviderSettings = Field(default_factory=LocalProviderSettings)
+    openai_compatible: OpenAICompatibleProviderSettings = Field(
+        default_factory=OpenAICompatibleProviderSettings
+    )
+
+
+class LLMSettings(_Section):
+    engine: str = Field("llamacpp", description="LLM engine id (registry key)")
+    model: str = Field("qwen3.5-4b-instruct-q4_k_m", description="Installed LLM model id")
+    providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
+    chain: list[str] = Field(
+        default_factory=lambda: ["local"],
+        description=(
+            "Provider fallback order, tried on construction/load failure only "
+            "(never mid-stream — ADR-006 turn epochs do not model a mid-turn "
+            "provider swap). Schema-only this batch: `engine` above remains "
+            "the sole active-provider selector; automatic chain-walking is a "
+            "future addition, not wired into build_assistant yet."
+        ),
     )
 
 
@@ -482,6 +529,18 @@ def _migrate_raw(raw: Any) -> Any:
     """Upgrade an older settings document, dict-level, before validation —
     mirrors the memory database's numbered-migration pattern (ADR-019).
 
+    Each transform below is gated on `from_version` individually (Batch 8
+    decision 8.1), not on a single top-level "below current version" check.
+    The single-gate design used through v5 meant bumping
+    `SETTINGS_SCHEMA_VERSION` made every already-migrated document re-run
+    every prior transform, keyed only on the old default *value* — a v5 user
+    who deliberately re-set a field to what used to be the old default (e.g.
+    `sentence_max_chars: 350`) would have had it silently rewritten the
+    moment v6 shipped, with no version boundary to stop it. Gating each
+    transform on the version it actually migrates *from* closes that gap:
+    a v5 document skips every v1-v5 transform outright, regardless of its
+    field values, and only the v5→v6 transform below ever touches it.
+
     v1 → v2 (M5.4): flat `permissions` keys become grouped sections
     (ADR-025 regroup); the dead `conversation.memory_enabled` flag moves to
     `permissions.privacy.remember_conversations` (now actually enforced).
@@ -506,45 +565,75 @@ def _migrate_raw(raw: Any) -> Any:
     worst-case TTFA and cuts playback starvation by ~76%.  Only the old
     default (350) is migrated; any other value was deliberately set by the
     user and is preserved.
+
+    v5 → v6 (Batch 8, M7.4): flat `llm.{context_length,gpu_layers,threads,
+    batch_size}` fields nest under `llm.providers.local`; `llm.chain` is
+    added, defaulting to `["local"]`. `llm.engine`/`llm.model` are left at
+    the top level untouched (decision 8.2) — nothing reads them differently
+    after this migration than before it.
     """
-    if not isinstance(raw, dict) or raw.get("schema_version", 1) >= SETTINGS_SCHEMA_VERSION:
+    if not isinstance(raw, dict):
         return raw
-    perms = raw.get("permissions")
-    if isinstance(perms, dict) and "general" not in perms:
-        raw["permissions"] = {
-            "general": {
-                "internet": perms.get("internet", False),
-                "date_time": perms.get("date_time", True) or perms.get("timezone", True),
-                "system_information": any(
-                    perms.get(key, True) for key in ("cpu", "gpu", "ram", "os", "locale")
-                ),
-            },
-            "files": {"read_files": perms.get("local_files", False), "write_files": False},
-            "devices": {"camera": perms.get("camera", False), "microphone": True},
-            "tools": {
-                "browser": perms.get("browser", False),
-                "python": perms.get("python", False),
-                "shell": perms.get("shell", False),
-                "plugins": perms.get("plugins", True),
-            },
-            "privacy": {"remember_conversations": True, "learn_preferences": True},
-        }
-    conversation = raw.get("conversation")
-    if isinstance(conversation, dict) and "memory_enabled" in conversation:
-        remember = conversation.pop("memory_enabled")
-        raw.setdefault("permissions", {}).setdefault("privacy", {})["remember_conversations"] = (
-            remember
-        )
-    conversation = raw.get("conversation")
-    if isinstance(conversation, dict) and conversation.get("max_tokens") == 512:
-        conversation["max_tokens"] = 2048
-    tts = raw.get("tts")
-    if isinstance(tts, dict) and tts.get("voice") == "af_heart":
-        tts["voice"] = None
-    # v4 → v5: A8 bounded chunking
-    conversation = raw.get("conversation")
-    if isinstance(conversation, dict) and conversation.get("sentence_max_chars") == 350:
-        conversation["sentence_max_chars"] = 50
+    from_version = raw.get("schema_version", 1)
+    if from_version >= SETTINGS_SCHEMA_VERSION:
+        return raw
+
+    if from_version < 2:
+        perms = raw.get("permissions")
+        if isinstance(perms, dict) and "general" not in perms:
+            raw["permissions"] = {
+                "general": {
+                    "internet": perms.get("internet", False),
+                    "date_time": perms.get("date_time", True) or perms.get("timezone", True),
+                    "system_information": any(
+                        perms.get(key, True) for key in ("cpu", "gpu", "ram", "os", "locale")
+                    ),
+                },
+                "files": {"read_files": perms.get("local_files", False), "write_files": False},
+                "devices": {"camera": perms.get("camera", False), "microphone": True},
+                "tools": {
+                    "browser": perms.get("browser", False),
+                    "python": perms.get("python", False),
+                    "shell": perms.get("shell", False),
+                    "plugins": perms.get("plugins", True),
+                },
+                "privacy": {"remember_conversations": True, "learn_preferences": True},
+            }
+        conversation = raw.get("conversation")
+        if isinstance(conversation, dict) and "memory_enabled" in conversation:
+            remember = conversation.pop("memory_enabled")
+            raw.setdefault("permissions", {}).setdefault("privacy", {})[
+                "remember_conversations"
+            ] = remember
+
+    if from_version < 3:
+        tts = raw.get("tts")
+        if isinstance(tts, dict) and tts.get("voice") == "af_heart":
+            tts["voice"] = None
+
+    if from_version < 4:
+        conversation = raw.get("conversation")
+        if isinstance(conversation, dict) and conversation.get("max_tokens") == 512:
+            conversation["max_tokens"] = 2048
+
+    if from_version < 5:
+        conversation = raw.get("conversation")
+        if isinstance(conversation, dict) and conversation.get("sentence_max_chars") == 350:
+            conversation["sentence_max_chars"] = 50
+
+    if from_version < 6:
+        llm = raw.get("llm")
+        if isinstance(llm, dict):
+            local = {
+                key: llm.pop(key)
+                for key in ("context_length", "gpu_layers", "threads", "batch_size")
+                if key in llm
+            }
+            providers = llm.setdefault("providers", {})
+            if isinstance(providers, dict):
+                providers.setdefault("local", {}).update(local)
+            llm.setdefault("chain", ["local"])
+
     raw["schema_version"] = SETTINGS_SCHEMA_VERSION
     return raw
 

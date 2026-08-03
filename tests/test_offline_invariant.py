@@ -37,6 +37,10 @@ _URLLIB_ALLOWLIST: dict[str, str] = {
     "eva/desktop/client.py": "loopback IPC — desktop shell → local /api/v1",
     "eva/service.py": "loopback IPC — server supervisor health/shutdown probes",
     "eva/cli.py": "loopback IPC — `eva status` health/engine probe",
+    "eva/llm/openai_compat.py": (
+        "loopback IPC — local OpenAI-compatible provider "
+        "(Ollama/LM Studio/vLLM), M7.4 (Batch 8 decision 8.3)"
+    ),
 }
 
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
@@ -464,3 +468,33 @@ class TestLoopbackClientsUnaffected:
         assert "running (PID" in output  # it got past the PID check...
         assert "not responding" in output  # ...and really attempted the probe
         assert block_egress == [], "the CLI status probe was misclassified as egress"
+
+
+class TestOpenAICompatibleProviderIsLoopbackOnly:
+    """Batch 8 decision 8.3: the local OpenAI-compatible provider
+    (Ollama/LM Studio/vLLM) is loopback IPC, not egress — added to the
+    allowlist above rather than routed through `eva.core.net`. These prove
+    the classification is about the *destination*, exactly like the other
+    loopback clients, and that a remote endpoint cannot slip through."""
+
+    def test_a_loopback_endpoint_is_permitted_to_construct(
+        self, block_egress: list[object]
+    ) -> None:
+        from eva.llm.openai_compat import OpenAICompatibleLLM
+
+        # Construction alone must not touch the network at all — only a real
+        # stream() call would, and none happens here.
+        OpenAICompatibleLLM(base_url="http://127.0.0.1:11434/v1", model="llama3")
+        assert block_egress == []
+
+    def test_a_remote_endpoint_is_rejected_before_any_connection_is_attempted(
+        self, block_egress: list[object]
+    ) -> None:
+        from eva.core.errors import ModelError
+        from eva.llm.openai_compat import OpenAICompatibleLLM
+
+        with pytest.raises(ModelError, match="local address"):
+            OpenAICompatibleLLM(base_url="http://203.0.113.1/v1", model="llama3")
+        # Rejected at construction, before any socket was ever opened — the
+        # guard never even had to act.
+        assert block_egress == []

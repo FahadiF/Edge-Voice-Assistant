@@ -24,6 +24,7 @@ from eva.core.events import (
     TurnStarted,
 )
 from eva.engine import Assistant
+from eva.llm.base import engine_device
 
 
 def _render(event: Event) -> str | None:
@@ -169,7 +170,7 @@ def _startup_banner(assistant: Assistant) -> None:
             return model_id
 
     print(f"\nProfile: {settings.profile} (hardware tier: {tier.display_name})")
-    print(f"  LLM: {display_name(settings.llm.model)}  [{assistant.llm.device}]")
+    print(f"  LLM: {display_name(settings.llm.model)}  [{engine_device(assistant.llm)}]")
     print(f"  ASR: {display_name(settings.asr.model)}  [{assistant.asr.device}]")
     print(f"  TTS: {display_name(settings.tts.model)}  [{assistant.tts.device}]")
     print(f"  VAD: {settings.vad.engine}  [cpu]")

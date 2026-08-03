@@ -60,3 +60,7 @@ class MemoryStoreError(EvaError):
 
 class MemoryNotFoundError(MemoryStoreError):
     """A referenced conversation, turn, or user profile does not exist."""
+
+
+class SecretError(EvaError):
+    """A referenced secret could not be resolved (missing, wrong store)."""

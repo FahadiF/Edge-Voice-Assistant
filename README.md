@@ -2,7 +2,7 @@
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-success)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1156%20passing-brightgreen)
 
 # Edge Voice Assistant (EVA) <img width="25" height="25" alt="icon" src="https://github.com/user-attachments/assets/71fe0186-e329-4410-98e9-b1287b17b382" />
 
@@ -211,10 +211,13 @@ memory and personalization, web UI, and desktop shell. M7 (conversation experien
 progress — M7.1 (speech-synchronized text display) is done; M7.2 (ASR accuracy
 investigation) is complete with implementation pending.
 
-Planned next, in order: architecture stabilization → ASR model upgrade → performance work
-(GPU speech synthesis, prompt-cache reuse) → a unified provider abstraction making local
-and remote models interchangeable → an **optional, off-by-default** online mode with
-search, retrieval, and citations.
+The LLM port is now transport-neutral (M7.4/ADR-029): local llama.cpp and a local
+OpenAI-compatible adapter (Ollama/LM Studio/vLLM) both implement the same port, with
+OS-keychain-backed secret references for any provider that needs an API key.
+
+Planned next: ASR model upgrade → performance work (GPU speech synthesis, prompt-cache
+reuse) → an **optional, off-by-default** online mode with search, retrieval, and
+citations.
 
 Online features will never be required, and enabling them will never reduce what works
 offline. See **[ROADMAP.md](docs/project/ROADMAP.md)** for detail and **[CHANGELOG.md](CHANGELOG.md)**

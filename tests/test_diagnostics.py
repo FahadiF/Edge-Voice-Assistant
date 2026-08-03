@@ -62,7 +62,12 @@ def _stub_assistant() -> SimpleNamespace:
         bus=bus,
         orchestrator=orchestrator,
         audio=audio,
-        llm=SimpleNamespace(device="cuda"),
+        # `load`/`unload` are present alongside `device` so this stub matches
+        # `LocalWeights` structurally (Batch 8 / C1) — `engine_device()` reads
+        # `.device` only for an object shaped like a *local* engine; a bare
+        # `.device` attribute alone (no load/unload) now correctly reads as
+        # "remote", which is what a real API-backed provider actually is.
+        llm=SimpleNamespace(device="cuda", load=lambda: None, unload=lambda: None),
         asr=SimpleNamespace(device="cuda"),
         tts=SimpleNamespace(device="cpu"),
         memory=SimpleNamespace(stats=lambda: memory_stats),

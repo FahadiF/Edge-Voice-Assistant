@@ -71,6 +71,11 @@ cuda = [
 # CLI/server never imports these. pystray is LGPL-3.0 (dynamically imported,
 # replaceable — see ADR-027); pillow renders the tray status icon.
 desktop = ["pywebview>=5", "pystray>=0.19", "pillow>=10"]
+# OS-keychain secret storage (Batch 8 / H6, decision 8.4). The base install
+# ships EnvSecretStore (EVA_SECRET_<REF> environment variables) with no extra
+# dependency; KeyringSecretStore additionally needs this and is imported
+# lazily inside its own get(), never at package import time.
+secrets = ["keyring>=25"]
 
 [project.scripts]
 eva = "eva.cli:main"
@@ -153,6 +158,12 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # Optional desktop extra (M5, ADR-023) — never imported by the base install.
 module = ["webview.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional secrets extra (Batch 8 / H6, decision 8.4) — never imported by the
+# base install; KeyringSecretStore imports it lazily inside get().
+module = ["keyring.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

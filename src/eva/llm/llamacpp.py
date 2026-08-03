@@ -39,6 +39,13 @@ def _register_cuda_dll_paths() -> None:
 
 
 class LlamaCppLLM(LLMEngine):
+    """Implements `LocalWeights` (load/unload/device) alongside the
+    transport-neutral `LLMEngine` port (Batch 8 / C1) — `device` is a class
+    attribute, not one set only inside `load()`, so `is_local()`/
+    `engine_device()` can read it before the model is ever loaded."""
+
+    device: str = "unloaded"
+
     def __init__(
         self,
         model_path: Path,
@@ -149,19 +156,30 @@ class LlamaCppLLM(LLMEngine):
             # adapter or stub that never reports one is treated as complete.
             reason: FinishReason = "stop"
             try:
-                for chunk in completion:
-                    if should_abort():
-                        logger.debug("LLM generation aborted")
-                        return GenerationOutcome(reason="abort")
-                    choice = chunk["choices"][0]
-                    reported = choice.get("finish_reason")
-                    if reported in ("stop", "length"):
-                        reason = reported
-                    token = choice["delta"].get("content")
-                    if token:
-                        yield token
+                try:
+                    for chunk in completion:
+                        if should_abort():
+                            logger.debug("LLM generation aborted")
+                            return GenerationOutcome(reason="abort")
+                        choice = chunk["choices"][0]
+                        reported = choice.get("finish_reason")
+                        if reported in ("stop", "length"):
+                            reason = reported
+                        token = choice["delta"].get("content")
+                        if token:
+                            yield token
+                except Exception as exc:
+                    # No specific llama.cpp exception type to narrow to (unlike
+                    # the OpenAI-compatible adapter's urllib errors) — any
+                    # failure mid-generation gets the same ModelError contract
+                    # load() already gives callers, so both adapters expose
+                    # one failure type regardless of provider.
+                    raise ModelError(f"llama.cpp generation failed: {exc}") from exc
             finally:
                 # Ensure llama.cpp's generator cleanup runs even on abort.
+                # GeneratorExit (generator.close()) is a BaseException, not
+                # Exception, so it passes through the except above untouched —
+                # cancellation is not reclassified as a model error.
                 close = getattr(completion, "close", None)
                 if close is not None:
                     close()

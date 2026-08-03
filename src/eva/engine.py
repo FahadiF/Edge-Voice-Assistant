@@ -31,8 +31,8 @@ from eva.core.errors import ModelNotInstalledError
 from eva.core.events import ComponentLoadFinished, ComponentLoadStarted, EventBus
 from eva.embedding.base import EmbeddingProvider
 from eva.embedding.registry import create_embedding_provider
-from eva.llm.base import LLMEngine
-from eva.llm.registry import create_llm
+from eva.llm.base import LLMEngine, engine_device, is_local
+from eva.llm.registry import LOCAL_ENGINE_IDS, create_llm
 from eva.memory.base import MemoryStore, UserProfileStore
 from eva.memory.registry import create_stores
 from eva.memory.retention import apply_retention_policy
@@ -108,10 +108,17 @@ class Assistant:
         Windows that allocation does not fail — the driver pages GPU memory
         to host RAM, so the symptom is uniform slowdown across every GPU
         stage, with no exception and no device fallback to signal it.
+
+        The LLM entry is skipped when it is not `LocalWeights` (Batch 8 /
+        C1) — a remote/API-backed provider has no local weights to release.
         """
-        for name, engine in (("llm", self.llm), ("asr", self.asr), ("tts", self.tts)):
+        components: list[tuple[str, Callable[[], None]]] = []
+        if is_local(self.llm):
+            components.append(("llm", self.llm.unload))
+        components += [("asr", self.asr.unload), ("tts", self.tts.unload)]
+        for name, unload in components:
             try:
-                engine.unload()
+                unload()
             except Exception:  # teardown must never abort on one component
                 logger.exception("Unloading '%s' failed; continuing", name)
 
@@ -127,7 +134,9 @@ class Assistant:
         before its loop starts) so the UI renders per-component progress.
         With `tts.lazy_load` the TTS engine is skipped here and loads on
         first use (the Kokoro adapter self-loads; the voices API registers
-        voices on demand).
+        voices on demand). A remote/API-backed LLM provider (Batch 8 / C1)
+        has no local-weights load step, so it is skipped here the same way —
+        it has nothing to report progress on and nothing to wait for.
         """
         logger.info("Loading models (first run may download weights)...")
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="preload-cpu") as pool:
@@ -137,7 +146,8 @@ class Assistant:
             if self.embedding is not None:
                 embedding = self.embedding
                 cpu_futures.append(pool.submit(self._load_component, "embedding", embedding.load))
-            self._load_component("llm", self.llm.load)
+            if is_local(self.llm):
+                self._load_component("llm", self.llm.load)
             self._load_component("asr", self.asr.load)
             for future in cpu_futures:
                 future.result()  # re-raise the first CPU-side load failure
@@ -220,8 +230,18 @@ def required_models(settings: Settings) -> list[str]:
 
     The embedding model is intentionally excluded — semantic memory search
     is optional; keyword/FTS search works without it (ADR-020).
+
+    The LLM model is excluded when `llm.engine` is not a locally-installed
+    one (Batch 8 / C1): a remote/API-backed provider (`openai-compatible`)
+    has no local file for `ModelManager` to check, and `settings.llm.model`
+    there names a model on the *remote* endpoint — requiring it "installed"
+    locally would fail readiness for a working remote configuration.
     """
-    return [settings.llm.model, settings.tts.model]
+    models: list[str] = []
+    if settings.llm.engine in LOCAL_ENGINE_IDS:
+        models.append(settings.llm.model)
+    models.append(settings.tts.model)
+    return models
 
 
 def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = None) -> Assistant:
@@ -233,8 +253,10 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
     bus = bus or EventBus()
     manager = ModelManager(paths)
 
-    llm_path = manager.files_for(settings.llm.model)["model"]
-    llm = create_llm(settings, llm_path)
+    # Batch 8 (C1): the factory resolves its own path/config from `settings`
+    # and `paths` — converged on the pattern `eva.asr.registry` already uses,
+    # so a remote provider (no local file at all) registers the same way.
+    llm = create_llm(settings, paths)
     tts = create_tts(settings, manager.files_for(settings.tts.model))
     asr = create_asr(settings, paths)  # engine-managed weights (downloads on first load)
     memory, profiles = create_stores(settings, paths)
@@ -268,7 +290,7 @@ def build_assistant(settings: Settings, paths: AppPaths, bus: EventBus | None = 
         # is the same state the diagnostics snapshot publishes — the prompt
         # was the one consumer that never got it, which is why EVA guessed
         # when asked whether it was using the GPU.
-        runtime_devices=lambda: {"llm": llm.device, "asr": asr.device, "tts": tts.device},
+        runtime_devices=lambda: {"llm": engine_device(llm), "asr": asr.device, "tts": tts.device},
         # The model's own tokenizer, so the history budget measures what
         # llama.cpp will actually build rather than a chars/4 guess.
         token_counter=llm.count_tokens,

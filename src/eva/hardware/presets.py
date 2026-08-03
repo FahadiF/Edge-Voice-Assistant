@@ -155,7 +155,7 @@ def apply_preset(settings: Settings, preset_id: str, tier_id: str) -> None:
     models = preset.for_tier(tier_id)
     settings.profile = preset_id
     settings.llm.model = models.llm_model
-    settings.llm.context_length = models.context_length
+    settings.llm.providers.local.context_length = models.context_length
     settings.asr.model = models.asr_model
     settings.asr.device = models.asr_device
     settings.tts.engine = models.tts_engine

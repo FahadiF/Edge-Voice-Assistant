@@ -39,7 +39,7 @@ class TestPresets:
         assert settings.profile == "fast"
         assert settings.llm.model == "qwen3-1.7b-instruct-q4_k_m"
         assert settings.asr.model == "faster-whisper/base"
-        assert settings.llm.context_length == 4096
+        assert settings.llm.providers.local.context_length == 4096
 
     def test_unknown_tier_falls_back_to_cpu_floor(self) -> None:
         settings = Settings()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 from eva.config.settings import (
     SETTINGS_SCHEMA_VERSION,
@@ -144,3 +145,95 @@ class TestMaxTokensMigrationComposition:
         assert settings.conversation.max_tokens == 2048
         assert settings.conversation.sentence_max_chars == 50
         assert settings.schema_version == SETTINGS_SCHEMA_VERSION
+
+
+# ── v5 → v6 (Batch 8: llm.{context_length,gpu_layers,threads,batch_size} nest
+#    under llm.providers.local; llm.chain is added) ─────────────────────────
+
+
+def _v5_doc(**llm_overrides: object) -> dict[str, Any]:
+    """A minimal v5 settings document with the old flat `llm` fields."""
+    llm: dict[str, Any] = {
+        "engine": "llamacpp",
+        "model": "qwen3.5-4b-instruct-q4_k_m",
+        "context_length": 8192,
+        "gpu_layers": -1,
+        "threads": 0,
+        "batch_size": 512,
+    }
+    llm.update(llm_overrides)
+    return {"schema_version": 5, "llm": llm}
+
+
+class TestBatch8ProviderMigration:
+    def test_flat_fields_nest_under_providers_local(self) -> None:
+        raw = _v5_doc(context_length=4096, gpu_layers=20, threads=6, batch_size=256)
+        result = _migrate_raw(raw)
+        assert result["llm"]["providers"]["local"] == {
+            "context_length": 4096,
+            "gpu_layers": 20,
+            "threads": 6,
+            "batch_size": 256,
+        }
+        assert result["schema_version"] == SETTINGS_SCHEMA_VERSION
+
+    def test_flat_fields_removed_from_the_top_level(self) -> None:
+        """The old flat keys must not linger alongside the new nested ones —
+        `extra="forbid"` would otherwise reject the migrated document."""
+        result = _migrate_raw(_v5_doc())
+        for key in ("context_length", "gpu_layers", "threads", "batch_size"):
+            assert key not in result["llm"]
+
+    def test_engine_and_model_stay_top_level_and_untouched(self) -> None:
+        """Decision 8.2: `engine`/`model` are deliberately NOT moved — every
+        existing reader of `settings.llm.model`/`.engine` keeps working."""
+        raw = _v5_doc()
+        result = _migrate_raw(raw)
+        assert result["llm"]["engine"] == "llamacpp"
+        assert result["llm"]["model"] == "qwen3.5-4b-instruct-q4_k_m"
+
+    def test_chain_defaults_to_local_only(self) -> None:
+        result = _migrate_raw(_v5_doc())
+        assert result["llm"]["chain"] == ["local"]
+
+    def test_missing_llm_section_does_not_crash(self) -> None:
+        result = _migrate_raw({"schema_version": 5})
+        assert result["schema_version"] == SETTINGS_SCHEMA_VERSION
+        assert "llm" not in result
+
+    def test_idempotent(self) -> None:
+        raw = _v5_doc(context_length=4096)
+        first = _migrate_raw(copy.deepcopy(raw))
+        second = _migrate_raw(copy.deepcopy(first))
+        assert first == second
+
+    def test_full_round_trip_produces_valid_settings(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps(_v5_doc(gpu_layers=10)), encoding="utf-8")
+        settings = load_settings(path)
+        assert settings.schema_version == SETTINGS_SCHEMA_VERSION
+        assert settings.llm.providers.local.gpu_layers == 10
+        assert settings.llm.chain == ["local"]
+        assert settings.llm.engine == "llamacpp"
+
+    def test_a_v5_users_deliberate_customizations_survive_the_v6_bump(self) -> None:
+        """The regression decision 8.1 exists to close: `_migrate_raw` used
+        to gate every transform on one top-level "below current version"
+        check, so bumping `SETTINGS_SCHEMA_VERSION` made an already-migrated
+        v5 document re-run every v1-v5 transform — keyed only on the OLD
+        default value. A v5 user who deliberately set `max_tokens` back to
+        512, `sentence_max_chars` back to 350, or `tts.voice` to
+        "af_heart" would have had it silently rewritten the moment v6
+        shipped. Each transform is now gated on the version it migrates
+        *from*, so a v5 document skips all of them regardless of content.
+        """
+        raw = {
+            "schema_version": 5,
+            "conversation": {"max_tokens": 512, "sentence_max_chars": 350},
+            "tts": {"voice": "af_heart"},
+        }
+        result = _migrate_raw(raw)
+        assert result["conversation"]["max_tokens"] == 512
+        assert result["conversation"]["sentence_max_chars"] == 350
+        assert result["tts"]["voice"] == "af_heart"
+        assert result["schema_version"] == SETTINGS_SCHEMA_VERSION  # still migrated to v6

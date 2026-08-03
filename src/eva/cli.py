@@ -717,21 +717,22 @@ def _cmd_memory(args: argparse.Namespace) -> int:
             return 0
 
         if cmd == "summarize":
+            from eva.llm.base import is_local
             from eva.memory.models import MemorySummary
             from eva.memory.summarizer import LLMSummarizer
-            from eva.models.manager import ModelManager
 
             turns = memory.all_turns(args.conversation_id)
             if not turns:
                 print("No turns in this conversation.")
                 return 0
-            manager = ModelManager(paths)
-            llm = create_llm(settings, manager.files_for(settings.llm.model)["model"])
-            llm.load()
+            llm = create_llm(settings, paths)
+            if is_local(llm):
+                llm.load()
             try:
                 text = LLMSummarizer(llm).summarize(turns)
             finally:
-                llm.unload()
+                if is_local(llm):
+                    llm.unload()
             first_id, last_id = turns[0].id, turns[-1].id
             assert first_id is not None and last_id is not None
             from datetime import UTC, datetime
@@ -832,12 +833,13 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
         from eva.benchmark.report import aggregate, render, summary_line
         from eva.core.provenance import capture_environment
+        from eva.llm.base import engine_device
 
         aggregated = aggregate(
             turns,
             label=f"eva bench x{args.rounds}",
             source="benchmark",
-            environment=capture_environment(assistant.llm.device),
+            environment=capture_environment(engine_device(assistant.llm)),
             notes=(f"Prompt: {args.text}",),
         )
         out = Path(args.report)

@@ -23,7 +23,12 @@ EVA is designed as a local-first, offline voice assistant. The policy broadly co
 - Dependencies affecting the runtime
 - Plugin and tool execution surfaces (when those features actually ship)
 
-**Note:** Runtime tool execution, online web search, external API provider integrations, and multimodal capabilities are **NOT** currently implemented. They remain future additions. Please do not report hypothetical vulnerabilities for these unreleased capabilities until they exist in the repository.
+**Note:** Runtime tool execution, online web search, and multimodal capabilities are **NOT**
+currently implemented. A local OpenAI-compatible provider adapter (Ollama/LM Studio/vLLM,
+loopback-only — see "Provider and secret handling" below) shipped in Batch 8/M7.4; a genuine
+**remote** provider integration remains a future addition (M7.5, Online Mode). Please do not
+report hypothetical vulnerabilities for unreleased capabilities until they exist in the
+repository.
 
 ## Plugin trust model
 
@@ -51,6 +56,31 @@ built-in or another plugin's contribution. Neither of those is a sandbox.
 
 Only the persona contribution kind is wired today; a plugin declaring any other
 kind is listed and toggleable, but that kind registers nothing.
+
+## Provider and secret handling
+
+M7.4 (ADR-029) splits the LLM port into a transport-neutral interface plus an
+optional local-weights lifecycle, and adds an OpenAI-compatible adapter
+(`eva.llm.openai_compat`) covering Ollama, LM Studio, and vLLM.
+
+- **Local providers only, this milestone.** The OpenAI-compatible adapter's
+  constructor rejects any `base_url` that does not resolve to loopback
+  (`127.0.0.1`/`::1`/`localhost`) — a genuinely remote endpoint is out of
+  scope until M7.5 (Online Mode) defines its own connection-mode and consent
+  model. This is enforced in code, not only documented: `eva.core.net`
+  (Batch 6/H2) is the sole module permitted to perform real egress, and an
+  import-direction test asserts nothing else — including this adapter —
+  opens a non-loopback connection.
+- **Secrets are references, never values.** A provider's `api_key_ref`
+  setting is an opaque string (e.g. `"eva/openai"`); the actual credential is
+  resolved only inside the adapter's request path, immediately before an
+  authenticated call, via `eva.core.secrets`. Settings — and therefore
+  `eva diagnose` output and any settings export — hold only the reference,
+  never the resolved value, so there is nothing for those surfaces to leak.
+  The base install resolves references from `EVA_SECRET_<REF>` environment
+  variables (`EnvSecretStore`); OS-keychain storage (Windows Credential
+  Manager / macOS Keychain / Secret Service) is available via the optional
+  `pip install -e ".[secrets]"` extra.
 
 ## Reporting a Vulnerability
 

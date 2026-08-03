@@ -175,6 +175,56 @@ class TestIdentity:
         assert settings.tts.model in facts
         assert "only if explicitly asked" in facts.lower()
 
+    def test_runtime_device_still_resolves_for_a_local_llm_adapter(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """Regression test for the C1 port-split risk named in the review: a
+        careless split could make EVA silently unable to answer "are you
+        using the GPU?", with no test failure — because `engine_device()`
+        now sits between `runtime_devices` and the raw `.device` read,
+        exactly mirroring `build_assistant`'s real wiring
+        (`lambda: {"llm": engine_device(llm), ...}`)."""
+        from eva.llm.base import engine_device
+
+        class _FakeLocalLLM:
+            device = "cuda"
+
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+        conv = store.start_conversation()
+        settings = Settings()
+        llm = _FakeLocalLLM()
+        builder = ContextBuilder(
+            settings,
+            store,
+            runtime_devices=lambda: {"llm": engine_device(llm)},  # type: ignore[arg-type]
+        )
+        facts = builder.build(conv.id, "hi").messages[0].content
+        assert "running on the GPU (CUDA)" in facts
+
+    def test_runtime_device_reports_remote_for_a_non_local_provider(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """The mirror image: a remote/API-backed provider has no `device` to
+        report, so the prompt must say so honestly rather than guessing or
+        raising `AttributeError` mid-turn."""
+        from eva.llm.base import engine_device
+
+        class _FakeRemoteLLM:
+            def stream(self) -> None: ...
+
+        conv = store.start_conversation()
+        settings = Settings()
+        llm = _FakeRemoteLLM()
+        builder = ContextBuilder(
+            settings,
+            store,
+            runtime_devices=lambda: {"llm": engine_device(llm)},  # type: ignore[arg-type]
+        )
+        facts = builder.build(conv.id, "hi").messages[0].content
+        assert "running on remote" in facts
+
     def test_only_one_system_message_ever_emitted(self, store: SQLiteMemoryStore) -> None:
         conv = store.start_conversation()
         store.add_turn(conv.id, "user", "hi")

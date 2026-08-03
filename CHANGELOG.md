@@ -6,6 +6,46 @@ first release onward.
 
 ## [Unreleased]
 
+### 🔌 Provider abstraction (M7.4, ADR-029)
+
+- **The LLM port is transport-neutral.** `LLMEngine` now covers generation only
+  (`stream`/`count_tokens`); the local-weights lifecycle (`load`/`unload`/`device`) moved to
+  a separate `LocalWeights` protocol that `LlamaCppLLM` implements alongside it. Two new
+  helpers, `is_local()`/`engine_device()`, are the one sanctioned way any caller decides
+  whether an engine has a local lifecycle or reads its device — a remote provider reports
+  `"remote"` rather than raising `AttributeError` or being silently skipped.
+- **New: a local OpenAI-compatible provider** (`eva.llm.openai_compat`) covering Ollama, LM
+  Studio, vLLM, and any server exposing an OpenAI-shaped streaming `/chat/completions`
+  endpoint. Local-only this milestone — the constructor rejects a non-loopback `base_url`
+  outright; a genuinely remote endpoint is M7.5 (Online Mode) territory. Classified as
+  loopback IPC (like the desktop client and service supervisor), not egress, so it needed no
+  change to the Batch 6 offline-invariant boundary — only a fifth entry in its
+  import-direction allowlist.
+- **Nested provider settings.** `LLMSettings` gains `providers` (fixed-key: `local`,
+  `openai_compatible` — deliberately not a `dict`, so the schema-driven Settings page
+  renders it with zero frontend change) and `chain` (fallback order, schema-only this batch —
+  `engine` remains the sole active-provider selector; wiring real chain-walking would have
+  required moving `Assistant.preload()`'s pinned GPU-ownership load order, which no approved
+  decision authorized). `engine`/`model` stay exactly where they were; only the local-runtime
+  knobs (`context_length`, `gpu_layers`, `threads`, `batch_size`) moved, under
+  `providers.local`. Settings schema `v5 → v6`.
+- **Secret references, never values.** New `eva.core.secrets`: a provider's `api_key_ref` is
+  an opaque reference string, resolved only inside the adapter's request path — settings,
+  diagnostics, and exports hold only the reference, so there is nothing for those surfaces to
+  leak. `EnvSecretStore` (base install, `EVA_SECRET_<REF>` environment variables) ships by
+  default; `KeyringSecretStore` needs the new optional `pip install -e ".[secrets]"` extra
+  and imports `keyring` lazily so the base install is unaffected.
+- **A latent settings-migration bug was found and fixed before it could ship**, discovered
+  during pre-implementation review: `_migrate_raw`'s transforms were gated on one top-level
+  "below current version" check, so bumping `SETTINGS_SCHEMA_VERSION` would have made an
+  already-migrated v5 document re-run every v1–v5 transform — silently overwriting a v5
+  user's deliberately-set `max_tokens`, `sentence_max_chars`, or `tts.voice` back to their old
+  defaults. Each transform is now gated on the version it migrates *from* individually; a
+  regression test pins the fix.
+- New ADR-029 records the full decision set (port split, settings shape, transport
+  classification, secrets, fallback scope, migration policy); amends ADR-002, ADR-013,
+  ADR-015.
+
 ### 🔒 Offline guarantee
 
 - **"Runs fully offline" is now a tested property, not a convention.** New

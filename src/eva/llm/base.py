@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
-from typing import Literal
+from typing import Literal, Protocol, TypeGuard, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -183,16 +183,14 @@ class GenerationOutcome(BaseModel):
 
 
 class LLMEngine(ABC):
-    device: str = "unloaded"
-    """Device the model actually landed on ("cuda"/"cpu"); set by load()."""
+    """Transport-neutral LLM port (Batch 8 / C1): generation only.
 
-    @abstractmethod
-    def load(self) -> None:
-        """Load model weights. Idempotent."""
-
-    @abstractmethod
-    def unload(self) -> None:
-        """Release model resources (hot-swap support)."""
+    Deliberately carries no `load`/`unload`/`device` — those describe a *local
+    weights* lifecycle a remote/API-backed provider does not have. An adapter
+    that manages on-disk weights (llama.cpp today) additionally implements
+    `LocalWeights`; callers that need to know branch on `is_local()`, never on
+    `isinstance(engine, LLMEngine)` or a bare `hasattr` guess.
+    """
 
     def count_tokens(self, text: str) -> int:
         """Token count for `text` under this model's tokenizer.
@@ -228,3 +226,50 @@ class LLMEngine(ABC):
         An adapter that cannot yet offer tools should say so rather than
         ignore a non-empty tuple, which would silently answer without them.
         """
+
+
+@runtime_checkable
+class LocalWeights(Protocol):
+    """On-disk model lifecycle (Batch 8 / C1): implemented only by adapters
+    that own local model weights (llama.cpp today), never by a remote/
+    API-backed adapter (the OpenAI-compatible one).
+
+    `device` must be present — and readable — before `load()` is ever called:
+    `is_local()` is checked to decide *whether* to call `load`/`unload` at
+    all, so an implementing class needs a class-level default (e.g.
+    `device: str = "unloaded"`), not just an attribute set inside `load()`.
+    """
+
+    device: str
+
+    def load(self) -> None:
+        """Load model weights. Idempotent."""
+
+    def unload(self) -> None:
+        """Release model resources (hot-swap support)."""
+
+
+def is_local(engine: LLMEngine) -> TypeGuard[LocalWeights]:
+    """True when `engine` manages its own local model weights.
+
+    The one sanctioned way to decide whether `load()`/`unload()` apply to an
+    `LLMEngine` — e.g. before `Assistant.preload()`/`unload_models()` call
+    them. A remote provider simply is not `LocalWeights`; nothing else marks
+    it. Typed as a `TypeGuard` so a caller's `if is_local(engine):` block lets
+    mypy see `engine.load()`/`.unload()`/`.device` as valid, not just at
+    runtime.
+    """
+    return isinstance(engine, LocalWeights)
+
+
+def engine_device(engine: LLMEngine) -> str:
+    """Device string for diagnostics and the runtime-awareness prompt.
+
+    A local adapter reports what it actually loaded onto ("cuda"/"cpu"/
+    "unloaded"); a remote/API-backed adapter has no device concept and
+    reports "remote" explicitly, rather than the caller raising
+    `AttributeError` or silently guessing.
+    """
+    if isinstance(engine, LocalWeights):
+        return engine.device
+    return "remote"

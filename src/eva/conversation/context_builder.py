@@ -392,7 +392,7 @@ class ContextBuilder:
         limits, and trimming them here would undo ADR-021's ordering.
         """
         budget = (
-            self._settings.llm.context_length
+            self._settings.llm.providers.local.context_length
             - self._settings.conversation.max_tokens
             - self._token_counter(system_prompt)
             - self._token_counter(user_text)
@@ -405,7 +405,7 @@ class ContextBuilder:
             logger.warning(
                 "System prompt plus generation allowance exceeds the %d-token context; "
                 "dropping all history",
-                self._settings.llm.context_length,
+                self._settings.llm.providers.local.context_length,
             )
             return [], 0, len(turns)
 
