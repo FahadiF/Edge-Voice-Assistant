@@ -211,6 +211,269 @@ async def _drive_stream(sync_iter: Iterator[Frame]) -> AsyncGenerator[Frame, Non
             await asyncio.wrap_future(close_future)
 
 
+# ──────────────────────── per-turn pipeline stages ────────────────────────
+#
+# Two collaborators lifted out of `_pipeline` (Batch 5 / H5). They were nested
+# closures over ~10 `nonlocal`-mutated variables; the M7.5 tool-execution loop
+# is a *cycle* around them, and wrapping a cycle around closures inside an
+# already-348-line function is where that function becomes unmaintainable.
+#
+# Both are deliberately **per-turn**, constructed inside `_pipeline` and thrown
+# away with it. That is not incidental: each carries per-turn state (the finish
+# reason, first-audio timing, the Markdown fence filter), and the closures they
+# replace had exactly that lifetime. A long-lived instance on `Orchestrator`
+# would leak one turn's state into the next.
+#
+# Values the closures read live off `self` are passed in explicitly instead.
+# All of them (`_voice`, `_language_code`, `_params`, `_settings`) are assigned
+# once in `Orchestrator.__init__` and never reassigned, so passing them is
+# equivalent to reading them through `self` — verified, not assumed.
+
+
+class _TokenProducer:
+    """LLM stream → bounded token queue, driven on a worker thread.
+
+    Extracted verbatim from `_pipeline`'s `produce()` closure. `finish_reason`
+    was a `nonlocal` write read back after `asyncio.gather()`; it is now an
+    attribute read at the same point, which is the same handoff with a name.
+    """
+
+    def __init__(
+        self,
+        *,
+        llm: LLMEngine,
+        messages: list[ChatMessage],
+        params: GenerationParams,
+        tokens: asyncio.Queue[str | None],
+        loop: asyncio.AbstractEventLoop,
+        controller: TurnController,
+        epoch: int,
+    ) -> None:
+        self._llm = llm
+        self._messages = messages
+        self._params = params
+        self._tokens = tokens
+        self._loop = loop
+        self._controller = controller
+        self._epoch = epoch
+        self.finish_reason: FinishReason = "stop"
+
+    def _push(self, item: str | None) -> None:
+        # A blocking put (not put_nowait) applies real backpressure to
+        # the producer thread when the bounded queue is full, instead
+        # of raising QueueFull; a timeout guards against hanging this
+        # thread forever if the loop stops draining (e.g. shutdown).
+        with contextlib.suppress(RuntimeError):
+            future = asyncio.run_coroutine_threadsafe(self._tokens.put(item), self._loop)
+            try:
+                future.result(timeout=_QUEUE_BACKPRESSURE_TIMEOUT_S)
+            except TimeoutError:
+                logger.warning("Token queue backpressure timeout; dropping token")
+
+    def run(self) -> None:
+        """Blocking; call via `asyncio.to_thread`."""
+        stream = self._llm.stream(
+            self._messages,
+            self._params,
+            should_abort=lambda: self._controller.is_stale(self._epoch),
+        )
+        try:
+            # Driven by hand rather than `for`: the FinishReason arrives as
+            # the generator's return value, and a `for` loop swallows it.
+            # An adapter that returns nothing is treated as "stop".
+            while True:
+                try:
+                    token = next(stream)
+                except StopIteration as done:
+                    # A generator with a bare `return` yields None.
+                    outcome = done.value
+                    self.finish_reason = outcome.reason if outcome is not None else "stop"
+                    break
+                self._push(token)
+        except Exception:
+            logger.exception("LLM generation failed")
+            self.finish_reason = "error"
+        finally:
+            with contextlib.suppress(Exception):
+                stream.close()
+            self._push(None)
+
+
+class _SpeakWorker:
+    """Sentence queue → TTS → playback, one sentence at a time.
+
+    Extracted verbatim from `_pipeline`'s `speak_worker()` closure. Synthesis
+    stays strictly sequential: `KokoroTTS` holds one shared, non-thread-safe
+    phonemizer instance, so two concurrent `synthesize_stream()` calls corrupt
+    it (measured). `first_audio_ms`/`tts_first_ms` were `nonlocal` writes and
+    are now attributes, read back by `_pipeline` after the worker completes.
+    """
+
+    def __init__(
+        self,
+        *,
+        tts: TTSEngine,
+        audio: AudioOutput,
+        bus: EventBus,
+        controller: TurnController,
+        settings: Settings,
+        voice: str,
+        language_code: str,
+        sentences: asyncio.Queue[tuple[int, str] | None],
+        epoch: int,
+        elapsed_ms: Callable[[], int],
+        set_state: Callable[[str], None],
+        on_component_failure: Callable[[str, _Reloadable], None],
+    ) -> None:
+        self._tts = tts
+        self._audio = audio
+        self._bus = bus
+        self._controller = controller
+        self._settings = settings
+        self._voice = voice
+        self._language_code = language_code
+        self._sentences = sentences
+        self._epoch = epoch
+        self._elapsed_ms = elapsed_ms
+        self._set_state = set_state
+        self._on_component_failure = on_component_failure
+        # Read back by `_pipeline` for TurnMetrics after the worker finishes.
+        self.first_audio_ms = 0
+        self.tts_first_ms = 0
+        self._speak_n = 0
+        self._prev_synth_done_ms = 0
+
+    def _queue_depth_s(self) -> float:
+        playback = getattr(self._audio, "playback", None)
+        depth = getattr(playback, "queued_seconds", None)
+        return round(depth(), 2) if depth is not None else -1.0
+
+    async def run(self) -> None:
+        epoch = self._epoch
+        elapsed_ms = self._elapsed_ms
+        started = False
+        # One filter per turn: fence state must survive across sentence
+        # segments (a code block's ``` markers arrive in different
+        # segments — ADR-024). Storage/events keep the raw Markdown;
+        # only what reaches the TTS engine is converted.
+        speech_filter = MarkdownSpeechFilter()
+        while True:
+            item = await self._sentences.get()
+            if item is None:
+                break
+            index, sentence = item
+            if self._controller.is_stale(epoch):
+                continue  # drain without speaking
+            spoken_text = speech_filter.convert(sentence)
+            if not spoken_text:
+                continue  # e.g. a segment entirely inside a code fence
+            self._speak_n += 1
+            if _CONV_TRACE:
+                dequeue_ms = elapsed_ms()
+                gap = dequeue_ms - self._prev_synth_done_ms if self._prev_synth_done_ms else 0
+                logger.info(
+                    "CVTRACE t=%dms dequeue n=%d queue_depth_s=%.2f gap_since_prev_done_ms=%d",
+                    dequeue_ms,
+                    self._speak_n,
+                    self._queue_depth_s(),
+                    gap,
+                )
+            if not started:
+                started = True
+                self._bus.publish(TtsStarted(epoch=epoch))
+                self._set_state("speaking")
+            synth_start = time.perf_counter()
+            if _CONV_TRACE:
+                logger.info("CVTRACE t=%dms synth_start n=%d", elapsed_ms(), self._speak_n)
+            # Hold back exactly one chunk so the true LAST chunk of this
+            # sentence (and only that one) gets its trailing silence
+            # trimmed — measured at ~90-100ms per sentence boundary on
+            # Kokoro's output, unnecessary dead air now that the next
+            # sentence's own natural lead-in silence follows immediately.
+            # Mid-utterance chunk boundaries are never trimmed: a pause
+            # there would be an artifact of chunking, not real silence.
+            pending: Frame | None = None
+            is_first_chunk_ever = self.first_audio_ms == 0
+            # Rides on whichever chunk reaches playback first, so display
+            # surfaces learn when THIS sentence starts sounding (M7.1).
+            # The raw segment travels, not `spoken_text`: the speech filter
+            # exists for the TTS engine, not for what the user reads.
+            mark: _SpeechMark | None = _SpeechMark(epoch=epoch, index=index, text=sentence)
+            try:
+                sync_gen = self._tts.synthesize_stream(
+                    spoken_text,
+                    voice=self._voice,
+                    speed=self._settings.tts.speed,
+                    language=self._language_code,
+                )
+                first_pcm_traced = False
+                async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
+                    async for chunk in chunks:
+                        if self._controller.is_stale(epoch):
+                            break  # aclosing() shuts down _drive_stream, which
+                            # closes sync_gen (KokoroTTS: its event loop too)
+                        if _CONV_TRACE and not first_pcm_traced:
+                            first_pcm_traced = True
+                            logger.info(
+                                "CVTRACE t=%dms first_pcm n=%d synth_ms=%d",
+                                elapsed_ms(),
+                                self._speak_n,
+                                int((time.perf_counter() - synth_start) * 1000),
+                            )
+                        if self.first_audio_ms == 0:
+                            self.tts_first_ms = int((time.perf_counter() - synth_start) * 1000)
+                            self.first_audio_ms = elapsed_ms()
+                            self._bus.publish(
+                                TtsAudioReady(epoch=epoch, ttfa_ms=self.first_audio_ms)
+                            )
+                        if pending is not None:
+                            # Not the last chunk: untouched.
+                            self._audio.say(pending, marker=mark)
+                            mark = None  # only the first chunk carries it
+                        pending = chunk
+                    if pending is not None and not self._controller.is_stale(epoch):
+                        # This IS the last chunk of the sentence: trim its
+                        # trailing silence, and its leading silence too if
+                        # it is also the very first sound of the whole
+                        # turn (shaves the initial "before any speech"
+                        # wait; later sentences keep their natural
+                        # lead-in, which is the between-sentence pause).
+                        # The is_stale guard restores the baseline
+                        # invariant that a barge-in never lets a held chunk
+                        # reach playback after stop_speaking() flushed it —
+                        # the per-chunk say() above is guarded by the same
+                        # check, and this last-chunk say() must be too.
+                        pending = trim_edge_silence(
+                            pending,
+                            max_leading_ms=_LEADING_TRIM_MS if is_first_chunk_ever else 0,
+                            max_trailing_ms=_TRAILING_TRIM_MS,
+                        )
+                        # `mark` is still set when the sentence rendered as
+                        # a single chunk — the common case on Kokoro, whose
+                        # phoneme batching yields one chunk per sentence.
+                        self._audio.say(pending, marker=mark)
+                if _CONV_TRACE:
+                    self._prev_synth_done_ms = elapsed_ms()
+                    logger.info(
+                        "CVTRACE t=%dms synth_done n=%d total_synth_ms=%d queue_depth_s=%.2f",
+                        self._prev_synth_done_ms,
+                        self._speak_n,
+                        int((time.perf_counter() - synth_start) * 1000),
+                        self._queue_depth_s(),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A TTS crash degrades this sentence to silence — the
+                # turn (text reply, storage, events) still completes,
+                # and the engine is restarted in the background so the
+                # next sentence/turn speaks again (M5.5, ADR-026).
+                logger.exception("TTS failed for one sentence; recovering the engine")
+                self._on_component_failure("tts", self._tts)
+            finally:
+                self._audio.finish_utterance()
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -780,47 +1043,16 @@ class Orchestrator:
         )
         messages = built_context.messages
 
-        finish_reason: FinishReason = "stop"
-
-        def produce() -> None:
-            def push(item: str | None) -> None:
-                # A blocking put (not put_nowait) applies real backpressure to
-                # the producer thread when the bounded queue is full, instead
-                # of raising QueueFull; a timeout guards against hanging this
-                # thread forever if the loop stops draining (e.g. shutdown).
-                with contextlib.suppress(RuntimeError):
-                    future = asyncio.run_coroutine_threadsafe(tokens.put(item), loop)
-                    try:
-                        future.result(timeout=_QUEUE_BACKPRESSURE_TIMEOUT_S)
-                    except TimeoutError:
-                        logger.warning("Token queue backpressure timeout; dropping token")
-
-            nonlocal finish_reason
-            stream = self._llm.stream(
-                messages, self._params, should_abort=lambda: self._controller.is_stale(epoch)
-            )
-            try:
-                # Driven by hand rather than `for`: the FinishReason arrives as
-                # the generator's return value, and a `for` loop swallows it.
-                # An adapter that returns nothing is treated as "stop".
-                while True:
-                    try:
-                        token = next(stream)
-                    except StopIteration as done:
-                        # A generator with a bare `return` yields None.
-                        outcome = done.value
-                        finish_reason = outcome.reason if outcome is not None else "stop"
-                        break
-                    push(token)
-            except Exception:
-                logger.exception("LLM generation failed")
-                finish_reason = "error"
-            finally:
-                with contextlib.suppress(Exception):
-                    stream.close()
-                push(None)
-
-        producer = asyncio.create_task(asyncio.to_thread(produce))
+        token_producer = _TokenProducer(
+            llm=self._llm,
+            messages=messages,
+            params=self._params,
+            tokens=tokens,
+            loop=loop,
+            controller=self._controller,
+            epoch=epoch,
+        )
+        producer = asyncio.create_task(asyncio.to_thread(token_producer.run))
 
         # ── speak worker: sentences → TTS → playback ──
         # Each item is (1-based index, raw segment): the index travels with the
@@ -829,142 +1061,21 @@ class Orchestrator:
             maxsize=_SENTENCE_QUEUE_MAXSIZE
         )
         self._current_sentences_queue = sentences
-        first_audio_ms = 0
-        tts_first_ms = 0
-
-        speak_n = 0
-        prev_synth_done_ms = 0
-
-        def _queue_depth_s() -> float:
-            playback = getattr(self._audio, "playback", None)
-            depth = getattr(playback, "queued_seconds", None)
-            return round(depth(), 2) if depth is not None else -1.0
-
-        async def speak_worker() -> None:
-            nonlocal first_audio_ms, tts_first_ms, speak_n, prev_synth_done_ms
-            started = False
-            # One filter per turn: fence state must survive across sentence
-            # segments (a code block's ``` markers arrive in different
-            # segments — ADR-024). Storage/events keep the raw Markdown;
-            # only what reaches the TTS engine is converted.
-            speech_filter = MarkdownSpeechFilter()
-            while True:
-                item = await sentences.get()
-                if item is None:
-                    break
-                index, sentence = item
-                if self._controller.is_stale(epoch):
-                    continue  # drain without speaking
-                spoken_text = speech_filter.convert(sentence)
-                if not spoken_text:
-                    continue  # e.g. a segment entirely inside a code fence
-                speak_n += 1
-                if _CONV_TRACE:
-                    dequeue_ms = elapsed_ms()
-                    gap = dequeue_ms - prev_synth_done_ms if prev_synth_done_ms else 0
-                    logger.info(
-                        "CVTRACE t=%dms dequeue n=%d queue_depth_s=%.2f gap_since_prev_done_ms=%d",
-                        dequeue_ms,
-                        speak_n,
-                        _queue_depth_s(),
-                        gap,
-                    )
-                if not started:
-                    started = True
-                    self._bus.publish(TtsStarted(epoch=epoch))
-                    self._set_state("speaking")
-                synth_start = time.perf_counter()
-                if _CONV_TRACE:
-                    logger.info("CVTRACE t=%dms synth_start n=%d", elapsed_ms(), speak_n)
-                # Hold back exactly one chunk so the true LAST chunk of this
-                # sentence (and only that one) gets its trailing silence
-                # trimmed — measured at ~90-100ms per sentence boundary on
-                # Kokoro's output, unnecessary dead air now that the next
-                # sentence's own natural lead-in silence follows immediately.
-                # Mid-utterance chunk boundaries are never trimmed: a pause
-                # there would be an artifact of chunking, not real silence.
-                pending: Frame | None = None
-                is_first_chunk_ever = first_audio_ms == 0
-                # Rides on whichever chunk reaches playback first, so display
-                # surfaces learn when THIS sentence starts sounding (M7.1).
-                # The raw segment travels, not `spoken_text`: the speech filter
-                # exists for the TTS engine, not for what the user reads.
-                mark: _SpeechMark | None = _SpeechMark(epoch=epoch, index=index, text=sentence)
-                try:
-                    sync_gen = self._tts.synthesize_stream(
-                        spoken_text,
-                        voice=self._voice,
-                        speed=self._settings.tts.speed,
-                        language=self._language_code,
-                    )
-                    first_pcm_traced = False
-                    async with contextlib.aclosing(_drive_stream(sync_gen)) as chunks:
-                        async for chunk in chunks:
-                            if self._controller.is_stale(epoch):
-                                break  # aclosing() shuts down _drive_stream, which
-                                # closes sync_gen (KokoroTTS: its event loop too)
-                            if _CONV_TRACE and not first_pcm_traced:
-                                first_pcm_traced = True
-                                logger.info(
-                                    "CVTRACE t=%dms first_pcm n=%d synth_ms=%d",
-                                    elapsed_ms(),
-                                    speak_n,
-                                    int((time.perf_counter() - synth_start) * 1000),
-                                )
-                            if first_audio_ms == 0:
-                                tts_first_ms = int((time.perf_counter() - synth_start) * 1000)
-                                first_audio_ms = elapsed_ms()
-                                self._bus.publish(
-                                    TtsAudioReady(epoch=epoch, ttfa_ms=first_audio_ms)
-                                )
-                            if pending is not None:
-                                # Not the last chunk: untouched.
-                                self._audio.say(pending, marker=mark)
-                                mark = None  # only the first chunk carries it
-                            pending = chunk
-                        if pending is not None and not self._controller.is_stale(epoch):
-                            # This IS the last chunk of the sentence: trim its
-                            # trailing silence, and its leading silence too if
-                            # it is also the very first sound of the whole
-                            # turn (shaves the initial "before any speech"
-                            # wait; later sentences keep their natural
-                            # lead-in, which is the between-sentence pause).
-                            # The is_stale guard restores the baseline
-                            # invariant that a barge-in never lets a held chunk
-                            # reach playback after stop_speaking() flushed it —
-                            # the per-chunk say() above is guarded by the same
-                            # check, and this last-chunk say() must be too.
-                            pending = trim_edge_silence(
-                                pending,
-                                max_leading_ms=_LEADING_TRIM_MS if is_first_chunk_ever else 0,
-                                max_trailing_ms=_TRAILING_TRIM_MS,
-                            )
-                            # `mark` is still set when the sentence rendered as
-                            # a single chunk — the common case on Kokoro, whose
-                            # phoneme batching yields one chunk per sentence.
-                            self._audio.say(pending, marker=mark)
-                    if _CONV_TRACE:
-                        prev_synth_done_ms = elapsed_ms()
-                        logger.info(
-                            "CVTRACE t=%dms synth_done n=%d total_synth_ms=%d queue_depth_s=%.2f",
-                            prev_synth_done_ms,
-                            speak_n,
-                            int((time.perf_counter() - synth_start) * 1000),
-                            _queue_depth_s(),
-                        )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    # A TTS crash degrades this sentence to silence — the
-                    # turn (text reply, storage, events) still completes,
-                    # and the engine is restarted in the background so the
-                    # next sentence/turn speaks again (M5.5, ADR-026).
-                    logger.exception("TTS failed for one sentence; recovering the engine")
-                    self._schedule_component_recovery("tts", self._tts)
-                finally:
-                    self._audio.finish_utterance()
-
-        speaker = asyncio.create_task(speak_worker())
+        speak_worker = _SpeakWorker(
+            tts=self._tts,
+            audio=self._audio,
+            bus=self._bus,
+            controller=self._controller,
+            settings=self._settings,
+            voice=self._voice,
+            language_code=self._language_code,
+            sentences=sentences,
+            epoch=epoch,
+            elapsed_ms=elapsed_ms,
+            set_state=self._set_state,
+            on_component_failure=self._schedule_component_recovery,
+        )
+        speaker = asyncio.create_task(speak_worker.run())
 
         # ── token consumer ──
         chunker = self._make_chunker()
@@ -1033,7 +1144,7 @@ class Orchestrator:
                 retrieval_scan_count=built_context.trace.retrieval_scan_count,
                 resources=last_sampled_resources(),
             )
-        if finish_reason == "length":
+        if token_producer.finish_reason == "length":
             logger.warning(
                 "Turn %d truncated at the %d-token ceiling", epoch, self._params.max_tokens
             )
@@ -1044,12 +1155,14 @@ class Orchestrator:
                 tokens=token_count,
                 ttft_ms=ttft_ms,
                 duration_ms=llm_ms,
-                finish_reason=finish_reason,
+                finish_reason=token_producer.finish_reason,
                 speakable_end=speakable_end(reply, self._make_chunker),
             )
         )
         if reply:
-            await asyncio.to_thread(self._store_turns, user_text, reply, finish_reason)
+            await asyncio.to_thread(
+                self._store_turns, user_text, reply, token_producer.finish_reason
+            )
             if not self._conversation_titled:
                 # First completed exchange: auto-title the conversation
                 # (M5.4 §2). Runs while TTS playback is still draining, so
@@ -1068,8 +1181,8 @@ class Orchestrator:
             ttft_ms=ttft_ms,
             llm_ms=llm_ms,
             tokens=token_count,
-            tts_first_ms=tts_first_ms,
-            ttfa_ms=first_audio_ms,
+            tts_first_ms=speak_worker.tts_first_ms,
+            ttfa_ms=speak_worker.first_audio_ms,
             total_ms=elapsed_ms(),
             retrieval_ms=built_context.trace.retrieval_ms,
             context_ms=built_context.trace.context_ms,

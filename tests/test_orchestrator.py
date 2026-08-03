@@ -1215,3 +1215,355 @@ class TestTtsCleanupSerialization:
             )
 
         asyncio.run(scenario())
+
+
+# ─────────────── per-stage tests for the extracted collaborators ───────────────
+#
+# Batch 5 (H5) lifted `produce` and `speak_worker` out of `_pipeline` into
+# module-level `_TokenProducer`/`_SpeakWorker`. Testing each stage in isolation
+# is the whole point of doing it: before the extraction these were closures over
+# ~10 `nonlocal` variables, reachable only by driving a full turn.
+
+
+class _StreamingTTS(TTSEngine):
+    """Yields N chunks per sentence so multi-chunk marker/trim behavior is
+    observable (`FakeTTS` falls back to exactly one chunk)."""
+
+    def __init__(self, chunks: int = 3) -> None:
+        self._chunks = chunks
+        self.synthesized: list[str] = []
+
+    def load(self) -> None: ...
+    def unload(self) -> None: ...
+
+    def synthesize(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Frame:
+        return np.ones(1600, dtype=np.int16)
+
+    def synthesize_stream(
+        self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+    ) -> Iterator[Frame]:
+        self.synthesized.append(text)
+        for _ in range(self._chunks):
+            yield np.ones(1600, dtype=np.int16)
+
+    def voices(self) -> list[str]:
+        return ["test-voice"]
+
+
+class TestTokenProducer:
+    """`_TokenProducer`: LLM stream to a bounded token queue, on a worker thread."""
+
+    @staticmethod
+    async def _drain(llm: LLMEngine, *, stale: bool = False) -> tuple[object, list[str | None]]:
+        from eva.conversation.orchestrator import _TokenProducer
+        from eva.core.turn import TurnController
+
+        controller = TurnController()
+        controller.advance()  # epoch 1
+        if stale:
+            controller.advance()  # epoch 1 is now stale
+        tokens: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
+        producer = _TokenProducer(
+            llm=llm,
+            messages=[ChatMessage(role="user", content="hi")],
+            params=GenerationParams(),
+            tokens=tokens,
+            loop=asyncio.get_running_loop(),
+            controller=controller,
+            epoch=1,
+        )
+        await asyncio.to_thread(producer.run)
+        drained: list[str | None] = []
+        while not tokens.empty():
+            drained.append(tokens.get_nowait())
+        return producer, drained
+
+    def test_tokens_are_queued_in_order_then_a_none_sentinel(self) -> None:
+        async def scenario() -> None:
+            producer, drained = await self._drain(FakeLLM(tokens=["a", "b", "c"]))
+            assert drained == ["a", "b", "c", None]
+            assert producer.finish_reason == "stop"  # type: ignore[attr-defined]
+
+        asyncio.run(scenario())
+
+    def test_a_generator_returning_no_outcome_is_treated_as_stop(self) -> None:
+        """A bare `return` in an adapter yields None from `StopIteration.value`."""
+
+        async def scenario() -> None:
+            producer, drained = await self._drain(FakeLLM(tokens=[]))
+            assert drained == [None]
+            assert producer.finish_reason == "stop"  # type: ignore[attr-defined]
+
+        asyncio.run(scenario())
+
+    def test_finish_reason_comes_from_the_generators_return_value(self) -> None:
+        from collections.abc import Generator
+
+        from eva.core.tools import ToolDefinition
+        from eva.llm.base import GenerationOutcome
+
+        class _LengthCappedLLM(LLMEngine):
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+            def stream(
+                self,
+                messages: list[ChatMessage],
+                params: GenerationParams,
+                should_abort: Callable[[], bool],
+                *,
+                tools: tuple[ToolDefinition, ...] = (),
+            ) -> Generator[str, None, GenerationOutcome]:
+                yield "truncated"
+                return GenerationOutcome(reason="length")
+
+        async def scenario() -> None:
+            producer, drained = await self._drain(_LengthCappedLLM())
+            assert producer.finish_reason == "length"  # type: ignore[attr-defined]
+            assert drained == ["truncated", None]
+
+        asyncio.run(scenario())
+
+    def test_a_crashing_engine_reports_error_and_still_closes_the_queue(self) -> None:
+        """The sentinel must be pushed on every path, or the token consumer
+        waits forever and the turn never finishes."""
+
+        class _BrokenLLM(LLMEngine):
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+            def stream(  # type: ignore[override]
+                self,
+                messages: list[ChatMessage],
+                params: GenerationParams,
+                should_abort: Callable[[], bool],
+            ) -> Iterator[str]:
+                yield "partial"
+                raise RuntimeError("llm exploded")
+
+        async def scenario() -> None:
+            producer, drained = await self._drain(_BrokenLLM())
+            assert producer.finish_reason == "error"  # type: ignore[attr-defined]
+            assert drained == ["partial", None]
+
+        asyncio.run(scenario())
+
+    def test_the_stream_is_closed_even_when_generation_fails(self) -> None:
+        closed: list[bool] = []
+
+        class _TrackingLLM(LLMEngine):
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+            def stream(  # type: ignore[override]
+                self,
+                messages: list[ChatMessage],
+                params: GenerationParams,
+                should_abort: Callable[[], bool],
+            ) -> Iterator[str]:
+                try:
+                    yield "x"
+                    raise RuntimeError("boom")
+                finally:
+                    closed.append(True)
+
+        async def scenario() -> None:
+            await self._drain(_TrackingLLM())
+            assert closed == [True]
+
+        asyncio.run(scenario())
+
+    def test_should_abort_is_wired_to_epoch_staleness(self) -> None:
+        """The per-token cancellation check barge-in depends on."""
+
+        async def scenario() -> None:
+            llm = FakeLLM(tokens=["a", "b", "c"])
+            producer, drained = await self._drain(llm, stale=True)
+            assert llm.aborted, "should_abort never reported the stale epoch"
+            assert drained == [None]  # nothing generated, sentinel still sent
+            assert producer.finish_reason == "stop"  # type: ignore[attr-defined]
+
+        asyncio.run(scenario())
+
+
+class TestSpeakWorker:
+    """`_SpeakWorker`: sentence queue to TTS to playback, strictly sequential."""
+
+    @staticmethod
+    def _worker(
+        sentences: asyncio.Queue[tuple[int, str] | None],
+        *,
+        tts: TTSEngine | None = None,
+        audio: FakeAudioOut | None = None,
+        bus: EventBus | None = None,
+        stale: bool = False,
+        recoveries: list[str] | None = None,
+    ) -> tuple[object, list[str]]:
+        from eva.conversation.orchestrator import _SpeakWorker
+        from eva.core.turn import TurnController
+
+        controller = TurnController()
+        controller.advance()
+        if stale:
+            controller.advance()
+        states: list[str] = []
+        sink = recoveries if recoveries is not None else []
+        worker = _SpeakWorker(
+            tts=tts or FakeTTS(),
+            audio=audio or FakeAudioOut(),
+            bus=bus or EventBus(),
+            controller=controller,
+            settings=Settings(),
+            voice="test-voice",
+            language_code="en",
+            sentences=sentences,
+            epoch=1,
+            elapsed_ms=lambda: 0,
+            set_state=states.append,
+            on_component_failure=lambda name, engine: sink.append(name),
+        )
+        return worker, states
+
+    @staticmethod
+    def _fill(queue: asyncio.Queue[tuple[int, str] | None], *sentences: str) -> None:
+        for index, text in enumerate(sentences, start=1):
+            queue.put_nowait((index, text))
+        queue.put_nowait(None)
+
+    def test_sentences_are_spoken_in_order(self) -> None:
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            audio, tts = FakeAudioOut(), FakeTTS()
+            worker, states = self._worker(queue, tts=tts, audio=audio)
+            self._fill(queue, "First one.", "Second one.")
+            await worker.run()  # type: ignore[attr-defined]
+            assert tts.synthesized == ["First one.", "Second one."]
+            assert len(audio.spoken) == 2
+            assert states == ["speaking"]  # set once, not per sentence
+
+        asyncio.run(scenario())
+
+    def test_first_audio_timings_are_assigned_for_metrics_readback(self) -> None:
+        """`_pipeline` reads these back for `TurnMetrics`."""
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            worker, _ = self._worker(queue, tts=_StreamingTTS(chunks=2))
+            self._fill(queue, "One.", "Two.")
+            await worker.run()  # type: ignore[attr-defined]
+            assert isinstance(worker.tts_first_ms, int)  # type: ignore[attr-defined]
+            assert worker.tts_first_ms >= 0  # type: ignore[attr-defined]
+
+        asyncio.run(scenario())
+
+    def test_a_stale_epoch_drains_without_speaking(self) -> None:
+        """Barge-in semantics: queued sentences are consumed so the producer can
+        finish, but nothing reaches TTS or playback."""
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            audio, tts = FakeAudioOut(), FakeTTS()
+            worker, states = self._worker(queue, tts=tts, audio=audio, stale=True)
+            self._fill(queue, "Never spoken.")
+            await worker.run()  # type: ignore[attr-defined]
+            assert tts.synthesized == []
+            assert audio.spoken == []
+            assert states == []
+            assert queue.empty()  # drained, not left blocking the producer
+
+        asyncio.run(scenario())
+
+    def test_tts_events_are_published_for_a_spoken_turn(self) -> None:
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            bus = EventBus()
+            sub = bus.subscribe()
+            worker, _ = self._worker(queue, bus=bus)
+            self._fill(queue, "Hello.")
+            await worker.run()  # type: ignore[attr-defined]
+            published = []
+            while not sub.empty():
+                published.append(sub.get_nowait().name)
+            assert published.count("TtsStarted") == 1
+            assert "TtsAudioReady" in published
+
+        asyncio.run(scenario())
+
+    def test_a_segment_that_speaks_to_nothing_is_skipped(self) -> None:
+        """A segment entirely inside a code fence converts to empty speech
+        (ADR-024): it must not reach TTS, nor count as the start of speaking."""
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            tts = FakeTTS()
+            worker, states = self._worker(queue, tts=tts)
+            self._fill(queue, "```", "code_line()")
+            await worker.run()  # type: ignore[attr-defined]
+            assert tts.synthesized == []
+            assert states == []
+
+        asyncio.run(scenario())
+
+    def test_markdown_fence_state_survives_a_full_open_close_cycle(self) -> None:
+        """One filter per turn, not per sentence (ADR-024): the fence opened in
+        one segment suppresses the next, and the closing fence lets speech
+        resume. A per-sentence filter would read the code aloud and then go
+        mute — the state has to live across segments in both directions."""
+
+        fence = "`" * 3
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            tts = FakeTTS()
+            worker, _ = self._worker(queue, tts=tts)
+            self._fill(queue, fence, "print(1)", fence, "Done.")
+            await worker.run()  # type: ignore[attr-defined]
+            # Only the segment after the fence closed is ever synthesized.
+            assert tts.synthesized == ["Done."]
+
+        asyncio.run(scenario())
+
+    def test_a_tts_crash_degrades_one_sentence_and_triggers_recovery(self) -> None:
+        """M5.5/ADR-026: the turn survives and the engine is restarted in the
+        background rather than the exception escaping the worker."""
+
+        class _BrokenTTS(TTSEngine):
+            def load(self) -> None: ...
+            def unload(self) -> None: ...
+
+            def synthesize(
+                self, text: str, *, voice: str, speed: float = 1.0, language: str | None = None
+            ) -> Frame:
+                raise RuntimeError("tts exploded")
+
+            def voices(self) -> list[str]:
+                return ["test-voice"]
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            recoveries: list[str] = []
+            audio = FakeAudioOut()
+            worker, _ = self._worker(queue, tts=_BrokenTTS(), audio=audio, recoveries=recoveries)
+            self._fill(queue, "Boom.")
+            await worker.run()  # type: ignore[attr-defined]  # must not raise
+            assert recoveries == ["tts"]
+            assert audio.spoken == []
+
+        asyncio.run(scenario())
+
+    def test_the_playback_marker_rides_only_the_first_chunk(self) -> None:
+        """M7.1: exactly one marker per sentence, on whichever chunk reaches
+        playback first — two markers would reveal the sentence twice."""
+
+        async def scenario() -> None:
+            queue: asyncio.Queue[tuple[int, str] | None] = asyncio.Queue()
+            audio = FakeAudioOut()
+            worker, _ = self._worker(queue, tts=_StreamingTTS(chunks=3), audio=audio)
+            self._fill(queue, "Multi chunk sentence.")
+            await worker.run()  # type: ignore[attr-defined]
+            assert len(audio.spoken) == 3
+            assert len(audio.markers) == 1, "expected exactly one marker per sentence"
+
+        asyncio.run(scenario())
