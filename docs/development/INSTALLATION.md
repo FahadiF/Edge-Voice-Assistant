@@ -53,7 +53,9 @@ Installation has three stages:
 ## Requirements
 
 - **Python 3.12** (64-bit)
-- **OS:** Windows 10/11 or Linux (Ubuntu 22.04+/equivalent)
+- **OS:** Windows 10/11 or Linux (Ubuntu 22.04+/equivalent). macOS is **not** supported —
+  the architecture is macOS-ready (ADR-008) and llama.cpp has Metal, but EVA has no macOS
+  packaging or CI coverage. CI runs the suite on Windows and Linux only.
 - **RAM:** 16 GB recommended
 - **GPU (optional):** NVIDIA GPU with 6 GB+ VRAM for GPU-accelerated inference.
   CPU-only works and is fully supported.

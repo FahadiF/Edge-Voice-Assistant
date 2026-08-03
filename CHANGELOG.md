@@ -6,6 +6,14 @@ first release onward.
 
 ## [Unreleased]
 
+### 📚 Documentation
+
+- `docs/development/INSTALLATION.md` now states outright that macOS is unsupported,
+  rather than only implying it by listing Windows and Linux install paths. `README.md`
+  already carried the explicit exclusion; a reader landing on the installation guide
+  directly had to infer it. No change to the supported matrix itself — Windows 10/11
+  and Linux, as decided and documented since 2026-07-26.
+
 ### 🔧 Developer Experience
 
 - `TurnMetrics` now carries `retrieval_ms`, `context_ms`, `retrieval_score_top1`, and
