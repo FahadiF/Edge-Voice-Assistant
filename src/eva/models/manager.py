@@ -1,6 +1,11 @@
 """Model manager: install, resolve, and remove models from the catalog.
 
-The only component in the product that touches the network (ADR-008).
+The only component in the product that performs **egress** — network traffic
+leaving this machine (ADR-008). Direct-URL downloads go through
+`eva.core.net.open_url()`, the single audited egress point (H2); engine-managed
+weights go through `huggingface_hub`, which owns its own HTTP stack. Loopback
+IPC between EVA's own processes is a separate concern and is not egress — see
+`eva.core.net` for the full boundary.
 
 Two ownership models live here. Manager-managed files download to
 `<models_dir>/<kind>/<model_id>/` via a temporary `.part` file and atomic
@@ -16,12 +21,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import shutil
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
 from eva.config.paths import AppPaths
+from eva.core import net
 from eva.core.errors import ModelError, ModelNotInstalledError
 from eva.models.catalog import ModelFile, ModelInfo, model_catalog, register_builtin_models
 
@@ -314,8 +318,7 @@ class ModelManager:
             for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
                 done = part.stat().st_size if part.exists() else 0
                 headers = {"Range": f"bytes={done}-"} if done else {}
-                request = urllib.request.Request(file.url, headers=headers)
-                with urllib.request.urlopen(request) as response:
+                with net.open_url(file.url, headers=headers) as response:
                     resumed = response.status == 206
                     if done and not resumed:
                         done = 0  # server ignored the range request; restart
@@ -341,7 +344,10 @@ class ModelManager:
                     attempt,
                     _DOWNLOAD_ATTEMPTS,
                 )
-        except (urllib.error.URLError, OSError) as exc:
+        except OSError as exc:
+            # `urllib.error.URLError` subclasses `OSError`, so this covers both
+            # transport and HTTP-protocol failures without importing urllib —
+            # egress details now live behind `eva.core.net` (H2).
             raise ModelError(f"Download failed for {filename}: {exc}") from exc
 
         received = part.stat().st_size if part.exists() else 0

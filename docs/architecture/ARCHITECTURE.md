@@ -271,6 +271,28 @@ something a contributor has to discover by reading source. Each is scheduled; se
 | **Settings is one flat document** | Single pydantic model, strict keys | No structure for per-provider configuration, credentials, or fallback chains |
 | **No secret storage** | None anywhere in the project | Prerequisite for any authenticated provider |
 
-**Offline-by-construction is currently enforced by convention, not by test.** The only
-network code lives in the model downloader, but nothing verifies that. Before any online
-capability is introduced, that invariant needs an automated guard.
+**Offline-by-construction is enforced by test, not by convention** (Batch 6). Two kinds of
+network traffic exist and must not be confused:
+
+- **Egress** — traffic leaving this machine. Only `eva.models.manager` performs it, to
+  download model weights: direct-URL files through `eva.core.net.open_url()`, the single
+  audited egress point, and engine-managed weights through `huggingface_hub`, which owns
+  its own HTTP stack. Nothing else in the codebase opens an outbound connection.
+- **Loopback IPC** — traffic to `127.0.0.1`/`::1`/`localhost`, which never leaves the
+  machine and is *not* egress. Three components rely on it and deliberately keep calling
+  `urllib.request` directly: `eva.desktop.client` (the desktop shell drives the engine
+  over `/api/v1`), `eva.service` (the supervisor's health and graceful-shutdown probes
+  behind `eva start`/`stop`/`restart`), and `eva.cli`'s `eva status` probe. Routing local
+  IPC through the egress boundary would misfile it as the very thing that boundary exists
+  to contain.
+
+`eva.core.net.is_loopback_host()` is the single definition of that distinction, shared by
+production code and the test fixture so the two cannot drift.
+
+`tests/test_offline_invariant.py` enforces both halves: a socket-level fixture denies every
+non-loopback `connect()` while permitting loopback, and a full simulated conversation
+(ASR → LLM → chunking → TTS → playback) must complete under it with zero outbound
+attempts. A companion test injects an engine that phones home mid-turn and asserts the
+fixture catches it, so the invariant cannot pass vacuously. An import-direction test pins
+`urllib.request` to exactly the four modules above, each with a stated reason, and rejects
+any second HTTP stack (`requests`/`httpx`/`aiohttp`) in `src/`.

@@ -6,6 +6,30 @@ first release onward.
 
 ## [Unreleased]
 
+### 🔒 Offline guarantee
+
+- **"Runs fully offline" is now a tested property, not a convention.** New
+  `tests/test_offline_invariant.py` blocks every non-loopback socket `connect()` and runs a
+  full simulated conversation (ASR → LLM → sentence chunking → TTS → playback) under it,
+  asserting zero outbound attempts. A companion test injects an engine that phones home
+  mid-turn and asserts the guard catches it, so the invariant cannot pass vacuously.
+  Blocking at the socket layer rather than mocking an HTTP client means it catches egress
+  from *any* stack — urllib, `huggingface_hub`, or a future provider SDK.
+- **One controlled egress point.** New `eva.core.net` is the only module in the codebase
+  that opens an outbound connection; `eva.models.manager` routes its direct-URL model
+  downloads through `net.open_url()` and no longer imports `urllib` at all. An
+  import-direction test pins `urllib.request` to exactly four modules — the boundary plus
+  the three **loopback** clients — and rejects any second HTTP stack
+  (`requests`/`httpx`/`aiohttp`) appearing in `src/`.
+- **Loopback IPC is explicitly not egress.** The desktop shell (`eva.desktop.client`), the
+  server supervisor (`eva.service`, behind `eva start`/`stop`/`restart`), and `eva status`
+  all speak HTTP to `127.0.0.1` and keep calling `urllib.request` directly by design — a
+  naive "no outbound sockets" rule would have broken all three. `eva.core.net.is_loopback_host()`
+  is the single definition of that distinction, shared by production code and the test
+  fixture so the two cannot drift. Explicit regression tests cover each client, including
+  that `0.0.0.0` resolves to loopback and that the *same* code paths aimed off-machine are
+  denied — proving the exemption is about the destination, not the module.
+
 ### 📊 Benchmarking (M8)
 
 - **Benchmark reporting.** `eva bench --report PATH [--format json|md|html]` now writes one
