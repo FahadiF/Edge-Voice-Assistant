@@ -8,6 +8,22 @@ first release onward.
 
 ### 🔧 Developer Experience
 
+- `TurnMetrics` now carries `retrieval_ms`, `context_ms`, `retrieval_score_top1`, and
+  `retrieval_scan_count` per turn, plus an optional `resources` sample — previously,
+  retrieval/context timing existed only as `Orchestrator.last_retrieval_ms`/
+  `last_retrieval_score_top1`, mutable "latest value" properties that a later turn's
+  diagnostics read could misattribute to the wrong turn. Those two properties are now
+  thin reads of the latest historical `TurnMetrics` record instead, so M8's benchmark
+  harness can reconstruct per-stage timing across a session's whole history, not just
+  the most recent turn. `NumpyMemoryRetriever` gains `last_scan_count` (not part of the
+  `MemoryRetriever` port), the M1(a) visibility metric for the deferred M1(b) ANN-index
+  decision. The resource sample reuses whatever the diagnostics sampler last measured
+  (`eva.metrics.diagnostics.last_sampled_resources()`) rather than sampling
+  synchronously at turn end, which would have put an `nvidia-smi` subprocess spawn on
+  the hot path — measured marginal cost of the new fields: ~2 us/turn. No settings
+  schema change, no new endpoint; `ResourceUsage` moved from `eva.metrics.diagnostics`
+  to `eva.metrics.turn` (re-exported from its old location) to avoid a circular import
+  now that `TurnMetrics` carries one.
 - The web UI's REST-facing TypeScript types (`web/src/api/types.generated.ts`) are now
   generated from the backend's OpenAPI schema (`npm run generate:types`) instead of
   hand-transcribed, closing a class of drift that had already caused two silent gaps

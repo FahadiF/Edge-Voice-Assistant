@@ -39,6 +39,18 @@ class NumpyMemoryRetriever(MemoryRetriever):
         self._scan_limit = scan_limit
         self._min_similarity = min_similarity
         self._speakers = frozenset(speakers) if speakers else None
+        self._last_scan_count = 0
+
+    @property
+    def last_scan_count(self) -> int:
+        """Rows scanned by the most recent `retrieve()` call, bounded by
+        `scan_limit` — the M1(a) visibility metric (Batch 7 decision 10.2):
+        evidence for whether the deferred M1(b) ANN index is ever actually
+        needed, rather than a guess. Deliberately not part of the
+        `MemoryRetriever` port — this is concrete-adapter-only, transient
+        state read by `ContextBuilder` in the same call frame it's produced,
+        never held across turns."""
+        return self._last_scan_count
 
     def retrieve(
         self,
@@ -48,6 +60,7 @@ class NumpyMemoryRetriever(MemoryRetriever):
         conversation_id: str | None = None,
     ) -> list[MemorySearchResult]:
         rows = self._store.embeddings_for(conversation_id, limit=self._scan_limit)
+        self._last_scan_count = len(rows)
         if not rows:
             return []
 

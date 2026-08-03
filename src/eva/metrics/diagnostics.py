@@ -14,28 +14,23 @@ from pydantic import BaseModel, ConfigDict
 
 from eva.config.settings import Settings
 from eva.hardware.detect import run_probe
-from eva.metrics.turn import TurnMetrics
+from eva.metrics.turn import ResourceUsage, TurnMetrics
 
 if TYPE_CHECKING:
     from eva.engine import Assistant
 
-
-class ResourceUsage(BaseModel):
-    # gpu_percent/vram_*_mb default to None (no nvidia-smi) but are always
-    # present once served — json_schema_serialization_defaults_required makes
-    # the OpenAPI response schema say so without affecting construction.
-    model_config = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
-
-    cpu_percent: float
-    ram_used_mb: int
-    ram_total_mb: int
-    gpu_percent: float | None = None
-    vram_used_mb: int | None = None
-    vram_total_mb: int | None = None
+# Most recent sample `sample_resources()` produced, reused by turn-completion
+# (Batch 7 decision 10.1) so attaching a resource figure to a `TurnMetrics`
+# never costs a synchronous nvidia-smi subprocess spawn on the hot path. A
+# single reference reassignment is GIL-atomic, and both the writer (a
+# diagnostics poll) and the reader (turn completion) only ever see a whole,
+# immutable `ResourceUsage` — never a partially-built one.
+_last_sample: ResourceUsage | None = None
 
 
 def sample_resources() -> ResourceUsage:
     """Current system utilization. GPU numbers are None without nvidia-smi."""
+    global _last_sample
     vm = psutil.virtual_memory()
     gpu_percent: float | None = None
     vram_used: int | None = None
@@ -57,7 +52,7 @@ def sample_resources() -> ResourceUsage:
                 vram_total = int(float(parts[2]))
             except ValueError:
                 pass
-    return ResourceUsage(
+    sample = ResourceUsage(
         cpu_percent=psutil.cpu_percent(interval=None),
         ram_used_mb=int((vm.total - vm.available) / 1_048_576),
         ram_total_mb=int(vm.total / 1_048_576),
@@ -65,6 +60,15 @@ def sample_resources() -> ResourceUsage:
         vram_used_mb=vram_used,
         vram_total_mb=vram_total,
     )
+    _last_sample = sample
+    return sample
+
+
+def last_sampled_resources() -> ResourceUsage | None:
+    """The most recent sample `sample_resources()` produced, or None if
+    diagnostics has never been polled this process. Read by turn-completion
+    (Batch 7 decision 10.1) instead of sampling again."""
+    return _last_sample
 
 
 class RuntimeSnapshot(BaseModel):

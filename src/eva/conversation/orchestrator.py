@@ -94,6 +94,7 @@ from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
 from eva.memory.base import MemoryStore
 from eva.memory.models import MemoryConversation
+from eva.metrics.diagnostics import last_sampled_resources
 from eva.metrics.turn import MetricsCollector, TurnMetrics
 from eva.tts.base import TTSEngine
 
@@ -318,13 +319,24 @@ class Orchestrator:
 
     @property
     def last_retrieval_ms(self) -> int | None:
-        """Most recent semantic-memory retrieval latency (diagnostics)."""
-        return self._context_builder.last_retrieval_ms
+        """Most recent semantic-memory retrieval latency (diagnostics).
+
+        A thin read of the latest historical `TurnMetrics` record (Batch 7) —
+        not a mutable `ContextBuilder` attribute. The prior design could
+        attribute a later build's timing to an earlier turn's diagnostics
+        read; this can't, because the value is fixed the moment the turn
+        that produced it is recorded. None only when no turn has completed
+        yet or the last one never reached context building (see
+        `TurnMetrics.retrieval_ms`'s default)."""
+        turns = self._metrics.turns
+        return turns[-1].retrieval_ms if turns else None
 
     @property
     def last_retrieval_score_top1(self) -> float | None:
-        """Top result's score from the most recent retrieval (diagnostics)."""
-        return self._context_builder.last_retrieval_top_score
+        """Top result's score from the most recent retrieval (diagnostics).
+        See `last_retrieval_ms` — same historical-record source."""
+        turns = self._metrics.turns
+        return turns[-1].retrieval_score_top1 if turns else None
 
     @property
     def conversation_id(self) -> str:
@@ -1010,7 +1022,16 @@ class Orchestrator:
         reply = "".join(reply_parts).strip()
         if self._controller.is_stale(epoch):
             return TurnMetrics(
-                epoch=epoch, asr_ms=asr_ms, ttft_ms=ttft_ms, tokens=token_count, cancelled=True
+                epoch=epoch,
+                asr_ms=asr_ms,
+                ttft_ms=ttft_ms,
+                tokens=token_count,
+                cancelled=True,
+                retrieval_ms=built_context.trace.retrieval_ms,
+                context_ms=built_context.trace.context_ms,
+                retrieval_score_top1=built_context.trace.retrieval_score_top1,
+                retrieval_scan_count=built_context.trace.retrieval_scan_count,
+                resources=last_sampled_resources(),
             )
         if finish_reason == "length":
             logger.warning(
@@ -1050,4 +1071,9 @@ class Orchestrator:
             tts_first_ms=tts_first_ms,
             ttfa_ms=first_audio_ms,
             total_ms=elapsed_ms(),
+            retrieval_ms=built_context.trace.retrieval_ms,
+            context_ms=built_context.trace.context_ms,
+            retrieval_score_top1=built_context.trace.retrieval_score_top1,
+            retrieval_scan_count=built_context.trace.retrieval_scan_count,
+            resources=last_sampled_resources(),
         )

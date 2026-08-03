@@ -19,6 +19,7 @@ from eva.asr.base import ASREngine, TranscriptionResult
 from eva.audio.frames import Frame
 from eva.audio.segmenter import BargeIn, UtteranceEnd, UtteranceProgress
 from eva.config.settings import Settings
+from eva.conversation.context_builder import ContextBuilder
 from eva.conversation.orchestrator import Orchestrator
 from eva.core.events import (
     BargeInLatencyMeasured,
@@ -34,7 +35,12 @@ from eva.core.events import (
     TurnCancelled,
     TurnFinished,
 )
+from eva.embedding.base import EmbeddingProvider
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
+from eva.memory.base import MemoryRetriever
+from eva.memory.models import MemorySearchResult, MemoryTurn
+from eva.metrics.diagnostics import sample_resources
+from eva.metrics.turn import TurnMetrics
 from eva.tts.base import TTSEngine
 from tests.server_fakes import FakeMemoryStore
 
@@ -1003,6 +1009,37 @@ class TestQueueBackpressure:
         asyncio.run(scenario())
 
 
+class _FixedRetriever(MemoryRetriever):
+    """Real `retrieve()` + a `last_scan_count` like `NumpyMemoryRetriever`
+    (Batch 7 decision 10.2), so a full turn actually exercises the retrieval-
+    metrics wiring rather than skipping it via the no-retriever fallback."""
+
+    def __init__(self, results: list[MemorySearchResult], scan_count: int) -> None:
+        self._results = results
+        self.last_scan_count = scan_count
+
+    def retrieve(
+        self, query_vector: bytes, *, top_k: int, conversation_id: str | None = None
+    ) -> list[MemorySearchResult]:
+        return self._results
+
+
+class _FixedEmbedding(EmbeddingProvider):
+    def load(self) -> None: ...
+    def unload(self) -> None: ...
+    def embed(self, text: str) -> np.ndarray:
+        return np.zeros(4, dtype=np.float32)
+
+
+def _make_result(text: str, score: float) -> MemorySearchResult:
+    from datetime import UTC, datetime
+
+    turn = MemoryTurn(
+        id=1, conversation_id="c", created_at=datetime.now(UTC), speaker="user", text=text
+    )
+    return MemorySearchResult(turn=turn, score=score, match_reason="semantic")
+
+
 class TestMetrics:
     def test_metrics_recorded_for_completed_turn(self) -> None:
         async def scenario() -> None:
@@ -1020,6 +1057,109 @@ class TestMetrics:
             assert not turns[0].cancelled
 
         asyncio.run(scenario())
+
+    def test_retrieval_and_context_metrics_populate_for_a_completed_turn(self) -> None:
+        """Batch 7 (M4): a real completed turn must carry retrieval_ms,
+        context_ms, retrieval_score_top1, and retrieval_scan_count — sourced
+        from the same `ContextTrace` the pipeline already builds, not
+        recomputed or left at defaults."""
+
+        async def scenario() -> None:
+            settings = Settings()
+            settings.conversation.system_prompt = "test"
+            memory = FakeMemoryStore()
+            builder = ContextBuilder(
+                settings,
+                memory,
+                retriever=_FixedRetriever([_make_result("a fact", 0.75)], scan_count=42),
+                embedding_provider=_FixedEmbedding(),
+            )
+            bus = EventBus()
+            audio = FakeAudioOut()
+            orch = Orchestrator(
+                settings,
+                bus,
+                audio,
+                FakeASR(),
+                FakeLLM(),
+                FakeTTS(),
+                memory,
+                context_builder=builder,
+            )
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.5)
+
+            await drive(orch, bus, script)
+            turn = orch.metrics.turns[0]
+            assert turn.retrieval_ms >= 0
+            assert turn.context_ms >= turn.retrieval_ms
+            assert turn.retrieval_score_top1 == 0.75
+            assert turn.retrieval_scan_count == 42
+
+        asyncio.run(scenario())
+
+    def test_empty_transcript_turn_keeps_new_fields_at_default(self) -> None:
+        """The empty-transcript early return (`_pipeline`) never reaches
+        context building — its `TurnMetrics` must keep every Batch 7 field
+        at the safe class default, not a stale or invented value."""
+
+        async def scenario() -> None:
+            orch, bus, _, _ = make_orchestrator(asr=FakeASR(text=""))
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.2)
+
+            await drive(orch, bus, script)
+            turn = orch.metrics.turns[0]
+            assert turn.retrieval_ms == 0
+            assert turn.context_ms == 0
+            assert turn.retrieval_score_top1 is None
+            assert turn.retrieval_scan_count == 0
+            assert turn.resources is None
+
+        asyncio.run(scenario())
+
+    def test_resources_reuses_the_diagnostics_samplers_latest_value(self) -> None:
+        """Decision 10.1: turn completion must never sample resources itself
+        (no synchronous nvidia-smi call on the hot path) — it reuses whatever
+        the diagnostics sampler last measured."""
+
+        async def scenario() -> None:
+            orch, bus, _, _ = make_orchestrator()
+            sample = sample_resources()  # simulates a prior diagnostics poll
+
+            async def script() -> None:
+                orch.feed_audio_event(UtteranceEnd(AUDIO, 1000, 800, False))
+                await asyncio.sleep(0.5)
+
+            await drive(orch, bus, script)
+            assert orch.metrics.turns[0].resources == sample
+
+        asyncio.run(scenario())
+
+
+class TestRetrievalPropertiesReadHistory:
+    """Batch 7 (D4): `last_retrieval_ms`/`last_retrieval_score_top1` become
+    thin reads of the latest historical `TurnMetrics`, not a mutable
+    `ContextBuilder` attribute — tested directly against the metrics
+    collector, without needing a full async turn."""
+
+    def test_none_before_any_turn_completes(self) -> None:
+        orch, _, _, _ = make_orchestrator()
+        assert orch.last_retrieval_ms is None
+        assert orch.last_retrieval_score_top1 is None
+
+    def test_reflects_the_latest_recorded_turn(self) -> None:
+        orch, _, _, _ = make_orchestrator()
+        orch.metrics.record(TurnMetrics(epoch=1, retrieval_ms=10, retrieval_score_top1=0.1))
+        orch.metrics.record(TurnMetrics(epoch=2, retrieval_ms=20, retrieval_score_top1=0.2))
+        assert orch.last_retrieval_ms == 20
+        assert orch.last_retrieval_score_top1 == 0.2
+        # The earlier turn's own record is untouched — frozen, immutable.
+        assert orch.metrics.turns[0].retrieval_ms == 10
 
 
 class TestTtsCleanupSerialization:

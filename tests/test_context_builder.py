@@ -45,6 +45,22 @@ class _FixedRetriever(MemoryRetriever):
         return self._results
 
 
+class _ScannedRetriever(MemoryRetriever):
+    """Exposes a mutable `last_scan_count` like the real
+    `NumpyMemoryRetriever` (Batch 7 decision 10.2), so `ContextBuilder`'s
+    `getattr` wiring — and per-call independence from any prior call's
+    reading — can be tested without a real embedding index."""
+
+    def __init__(self, results: list[MemorySearchResult], scan_count: int) -> None:
+        self._results = results
+        self.last_scan_count = scan_count
+
+    def retrieve(
+        self, query_vector: bytes, *, top_k: int, conversation_id: str | None = None
+    ) -> list[MemorySearchResult]:
+        return self._results
+
+
 class _FakeEmbeddingProvider(EmbeddingProvider):
     def load(self) -> None: ...
     def unload(self) -> None: ...
@@ -444,3 +460,108 @@ class TestTrace:
         assert result.trace.summary_included is True
         assert result.trace.summary_text_preview is not None
         assert len(result.trace.summary_text_preview) <= 80
+
+
+class TestRetrievalAndContextTiming:
+    """Batch 7 (M4): retrieval_ms/context_ms/retrieval_score_top1/
+    retrieval_scan_count are per-call values carried on THIS build's trace —
+    not the mutable `self._last_retrieval_ms`-style instance state the prior
+    design used, which let a later build's read attribute the wrong turn's
+    numbers (see `.dev/EVA — Principal Architecture Review.md`)."""
+
+    def test_context_ms_covers_the_whole_build_including_retrieval(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        retriever = _FixedRetriever([_make_result("a fact", 0.9)])
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        result = builder.build(conv.id, "hi")
+        assert result.trace.context_ms >= result.trace.retrieval_ms
+        assert result.trace.retrieval_ms >= 0
+        assert result.trace.context_ms >= 0
+
+    def test_retrieval_score_top1_matches_the_highest_scored_result(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        results = [_make_result("first", 0.9, turn_id=10), _make_result("second", 0.5, turn_id=20)]
+        retriever = _FixedRetriever(results)
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        result = builder.build(conv.id, "hi")
+        assert result.trace.retrieval_score_top1 == 0.9
+
+    def test_retrieval_score_top1_is_none_when_nothing_is_retrieved(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        builder = ContextBuilder(Settings(), store)  # no retriever configured
+        result = builder.build(conv.id, "hi")
+        assert result.trace.retrieval_score_top1 is None
+        assert result.trace.retrieval_ms == 0
+        assert result.trace.retrieval_scan_count == 0
+
+    def test_scan_count_is_read_from_the_concrete_retriever_not_the_port(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """The `MemoryRetriever` port stays unchanged (decision 10.2) — the
+        count is read via `getattr`, so it must reflect whatever the
+        concrete retriever reports, and degrade to 0 for one that doesn't
+        expose it at all (`_FixedRetriever`, below)."""
+        conv = store.start_conversation()
+        retriever = _ScannedRetriever([_make_result("x", 0.5)], scan_count=1847)
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        result = builder.build(conv.id, "hi")
+        assert result.trace.retrieval_scan_count == 1847
+
+    def test_retriever_without_last_scan_count_degrades_to_zero(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        retriever = _FixedRetriever([_make_result("x", 0.5)])  # no last_scan_count attribute
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        result = builder.build(conv.id, "hi")
+        assert result.trace.retrieval_scan_count == 0
+
+    def test_two_calls_never_cross_contaminate_each_others_trace(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """The regression this batch fixes: retrieval numbers must belong to
+        the call that produced them, not to whichever call happened to run
+        (or finish) most recently on the shared retriever instance. Proven
+        here by changing the retriever's state BETWEEN two calls on the SAME
+        builder and confirming each call's trace matches its own moment,
+        never the other's — the mechanism that makes this safe is that
+        `ContextBuilder` no longer holds any of this as instance state at
+        all (verified structurally: no `_last_retrieval_ms`-style attribute
+        exists post-construction)."""
+        conv = store.start_conversation()
+        retriever = _ScannedRetriever([_make_result("first", 0.9)], scan_count=100)
+        builder = ContextBuilder(
+            Settings(), store, retriever=retriever, embedding_provider=_FakeEmbeddingProvider()
+        )
+        assert not hasattr(builder, "_last_retrieval_ms")
+        assert not hasattr(builder, "_last_retrieval_top_score")
+
+        first = builder.build(conv.id, "hi")
+        assert first.trace.retrieval_scan_count == 100
+        assert first.trace.retrieval_score_top1 == 0.9
+
+        retriever.last_scan_count = 999
+        retriever._results = [_make_result("second", 0.1)]
+        second = builder.build(conv.id, "hi again")
+        assert second.trace.retrieval_scan_count == 999
+        assert second.trace.retrieval_score_top1 == 0.1
+
+        # The first call's already-returned trace is unaffected by the
+        # retriever's later state change — proof there is no shared mutable
+        # attribute a later call could have corrupted it through.
+        assert first.trace.retrieval_scan_count == 100
+        assert first.trace.retrieval_score_top1 == 0.9

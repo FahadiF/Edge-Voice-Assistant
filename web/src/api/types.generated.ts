@@ -1853,7 +1853,14 @@ export interface components {
              */
             title: string;
         };
-        /** ResourceUsage */
+        /**
+         * ResourceUsage
+         * @description System utilization at one sample point (`eva.metrics.diagnostics.
+         *     sample_resources()`). Defined here, not in `diagnostics.py`: `TurnMetrics`
+         *     below carries a `ResourceUsage` sample (Batch 7 decision 10.1), and
+         *     `diagnostics.py` already imports `TurnMetrics` from this module — defining
+         *     it there instead would make the two modules import each other.
+         */
         ResourceUsage: {
             /** Cpu Percent */
             cpu_percent: number;
@@ -2164,6 +2171,24 @@ export interface components {
              * @default false
              */
             cancelled: boolean;
+            /**
+             * Retrieval Ms
+             * @default 0
+             */
+            retrieval_ms: number;
+            /**
+             * Context Ms
+             * @default 0
+             */
+            context_ms: number;
+            /** Retrieval Score Top1 */
+            retrieval_score_top1?: number | null;
+            /**
+             * Retrieval Scan Count
+             * @default 0
+             */
+            retrieval_scan_count: number;
+            resources?: components["schemas"]["ResourceUsage"] | null;
         };
         /** UISettings */
         UISettings: {

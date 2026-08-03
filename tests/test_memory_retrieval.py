@@ -176,6 +176,44 @@ class TestScanLimit:
         results = retriever.retrieve(_vec([1, 0]), top_k=10)
         assert [r.turn.id for r in results] == [newest.id]
 
+    def test_last_scan_count_reports_saturation_at_the_ceiling(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        """Batch 7 (M4/M1a): the visibility metric for the deferred ANN-index
+        decision — a retrieval that scans exactly `scan_limit` rows is
+        evidence the cap is actually being hit, not just configured."""
+        conv = store.start_conversation()
+        for i in range(5):
+            turn = store.add_turn(conv.id, "user", f"turn {i}")
+            store.store_embedding(turn.id, "m", _vec([1, i * 0.001]), dim=2)
+
+        retriever = NumpyMemoryRetriever(store, recency_half_life_days=0, scan_limit=3)
+        retriever.retrieve(_vec([1, 0]), top_k=10)
+        assert retriever.last_scan_count == 3  # saturated: hit the ceiling
+
+    def test_last_scan_count_below_the_ceiling_is_not_saturated(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        conv = store.start_conversation()
+        for i in range(2):
+            turn = store.add_turn(conv.id, "user", f"turn {i}")
+            store.store_embedding(turn.id, "m", _vec([1, i * 0.001]), dim=2)
+
+        retriever = NumpyMemoryRetriever(store, recency_half_life_days=0, scan_limit=3)
+        retriever.retrieve(_vec([1, 0]), top_k=10)
+        assert retriever.last_scan_count == 2  # below the ceiling — not saturated
+
+    def test_last_scan_count_defaults_to_zero_before_any_retrieval(
+        self, store: SQLiteMemoryStore
+    ) -> None:
+        retriever = NumpyMemoryRetriever(store)
+        assert retriever.last_scan_count == 0
+
+    def test_last_scan_count_is_zero_on_an_empty_store(self, store: SQLiteMemoryStore) -> None:
+        retriever = NumpyMemoryRetriever(store)
+        retriever.retrieve(_vec([1, 0]), top_k=10)
+        assert retriever.last_scan_count == 0
+
 
 class TestRobustness:
     def test_mismatched_dimension_embeddings_are_skipped(self, store: SQLiteMemoryStore) -> None:

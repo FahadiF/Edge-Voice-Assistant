@@ -140,6 +140,19 @@ class ContextTrace:
     """Tokens the recent-turn window contributes to the prompt."""
     history_turns_dropped: int = 0
     """Oldest turns dropped to fit the context budget (M7.3)."""
+    retrieval_ms: int = 0
+    """Semantic-memory retrieval cost for THIS build (Batch 7) — a per-call
+    value, not a mutable instance attribute, so a later build can never be
+    misattributed to an earlier turn."""
+    retrieval_score_top1: float | None = None
+    """Top retrieved result's score for this build, or None if nothing was
+    retrieved (no retriever configured, embedding disabled, or no matches)."""
+    retrieval_scan_count: int = 0
+    """Rows scanned by the retriever for this build, bounded by
+    `settings.memory.retrieval_scan_limit` — the M1(a) visibility metric.
+    0 when retrieval used the keyword fallback (no scan-limited scan ran)."""
+    context_ms: int = 0
+    """Wall-clock cost of this whole `build()` call, retrieval included."""
 
 
 @dataclass(frozen=True)
@@ -224,20 +237,6 @@ class ContextBuilder:
         # otherwise. Only ever used to DROP history, so an estimate that runs
         # slightly high costs a turn of context, never a context overflow.
         self._token_counter = token_counter or _estimate_tokens
-        self._last_retrieval_ms: int | None = None
-        self._last_retrieval_top_score: float | None = None
-
-    @property
-    def last_retrieval_ms(self) -> int | None:
-        """Wall-clock time of the most recent semantic retrieval (embed +
-        search) — diagnostics (ADR-019 §11). None until the first retrieval."""
-        return self._last_retrieval_ms
-
-    @property
-    def last_retrieval_top_score(self) -> float | None:
-        """Top result's score from the most recent retrieval, or None if
-        nothing was retrieved (no retriever configured, or no matches)."""
-        return self._last_retrieval_top_score
 
     def build(
         self,
@@ -254,6 +253,7 @@ class ContextBuilder:
         rendered on screen. It defaults to False so every existing caller
         (context preview, benchmarks) keeps the on-screen behaviour it had.
         """
+        build_started = time.perf_counter()
         language = resolve_language(self._settings)
         persona = resolve_persona(self._settings)
         profile = self._profile_store.active() if self._profile_store is not None else None
@@ -274,7 +274,9 @@ class ContextBuilder:
         if known_name:
             system_prompt = f"{system_prompt} The user's name is {known_name}."
 
-        results, memory_trace = self._retrieve_memories(user_text)
+        results, memory_trace, retrieval_ms, retrieval_top1, scan_count = self._retrieve_memories(
+            user_text
+        )
         memory_block, memory_trimmed = self._format_memory_block(results)
         if memory_trimmed:
             trimmed_sections.append("relevant_memories")
@@ -348,6 +350,10 @@ class ContextBuilder:
             history_tokens=history_tokens,
             history_turns_dropped=dropped,
             trimmed_sections=tuple(trimmed_sections),
+            retrieval_ms=retrieval_ms,
+            retrieval_score_top1=retrieval_top1,
+            retrieval_scan_count=scan_count,
+            context_ms=int((time.perf_counter() - build_started) * 1000),
         )
         return BuiltContext(messages=messages, trace=trace)
 
@@ -535,8 +541,15 @@ class ContextBuilder:
 
     def _retrieve_memories(
         self, user_text: str
-    ) -> tuple[list[MemorySearchResult], list[RetrievedMemoryTrace]]:
+    ) -> tuple[list[MemorySearchResult], list[RetrievedMemoryTrace], int, float | None, int]:
+        """Returns (results, trace, retrieval_ms, top1_score, scan_count) —
+        all per-call values (Batch 7), threaded onto this build's
+        `ContextTrace` rather than held as mutable instance state: the prior
+        design (`self._last_retrieval_ms` etc.) let a later turn's read of
+        the property attribute an earlier or unrelated build's numbers to
+        the wrong turn."""
         start = time.perf_counter()
+        scan_count = 0
         if (
             self._retriever is None
             or self._embedding_provider is None
@@ -558,14 +571,18 @@ class ContextBuilder:
                 top_k=self._settings.memory.retrieval_top_k,
                 conversation_id=None,
             )
-        self._last_retrieval_ms = int((time.perf_counter() - start) * 1000)
-        self._last_retrieval_top_score = results[0].score if results else None
+            # Not part of the MemoryRetriever port (decision 10.2) — a fake
+            # or future adapter that doesn't expose it degrades to 0 rather
+            # than raising.
+            scan_count = getattr(self._retriever, "last_scan_count", 0)
+        retrieval_ms = int((time.perf_counter() - start) * 1000)
+        top1_score = results[0].score if results else None
         trace = [
             RetrievedMemoryTrace(turn_id=r.turn.id, score=r.score, text_preview=r.turn.text[:80])
             for r in results
             if r.turn.id is not None
         ]
-        return results, trace
+        return results, trace, retrieval_ms, top1_score, scan_count
 
     def _keyword_fallback(self, user_text: str) -> list[MemorySearchResult]:
         """Recall by keyword when semantic search isn't available: run the

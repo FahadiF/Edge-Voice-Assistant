@@ -61,3 +61,37 @@ def test_no_completed_turns_message() -> None:
     assert collector.summary() == "No completed turns."
     assert collector.total_recorded == 1
     assert collector.non_cancelled_count == 0
+
+
+class TestHistoricalRetrievalAttribution:
+    """Batch 7 (M4): retrieval/context timing must be reconstructable per
+    turn from the bounded history, not just readable as a single latest
+    value — the roadmap's own acceptance criterion for this batch."""
+
+    def test_reconstructs_retrieval_and_context_timing_for_every_turn(self) -> None:
+        collector = MetricsCollector()
+        for i in range(3):
+            collector.record(
+                TurnMetrics(
+                    epoch=i,
+                    retrieval_ms=10 + i,
+                    context_ms=20 + i,
+                    retrieval_score_top1=0.1 * i,
+                    retrieval_scan_count=100 + i,
+                )
+            )
+        turns = collector.turns
+        assert [t.retrieval_ms for t in turns] == [10, 11, 12]
+        assert [t.context_ms for t in turns] == [20, 21, 22]
+        assert [round(t.retrieval_score_top1, 2) for t in turns] == [0.0, 0.1, 0.2]  # type: ignore[arg-type]
+        assert [t.retrieval_scan_count for t in turns] == [100, 101, 102]
+
+    def test_new_fields_default_safely_for_a_turn_that_never_built_context(self) -> None:
+        """An early-return `TurnMetrics` (stale-after-ASR, empty transcript)
+        must never report a retrieval that did not happen."""
+        m = TurnMetrics(epoch=1)
+        assert m.retrieval_ms == 0
+        assert m.context_ms == 0
+        assert m.retrieval_score_top1 is None
+        assert m.retrieval_scan_count == 0
+        assert m.resources is None

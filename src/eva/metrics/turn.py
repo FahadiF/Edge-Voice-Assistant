@@ -22,6 +22,26 @@ from pydantic import BaseModel, ConfigDict
 _MAX_TURN_SAMPLES = 1000
 
 
+class ResourceUsage(BaseModel):
+    """System utilization at one sample point (`eva.metrics.diagnostics.
+    sample_resources()`). Defined here, not in `diagnostics.py`: `TurnMetrics`
+    below carries a `ResourceUsage` sample (Batch 7 decision 10.1), and
+    `diagnostics.py` already imports `TurnMetrics` from this module — defining
+    it there instead would make the two modules import each other."""
+
+    # gpu_percent/vram_*_mb default to None (no nvidia-smi) but are always
+    # present once served — json_schema_serialization_defaults_required makes
+    # the OpenAPI response schema say so without affecting construction.
+    model_config = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
+
+    cpu_percent: float
+    ram_used_mb: int
+    ram_total_mb: int
+    gpu_percent: float | None = None
+    vram_used_mb: int | None = None
+    vram_total_mb: int | None = None
+
+
 class TurnMetrics(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -34,6 +54,21 @@ class TurnMetrics(BaseModel):
     ttfa_ms: int = 0  # utterance end → first audio queued
     total_ms: int = 0  # utterance end → playback drained
     cancelled: bool = False
+    # Batch 7 (M4): historical attribution for the two dominant latency
+    # sources named in M8 — previously only available as orchestrator
+    # "latest value" properties, which a later turn's read could misattribute
+    # to the wrong turn (see ContextBuilder/Orchestrator, ADR-021).
+    retrieval_ms: int = 0  # semantic-memory retrieval cost for this turn
+    context_ms: int = 0  # whole ContextBuilder.build() cost for this turn
+    retrieval_score_top1: float | None = None  # top result's score, or None
+    retrieval_scan_count: int = 0  # M1(a) visibility metric — rows scanned,
+    # bounded by settings.memory.retrieval_scan_limit; evidence for the M1(b)
+    # ANN-index decision, which was deliberately deferred pending this data.
+    resources: ResourceUsage | None = None
+    """Most recent resource sample (decision 10.1): reused from whatever the
+    diagnostics sampler last measured, never sampled synchronously here —
+    `sample_resources()` shells out to nvidia-smi, which has no place on the
+    turn-completion hot path. None until diagnostics has been polled once."""
 
     @property
     def tokens_per_s(self) -> float:
