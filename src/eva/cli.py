@@ -817,11 +817,33 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         ),
     )
     print(f"\nRunning pipeline benchmark ({args.rounds} round(s))...\n")
+    turns = []
     for i in range(args.rounds):
         report = bench.run(args.text)
         print(f"── Round {i + 1} ──")
         print(report.render())
         print()
+        # Re-projection of numbers `bench.run()` already measured — the
+        # aggregator only ever sees TurnMetrics, whatever produced them (M8).
+        turns.append(report.as_turn_metrics(epoch=i + 1))
+
+    if args.report:
+        from pathlib import Path
+
+        from eva.benchmark.report import aggregate, render, summary_line
+        from eva.core.provenance import capture_environment
+
+        aggregated = aggregate(
+            turns,
+            label=f"eva bench x{args.rounds}",
+            source="benchmark",
+            environment=capture_environment(assistant.llm.device),
+            notes=(f"Prompt: {args.text}",),
+        )
+        out = Path(args.report)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(render(aggregated, args.format), encoding="utf-8")
+        print(f"Report written to {out}  ({summary_line(aggregated)})")
     return 0
 
 
@@ -1323,6 +1345,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--text", default="What is the capital of Finland and what is it known for?"
     )
     p_bench.add_argument("--rounds", type=int, default=1)
+    p_bench.add_argument(
+        "--report",
+        help="Write an aggregated report across all rounds to this path (M8)",
+    )
+    p_bench.add_argument(
+        "--format",
+        choices=["json", "md", "html"],
+        default="md",
+        help="Report format; Markdown by default because it diffs in git",
+    )
     p_bench.set_defaults(func=_cmd_bench)
 
     p_serve = sub.add_parser(

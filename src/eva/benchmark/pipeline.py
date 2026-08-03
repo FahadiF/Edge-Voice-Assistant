@@ -22,6 +22,7 @@ from eva.asr.base import ASREngine
 from eva.audio.frames import Frame
 from eva.conversation.chunker import SentenceChunker
 from eva.llm.base import ChatMessage, GenerationParams, LLMEngine
+from eva.metrics.turn import TurnMetrics
 from eva.tts.base import TTSEngine
 
 logger = logging.getLogger(__name__)
@@ -44,11 +45,36 @@ class PipelineReport(BaseModel):
     stages: tuple[StageTiming, ...]
     asr_ms: int
     ttft_ms: int
+    llm_ms: int = 0  # full generation; already timed, previously only in `stages`
     first_chunk_ms: int  # first-sentence synthesis: time to first streamed chunk
     ttfa_ms: int  # simulated: ASR + LLM-to-first-sentence + first TTS chunk
     tokens: int
     tokens_per_s: float
     tts_rtf: float  # full first-sentence synthesis time / audio duration
+
+    def as_turn_metrics(self, epoch: int = 0) -> TurnMetrics:
+        """Re-project this run onto the canonical per-turn record (M8).
+
+        A pure mapping of numbers this benchmark already measured — no new
+        timing, no second collection path. It exists so the report generator
+        consumes one record type regardless of whether the samples came from
+        a synthetic run or a live session (`MetricsCollector.turns`).
+
+        `retrieval_ms`/`context_ms` stay at their defaults because
+        `PipelineBenchmark` composes its messages directly and never calls
+        `ContextBuilder` — those stages genuinely did not run here, which the
+        report renders as "not measured" rather than as 0 ms.
+        """
+        return TurnMetrics(
+            epoch=epoch,
+            asr_ms=self.asr_ms,
+            ttft_ms=self.ttft_ms,
+            llm_ms=self.llm_ms,
+            tokens=self.tokens,
+            tts_first_ms=self.first_chunk_ms,
+            ttfa_ms=self.ttfa_ms,
+            total_ms=self.ttfa_ms,  # no playback drain in a synthetic run
+        )
 
     def render(self) -> str:
         lines = [
@@ -167,6 +193,7 @@ class PipelineBenchmark:
             stages=tuple(stages),
             asr_ms=asr_ms,
             ttft_ms=asr_ms + ttft_ms,
+            llm_ms=llm_ms,
             first_chunk_ms=first_chunk_ms,
             ttfa_ms=asr_ms + first_sentence_ms + first_chunk_ms,
             tokens=tokens,

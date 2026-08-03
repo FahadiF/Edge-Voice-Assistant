@@ -6,6 +6,35 @@ first release onward.
 
 ## [Unreleased]
 
+### 📊 Benchmarking (M8)
+
+- **Benchmark reporting.** `eva bench --report PATH [--format json|md|html]` now writes one
+  aggregated report across all rounds, instead of only printing each round separately.
+  New `eva.benchmark.report` turns any `Sequence[TurnMetrics]` into a canonical
+  `BenchmarkReport` model, and JSON/Markdown/HTML are projections *of that model* — so
+  the three formats cannot disagree about what a run measured. Reported per stage:
+  p50/p95/min/max for ASR, memory retrieval, context composition, TTFT, LLM generation,
+  first-sentence synthesis, TTFA, total turn, and LLM tokens/s, plus peak RAM/VRAM/CPU/GPU
+  and memory scan-cap saturation (the M1(a) metric that decides whether the deferred ANN
+  index is ever needed).
+- **The reporting layer collects nothing.** Every figure comes from telemetry that already
+  existed: `MetricsCollector.turns` for a live session, or `PipelineBenchmark` rounds
+  re-projected through the new `PipelineReport.as_turn_metrics()`. The aggregator takes
+  `Sequence[TurnMetrics]` and cannot tell which source produced it, so live-session and
+  synthetic runs render through one code path. `PipelineReport.llm_ms` is now an ordinary
+  field — it was always measured, just unreachable except as a `StageTiming` string.
+- **Honest gaps.** A stage whose samples are all zero renders as *"not measured"* rather
+  than `0 ms`: a synthetic run never calls `ContextBuilder`, so retrieval/context genuinely
+  did not run, and "instant" would be the wrong reading. The WER section is present but
+  always empty, stating that it needs the recorded fixture corpus rather than reporting a
+  synthetic figure. HTML reports are self-contained (inline CSS/SVG, no scripts, no
+  external references — asserted by test) so they open with no network.
+- `Environment`/`_environment()` moved from `eva.audio.capture_probe` to a shared
+  `eva.core.provenance` (`capture_environment()`, `git_state()`, `package_version()`).
+  Two unrelated callers now need the same git/version/GPU facts, and provenance was never
+  audio-specific — the same class of misplacement as review finding M3. Field set
+  unchanged, so `eva capture-test`'s JSON keeps its exact shape.
+
 ### 📚 Documentation
 
 - `docs/development/INSTALLATION.md` now states outright that macOS is unsupported,

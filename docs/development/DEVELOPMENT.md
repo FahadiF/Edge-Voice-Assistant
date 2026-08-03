@@ -218,6 +218,45 @@ frontend-side type override or a parallel response-only class.
 
 ---
 
+## 7b. Benchmark reports (M8)
+
+`eva bench` prints each round as it runs. Add `--report` to also write one **aggregated**
+report across all rounds:
+
+```bash
+eva bench --rounds 5 --report bench.md
+```
+
+`--format` selects the projection: `md` (default), `json`, or `html`. All three are
+rendered from the same `BenchmarkReport` model, so they can never disagree about what a
+run measured. Markdown is the default because it diffs in git, which is what makes one
+run comparable to the last; JSON is for tooling; HTML carries the inline bar charts.
+
+**The reporting layer collects nothing.** Every figure comes from `TurnMetrics` records
+that already existed — either `MetricsCollector.turns` from a live session, or
+`PipelineBenchmark` rounds re-projected via `PipelineReport.as_turn_metrics()`.
+`eva.benchmark.report.aggregate()` takes any `Sequence[TurnMetrics]` and cannot tell
+which produced it, so adding a new sample source means producing `TurnMetrics`, never
+touching the report generator. Adding a new *stage* to all three formats at once means
+appending one row to `_STAGES` in `report.py`.
+
+Two conventions worth knowing when reading output:
+
+- **"not measured"** is printed when every sample for a stage was zero. A synthetic
+  `eva bench` run never calls `ContextBuilder`, so memory-retrieval and
+  context-composition genuinely did not happen — printing `0 ms` would read as "instant"
+  when it means "absent". A real sub-millisecond stage is mislabelled by this rule,
+  which is the safer of the two errors.
+- **Speech-recognition accuracy (WER)** is always empty. It needs the recorded fixture
+  corpus, which does not exist yet; the section states that rather than reporting a
+  synthetic number that would not describe real speech.
+
+HTML reports are deliberately self-contained — inline CSS, inline SVG, no scripts, no
+external references of any kind — so they open correctly on a machine with no network.
+A test asserts this; do not add a CDN stylesheet or chart library to them.
+
+---
+
 ## 8. Release process
 
 1. Quality gate green on Windows and Linux.

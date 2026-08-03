@@ -30,15 +30,11 @@ import contextlib
 import functools
 import inspect
 import json
-import platform
-import subprocess
-import sys
 import time
 import wave
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +49,7 @@ from eva.audio.processor import create_processor
 from eva.audio.ring import FrameRing
 from eva.audio.segmenter import SegmenterEvent, SpeechSegmenter, UtteranceDiscarded, UtteranceEnd
 from eva.config.settings import Settings
+from eva.core.provenance import Environment, capture_environment
 
 _IDLE_SLEEP_S = 0.002
 _LOW_LEVEL_DBFS = -50.0  # below this, a recording is too quiet to conclude anything
@@ -156,24 +153,6 @@ class AsrConfig:
     no_speech_threshold: float | None
 
 
-@dataclass(frozen=True)
-class Environment:
-    """Everything needed to reproduce this measurement months later."""
-
-    timestamp_utc: str
-    eva_version: str
-    git_commit: str | None
-    git_dirty: bool | None
-    backend: str
-    gpu_name: str | None
-    gpu_vram_mb: int | None
-    cuda_device_count: int
-    faster_whisper_version: str | None
-    ctranslate2_version: str | None
-    python_version: str
-    platform: str
-
-
 _TRACKED_ASR_ARGS = (
     "language",
     "beam_size",
@@ -246,75 +225,6 @@ def _asr_config(settings: Settings, asr: ASREngine, observed: dict[str, Any]) ->
         compute_type_configured=settings.asr.compute_type,
         compute_type_resolved=observed.get("_compute_type"),
         **seen,
-    )
-
-
-def _git_state() -> tuple[str | None, bool | None]:
-    """(short commit, dirty). Both None outside a git checkout."""
-    from eva.core.proc import no_window_kwargs
-
-    root = Path(__file__).resolve().parents[3]
-
-    def git(*args: str) -> str | None:
-        try:
-            done = subprocess.run(
-                ["git", "-C", str(root), *args],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-                **no_window_kwargs(),
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        return done.stdout.strip() if done.returncode == 0 else None
-
-    commit = git("rev-parse", "--short", "HEAD")
-    if commit is None:
-        return (None, None)
-    status = git("status", "--porcelain")
-    return (commit, bool(status) if status is not None else None)
-
-
-def _package_version(name: str) -> str | None:
-    try:
-        return version(name)
-    except PackageNotFoundError:
-        return None
-
-
-def _environment(backend: str) -> Environment:
-    from eva import __version__
-
-    gpu_name: str | None = None
-    gpu_vram: int | None = None
-    with contextlib.suppress(Exception):
-        from eva.hardware import detect_hardware
-
-        gpus = detect_hardware().gpus
-        if gpus:
-            gpu_name, gpu_vram = gpus[0].name, gpus[0].vram_total_mb
-
-    cuda_devices = 0
-    with contextlib.suppress(Exception):
-        import ctranslate2
-
-        cuda_devices = int(ctranslate2.get_cuda_device_count())
-
-    commit, dirty = _git_state()
-    return Environment(
-        timestamp_utc=datetime.now(UTC).isoformat(timespec="seconds"),
-        eva_version=__version__,
-        git_commit=commit,
-        git_dirty=dirty,
-        backend=backend,
-        gpu_name=gpu_name,
-        gpu_vram_mb=gpu_vram,
-        cuda_device_count=cuda_devices,
-        faster_whisper_version=_package_version("faster-whisper"),
-        ctranslate2_version=_package_version("ctranslate2"),
-        python_version=platform.python_version(),
-        platform=f"{platform.system()} {platform.release()} ({sys.platform})",
     )
 
 
@@ -708,7 +618,7 @@ def run_capture_test(
         frames_dropped=dropped,
         segmentation=_segment(settings, clean_pcm),
         asr=asr_config,
-        environment=_environment(asr_config.device or "unknown"),
+        environment=capture_environment(asr_config.device or "unknown"),
         variants=variants,
     )
     json_path = out_dir / f"{stamp}_report.json"

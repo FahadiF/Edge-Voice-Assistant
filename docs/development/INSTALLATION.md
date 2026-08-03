@@ -246,7 +246,7 @@ eva desktop
 | `eva listen` | Live VAD/segmentation monitor | base + microphone |
 | `eva echo-test` | Measure echo cancellation | base + mic/speakers |
 | `eva models list/download/remove` | Manage models | base |
-| `eva bench` | End-to-end pipeline benchmark (no mic) | full setup |
+| `eva bench` | End-to-end pipeline benchmark (no mic); `--report` writes an aggregated JSON/Markdown/HTML report | full setup |
 | `eva run` | Interactive voice assistant (terminal) | full setup + mic/speakers |
 | `eva serve` | Platform API server (foreground; serves the web UI) | base |
 | `eva start/stop/restart` | Background server lifecycle | base |
