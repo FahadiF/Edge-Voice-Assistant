@@ -41,6 +41,10 @@
 }
 
 .composer-plus > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   width: 34px;
   height: 34px;
   border-radius: 50%;
