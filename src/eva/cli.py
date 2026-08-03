@@ -228,6 +228,10 @@ def _cmd_models(args: argparse.Namespace) -> int:
             status = "installed" if installed else "available"
             if info.managed_by == "bundled":
                 status = "bundled"
+            elif installed and manager.verify_engine_snapshot(info.id) == "corrupt":
+                # Batch 10 / M6: caught here rather than left to surface as a
+                # CTranslate2 crash the next time the engine loads it.
+                status = "corrupt"
             print(
                 f"{marker:2}{info.id:<32} {info.kind:<5} {info.license:<12} {size_str:>8}  {status}"
             )
@@ -259,7 +263,11 @@ def _cmd_models(args: argparse.Namespace) -> int:
         card = manager.describe(args.model_id, settings)
         width = max(len(k) for k in card)
         for key, value in card.items():
-            if value in (None, "", 0) and key not in ("installed", "active", "compatible"):
+            if value in (None, "", 0, "not-applicable") and key not in (
+                "installed",
+                "active",
+                "compatible",
+            ):
                 continue
             print(f"{key.replace('_', ' '):<{width + 2}}{value}")
         return 0

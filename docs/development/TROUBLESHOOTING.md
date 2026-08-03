@@ -110,6 +110,24 @@ eva models remove <model-id> && eva models download <model-id>
 
 Integrity failures are deliberately hard errors, never warnings.
 
+### `... failed integrity verification (checksum mismatch ...)`
+
+An engine-managed model (a Whisper/CTranslate2 speech-recognition model) has weight
+files on disk that no longer match the checksum recorded the first time it was
+installed — most likely disk-level corruption (a bad sector, an interrupted copy, an
+antivirus quarantine action) rather than anything EVA did. Caught here, at install
+time, deliberately: the alternative is CTranslate2 crashing with an opaque native error
+partway through a turn. Remove and re-download:
+
+```bash
+eva models remove <model-id> && eva models download <model-id>
+```
+
+A model installed before this check existed (Batch 10 / M6) has no recorded checksum
+to compare against; `eva models list`/`eva models info <model-id>` reports its
+integrity as unverified rather than corrupt — this is expected and not itself a
+problem. It becomes verifiable the next time it is reinstalled.
+
 ---
 
 ## GPU and performance

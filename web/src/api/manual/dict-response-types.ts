@@ -33,6 +33,7 @@ export interface ModelCard {
   managed_by: "manager" | "engine" | "bundled";
   installed: boolean;
   installed_version: string | null;
+  integrity: "verified" | "unverified" | "corrupt" | "not-applicable";
   update_available: boolean;
   active: boolean;
   compatible: boolean;

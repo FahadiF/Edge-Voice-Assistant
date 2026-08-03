@@ -485,3 +485,96 @@ class TestManager:
         )
         manager.download("kokoro-82m-v1.0")
         assert manager.disk_usage_mb("kokoro-82m-v1.0") == 4  # 2 files x 2 MB
+
+
+class TestEngineSnapshotIntegrity:
+    """Batch 10 (M6): detect a corrupt engine-managed snapshot before it fails
+    inside CTranslate2 at load time, rather than after."""
+
+    MODEL_ID = "faster-whisper/small"
+
+    def test_not_installed_is_not_applicable(self, manager: ModelManager) -> None:
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "not-applicable"
+
+    def test_non_engine_model_is_not_applicable(self, manager: ModelManager) -> None:
+        assert manager.verify_engine_snapshot("qwen3-1.7b-instruct-q4_k_m") == "not-applicable"
+
+    def test_snapshot_with_no_manifest_is_unverified(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        """Migration case: a model installed before this check existed has no
+        manifest to compare against. Reported honestly, not as a failure."""
+        _fake_hub_snapshot(app_paths, manager.info(self.MODEL_ID), "deadbeef")
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "unverified"
+
+    def test_matching_manifest_is_verified(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        snapshot = _fake_hub_snapshot(app_paths, manager.info(self.MODEL_ID), "deadbeef")
+        manager._record_engine_snapshot_integrity(snapshot)
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "verified"
+
+    def test_corrupted_weights_are_detected(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        snapshot = _fake_hub_snapshot(app_paths, manager.info(self.MODEL_ID), "deadbeef")
+        manager._record_engine_snapshot_integrity(snapshot)
+
+        (snapshot / "model.bin").write_bytes(b"not the original weights")
+
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "corrupt"
+
+    def test_manifest_is_not_rewritten_on_a_later_call(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        """The whole point: re-hashing current disk contents on every call
+        would make corruption undetectable (it would always match itself)."""
+        snapshot = _fake_hub_snapshot(app_paths, manager.info(self.MODEL_ID), "deadbeef")
+        manager._record_engine_snapshot_integrity(snapshot)
+        recorded = (snapshot / ".eva-integrity.json").read_text(encoding="utf-8")
+
+        (snapshot / "model.bin").write_bytes(b"different bytes, same filename")
+        manager._record_engine_snapshot_integrity(snapshot)  # must be a no-op
+
+        assert (snapshot / ".eva-integrity.json").read_text(encoding="utf-8") == recorded
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "corrupt"
+
+    def test_describe_surfaces_integrity_for_engine_managed_models(
+        self, manager: ModelManager, app_paths: AppPaths
+    ) -> None:
+        snapshot = _fake_hub_snapshot(app_paths, manager.info(self.MODEL_ID), "deadbeef")
+        manager._record_engine_snapshot_integrity(snapshot)
+        assert manager.describe(self.MODEL_ID)["integrity"] == "verified"
+
+    def test_fresh_download_records_a_manifest_and_verifies(
+        self, manager: ModelManager, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        info = manager.info(self.MODEL_ID)
+
+        def fake_snapshot_download(**kwargs: object) -> None:
+            _fake_hub_snapshot(app_paths, info, str(kwargs["revision"]))
+
+        monkeypatch.setattr("huggingface_hub.snapshot_download", fake_snapshot_download)
+
+        manager.download(self.MODEL_ID)
+
+        assert manager.verify_engine_snapshot(self.MODEL_ID) == "verified"
+
+    def test_reinstalling_a_corrupted_snapshot_raises_model_error(
+        self, manager: ModelManager, app_paths: AppPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Batch 10 acceptance criterion: a deliberately corrupted snapshot is
+        reported as corrupt at install time, not left to surface later as a
+        CTranslate2 crash."""
+        info = manager.info(self.MODEL_ID)
+        snapshot = _fake_hub_snapshot(app_paths, info, info.hf_revision)
+        manager._record_engine_snapshot_integrity(snapshot)
+        (snapshot / "model.bin").write_bytes(b"bit rot")
+
+        def fake_snapshot_download(**kwargs: object) -> None:
+            pass  # already "cached" on disk; nothing to fetch
+
+        monkeypatch.setattr("huggingface_hub.snapshot_download", fake_snapshot_download)
+
+        with pytest.raises(ModelError, match="integrity verification"):
+            manager.download(self.MODEL_ID)

@@ -19,10 +19,12 @@ and one the engine fetched lazily are the same bytes on disk.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from eva.config.paths import AppPaths
 from eva.core import net
@@ -33,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 1024 * 256
 _DOWNLOAD_ATTEMPTS = 3
+
+IntegrityStatus = Literal["verified", "unverified", "corrupt", "not-applicable"]
+
+_INTEGRITY_MANIFEST_FILENAME = ".eva-integrity.json"
+"""Sidecar recording each weight file's SHA-256 as of the moment a snapshot
+was first confirmed complete (Batch 10 / M6). Engine-managed downloads go
+through `huggingface_hub`'s own cache, which on Windows commonly copies files
+rather than symlinking them into content-hashed blobs — so the blob filename
+cannot always be trusted as a checksum for free, and a self-recorded manifest
+is needed instead of relying on that convention."""
 
 ProgressCallback = Callable[[str, int, int], None]
 """(filename, bytes_done, bytes_total) — bytes_total may be 0 if unknown."""
@@ -150,6 +162,50 @@ class ModelManager:
     def installed(self, kind: str | None = None) -> list[ModelInfo]:
         return [m for m in self.available(kind) if self.is_installed(m.id)]
 
+    def verify_engine_snapshot(self, model_id: str) -> IntegrityStatus:
+        """Recompute each weight file's SHA-256 against the manifest recorded
+        the first time this snapshot was confirmed complete (Batch 10 / M6).
+
+        Only meaningful for `managed_by="engine"` models with something
+        installed; anything else is `"not-applicable"`. A snapshot installed
+        before this existed has no manifest to compare against — reported as
+        `"unverified"`, never `"corrupt"`: there is nothing to disprove, and
+        a false failure would be worse than honest silence.
+        """
+        info = self.info(model_id)
+        if info.managed_by != "engine":
+            return "not-applicable"
+        snapshots = self._hf_snapshots(info)
+        if not snapshots:
+            return "not-applicable"
+        manifest_path = snapshots[0] / _INTEGRITY_MANIFEST_FILENAME
+        if not manifest_path.exists():
+            return "unverified"
+        manifest: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for filename, expected_sha256 in manifest.items():
+            target = snapshots[0] / filename
+            if not target.exists() or self._sha256_of(target) != expected_sha256:
+                return "corrupt"
+        return "verified"
+
+    def _record_engine_snapshot_integrity(self, snapshot: Path) -> None:
+        """Hash every weight file in a freshly confirmed snapshot and persist
+        the digests once.
+
+        Never overwrites an existing manifest: only the state recorded right
+        after a genuinely fresh download is a trustworthy baseline. Hashing
+        the *current* disk contents on every call — including a later one
+        where the files may have rotted — would make verification
+        tautological (it would always match itself).
+        """
+        manifest_path = snapshot / _INTEGRITY_MANIFEST_FILENAME
+        if manifest_path.exists():
+            return
+        manifest = {f.name: self._sha256_of(f) for f in snapshot.glob("*.bin")}
+        if not manifest:
+            return
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
     def files_for(self, model_id: str) -> dict[str, Path]:
         """Resolve the installed file paths keyed by their engine role."""
         info = self.info(model_id)
@@ -213,6 +269,7 @@ class ModelManager:
             "managed_by": info.managed_by,
             "installed": installed,
             "installed_version": info.version if installed else None,
+            "integrity": self.verify_engine_snapshot(model_id),
             "update_available": False,  # populated when remote catalogs land
             "active": active,
             "compatible": fits_gpu and fits_ram,
@@ -289,6 +346,17 @@ class ModelManager:
         except Exception as exc:  # network, auth, missing repo — all fatal here
             raise ModelError(f"Could not download '{info.id}' from {repo}: {exc}") from exc
         logger.info("Model '%s' installed", info.id)
+
+        snapshots = self._hf_snapshots(info)
+        if snapshots:
+            self._record_engine_snapshot_integrity(snapshots[0])
+            if self.verify_engine_snapshot(info.id) == "corrupt":
+                raise ModelError(
+                    f"Model '{info.id}' failed integrity verification (checksum "
+                    "mismatch against the manifest recorded at install time) — "
+                    "the cached files appear corrupted on disk. Remove and "
+                    f"re-download: eva models remove {info.id}"
+                )
 
     def _download_file(
         self, file: ModelFile, target: Path, progress: ProgressCallback | None
