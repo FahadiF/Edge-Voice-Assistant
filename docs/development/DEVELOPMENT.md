@@ -275,8 +275,21 @@ Saves `fixtures/speech/NNN.wav` and `fixtures/transcripts/NNN.txt` (the prompt t
 verbatim, UTF-8), then asks `[N] Next / [R] Re-record / [Q] Quit`.
 
 Interrupting or quitting is always safe: re-running the same command resumes at the
-first prompt still missing either half of its pair, and a file that predates the current
-run is never overwritten without an explicit `y` confirmation.
+first prompt still missing either half of its pair, and an existing WAV *or* transcript
+(either half is enough — not just the WAV) is never overwritten without an explicit `y`
+confirmation. After every save, a one-line summary confirms what actually happened:
+index, filename, captured duration, and the transcript — the fastest way to notice a
+take that got cut short by a mid-sentence pause before you've moved on to the next 150.
+
+**`prompts.txt` is fingerprinted, not just read.** The first session writes
+`fixtures/.eva-corpus-manifest.json` (a SHA-256 of the prompt file plus its prompt
+count); every later invocation checks the current file against it before touching
+anything. Numbering is positional, so editing, reordering, inserting, or deleting a
+prompt after recording has started would otherwise silently detach an already-saved
+transcript from the text now on that line, with nothing else able to catch it. A mismatch
+aborts with an explanation rather than proceeding; `--force` re-baselines the manifest
+against the current file if the change was intentional. Finalize the prompt list before
+you start recording — this is enforcement of that assumption, not a replacement for it.
 
 **Recording, VAD, and WAV writing are not reimplemented for this tool** — it calls
 `eva.audio.capture_probe`'s private `_record`/`_write_wav` directly, the same helpers

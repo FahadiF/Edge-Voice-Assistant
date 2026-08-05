@@ -172,6 +172,7 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             prompts_path=Path(args.prompts),
             fixtures_dir=Path(args.fixtures_dir),
             seconds=args.seconds,
+            force=args.force,
         )
     return 2
 
@@ -1228,6 +1229,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_corpus_record.add_argument(
         "--seconds", type=float, default=10.0, help="Recording ceiling per prompt"
+    )
+    p_corpus_record.add_argument(
+        "--force",
+        action="store_true",
+        help="Proceed even if prompts.txt has changed since recording began "
+        "(re-baselines the integrity manifest)",
     )
     p_corpus.set_defaults(func=_cmd_corpus)
 

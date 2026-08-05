@@ -17,16 +17,21 @@ would have produced for the same speech.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from eva.audio.capture_probe import _record, _write_wav
-from eva.audio.frames import Frame
+from eva.audio.frames import SAMPLE_RATE, Frame
 from eva.config.settings import Settings
 from eva.core.errors import ConfigError
 
 _FILENAME_MIN_WIDTH = 3
 """Matches the corpus's own "023.wav" convention for the common case (up to
 999 prompts); widens automatically rather than truncating a larger corpus."""
+
+_MANIFEST_FILENAME = ".eva-corpus-manifest.json"
 
 
 def read_prompts(path: Path) -> list[str]:
@@ -39,6 +44,82 @@ def read_prompts(path: Path) -> list[str]:
         raise ConfigError(f"Prompt script not found: {path} (create it with one prompt per line)")
     lines = path.read_text(encoding="utf-8").splitlines()
     return [line.strip() for line in lines if line.strip()]
+
+
+@dataclass(frozen=True)
+class PromptManifest:
+    """The prompt list's fingerprint as of the first recording session."""
+
+    prompts_sha256: str
+    prompt_count: int
+
+
+def _hash_prompts_file(path: Path) -> str:
+    """SHA-256 of the raw file bytes — deliberately the literal file, not the
+    filtered prompt list, so any edit is caught, including one that happens
+    not to change which lines are blank."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _manifest_path(fixtures_dir: Path) -> Path:
+    return fixtures_dir / _MANIFEST_FILENAME
+
+
+def _load_manifest(fixtures_dir: Path) -> PromptManifest | None:
+    path = _manifest_path(fixtures_dir)
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return PromptManifest(prompts_sha256=data["prompts_sha256"], prompt_count=data["prompt_count"])
+
+
+def _write_manifest(fixtures_dir: Path, prompts_path: Path, prompt_count: int) -> None:
+    manifest = PromptManifest(
+        prompts_sha256=_hash_prompts_file(prompts_path), prompt_count=prompt_count
+    )
+    _manifest_path(fixtures_dir).write_text(
+        json.dumps(
+            {"prompts_sha256": manifest.prompts_sha256, "prompt_count": manifest.prompt_count}
+        ),
+        encoding="utf-8",
+    )
+
+
+def _verify_prompt_integrity(
+    fixtures_dir: Path, prompts_path: Path, prompt_count: int, *, force: bool
+) -> None:
+    """Guard against `prompts.txt` changing after recording begins.
+
+    Numbering is positional: editing, reordering, inserting, or deleting a
+    prompt after some have already been recorded silently detaches an
+    already-saved transcript from the text now at that line, with nothing
+    else able to catch it later. The first session (no manifest yet) simply
+    records today's fingerprint as the baseline — this also covers resuming
+    a corpus that predates this check, with nothing to compare against yet.
+    """
+    existing = _load_manifest(fixtures_dir)
+    if existing is None:
+        _write_manifest(fixtures_dir, prompts_path, prompt_count)
+        return
+
+    current_hash = _hash_prompts_file(prompts_path)
+    if existing.prompts_sha256 == current_hash and existing.prompt_count == prompt_count:
+        return
+
+    if not force:
+        raise ConfigError(
+            f"{prompts_path} has changed since recording began "
+            f"(was {existing.prompt_count} prompts, now {prompt_count}). Editing, "
+            "reordering, inserting, or deleting prompts after recording begins can "
+            "corrupt the corpus — an already-recorded number would silently point "
+            "at different text. Pass --force to proceed anyway (this re-baselines "
+            "the manifest against the current prompt list)."
+        )
+    print(
+        f"--force: proceeding despite a change to {prompts_path}. "
+        "Re-baselining the integrity manifest against the current prompt list."
+    )
+    _write_manifest(fixtures_dir, prompts_path, prompt_count)
 
 
 def _stem_width(total: int) -> int:
@@ -92,6 +173,7 @@ def run_corpus_record(
     prompts_path: Path,
     fixtures_dir: Path,
     seconds: float = 10.0,
+    force: bool = False,
 ) -> int:
     """Interactive prompt-by-prompt recording session. Resumes automatically;
     never overwrites a file that predates this run without asking first."""
@@ -106,6 +188,7 @@ def run_corpus_record(
     transcripts_dir.mkdir(parents=True, exist_ok=True)
 
     total = len(prompts)
+    _verify_prompt_integrity(fixtures_dir, prompts_path, total, force=force)
     width = _stem_width(total)
     index = _resume_index(speech_dir, transcripts_dir, total, width)
     if index > total:
@@ -132,7 +215,7 @@ def run_corpus_record(
                 print("No audio captured — is the microphone available and unmuted? Try again.")
                 continue
 
-            if wav_path.exists() and index not in written_this_run:
+            if (wav_path.exists() or txt_path.exists()) and index not in written_this_run:
                 answer = (
                     input(f"'{stem}' already has a recording. Overwrite? [y/N] ").strip().lower()
                 )
@@ -144,7 +227,9 @@ def run_corpus_record(
             _write_wav(wav_path, pcm)
             txt_path.write_text(prompt, encoding="utf-8")
             written_this_run.add(index)
-            print(f"Saved {wav_path} and {txt_path}")
+            duration_s = pcm.size / SAMPLE_RATE
+            print(f"Saved [{index}/{total}] {wav_path.name}  ({duration_s:.2f}s)")
+            print(f"  Transcript: {prompt}")
 
             action = _ask_next_action()
             if action == "quit":

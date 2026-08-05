@@ -20,9 +20,13 @@ import numpy as np
 import pytest
 
 from eva.audio.corpus import (
+    _MANIFEST_FILENAME,
+    _hash_prompts_file,
+    _load_manifest,
     _resume_index,
     _stem,
     _stem_width,
+    _verify_prompt_integrity,
     read_prompts,
     run_corpus_record,
 )
@@ -272,6 +276,69 @@ class TestRunCorpusRecordWorkflow:
             encoding="utf-8"
         ) == "Hello EVA."
 
+    def test_transcript_only_orphan_also_requires_confirmation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Symmetric overwrite guard: a transcript with no paired WAV must be
+        confirmed too, not silently replaced just because the WAV is absent."""
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        (fixtures_dir / "transcripts").mkdir(parents=True)
+        (fixtures_dir / "transcripts" / "001.txt").write_text("stale text", encoding="utf-8")
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        # record, DECLINE overwrite, record 2, next
+        _scripted_input(monkeypatch, ["", "n", "", "n"])
+
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+        assert code == 0
+        assert not (fixtures_dir / "speech" / "001.wav").exists()
+        assert (fixtures_dir / "transcripts" / "001.txt").read_text(
+            encoding="utf-8"
+        ) == "stale text"
+        assert (fixtures_dir / "speech" / "002.wav").exists()
+
+    def test_transcript_only_orphan_overwrite_confirmed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA."])
+        fixtures_dir = tmp_path / "fixtures"
+        (fixtures_dir / "transcripts").mkdir(parents=True)
+        (fixtures_dir / "transcripts" / "001.txt").write_text("stale text", encoding="utf-8")
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "y", "n"])  # record, CONFIRM overwrite, next
+
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+        assert code == 0
+        assert (fixtures_dir / "speech" / "001.wav").exists()
+        assert (fixtures_dir / "transcripts" / "001.txt").read_text(
+            encoding="utf-8"
+        ) == "Hello EVA."
+
+    def test_summary_after_saving_shows_index_filename_duration_and_transcript(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA."])
+        fixtures_dir = tmp_path / "fixtures"
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(SAMPLE_RATE * 2)
+        )
+        _scripted_input(monkeypatch, ["", "n"])
+
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "[1/1]" in out
+        assert "001.wav" in out
+        assert "2.00s" in out
+        assert "Hello EVA." in out
+
     def test_invalid_menu_choice_reprompts_without_re_recording(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -361,3 +428,147 @@ class TestReusesTheRealCapturePipeline:
         assert wav_path.exists()
         with wave.open(str(wav_path), "rb") as handle:
             assert handle.getnframes() == 10 * 160  # 5 speech + 5 silence chunks, 10 ms @ 16 kHz
+
+
+class TestPromptIntegrityManifest:
+    """Editing `prompts.txt` after recording begins silently detaches an
+    already-saved transcript from the text now on that line — nothing else
+    catches it. The manifest is the guard against that."""
+
+    def _run_one_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, prompts_path: Path, fixtures_dir: Path
+    ) -> int:
+        """Records prompt 1 only, then quits — establishes a manifest baseline
+        without needing to script through every remaining prompt."""
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "q"])
+        return run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+    def test_first_session_persists_a_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+
+        self._run_one_prompt(monkeypatch, prompts_path, fixtures_dir)
+
+        manifest = _load_manifest(fixtures_dir)
+        assert manifest is not None
+        assert manifest.prompt_count == 2
+        assert manifest.prompts_sha256 == _hash_prompts_file(prompts_path)
+        assert (fixtures_dir / _MANIFEST_FILENAME).exists()
+
+    def test_resume_with_unchanged_prompts_does_not_abort(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        self._run_one_prompt(monkeypatch, prompts_path, fixtures_dir)
+
+        # Second session, prompts.txt untouched.
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "n"])
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+        assert code == 0
+        assert (fixtures_dir / "speech" / "002.wav").exists()
+
+    def test_editing_prompt_text_after_recording_aborts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        self._run_one_prompt(monkeypatch, prompts_path, fixtures_dir)
+
+        prompts_path.write_text("Hello EVA, changed.\nGood morning.\n", encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="changed since recording began"):
+            run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+        # Nothing was recorded as a side effect of the aborted attempt.
+        assert not (fixtures_dir / "speech" / "002.wav").exists()
+
+    def test_changing_prompt_count_after_recording_aborts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        self._run_one_prompt(monkeypatch, prompts_path, fixtures_dir)
+
+        prompts_path.write_text("Hello EVA.\nGood morning.\nOne more prompt.\n", encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="was 2 prompts, now 3"):
+            run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+    def test_force_bypasses_the_abort_and_rebaselines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        self._run_one_prompt(monkeypatch, prompts_path, fixtures_dir)
+
+        prompts_path.write_text("Hello EVA, changed.\nGood morning.\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "n"])
+
+        code = run_corpus_record(
+            Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir, force=True
+        )
+
+        assert code == 0
+        manifest = _load_manifest(fixtures_dir)
+        assert manifest is not None
+        assert manifest.prompts_sha256 == _hash_prompts_file(prompts_path)
+
+        # Re-baselined: an immediate follow-up run without --force no longer aborts.
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "n"])
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+        assert code == 0
+
+    def test_a_pre_existing_corpus_with_no_manifest_adopts_a_baseline_without_aborting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Migration case: a corpus recorded before this check existed has no
+        manifest yet. The first run against it must not abort — it has
+        nothing to compare against — and existing resume behavior continues
+        exactly as before."""
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA.", "Good morning."])
+        fixtures_dir = tmp_path / "fixtures"
+        (fixtures_dir / "speech").mkdir(parents=True)
+        (fixtures_dir / "transcripts").mkdir(parents=True)
+        (fixtures_dir / "speech" / "001.wav").write_bytes(b"pre-existing")
+        (fixtures_dir / "transcripts" / "001.txt").write_text("Hello EVA.", encoding="utf-8")
+        monkeypatch.setattr(
+            "eva.audio.corpus._capture_one", lambda settings, seconds: _tone(500, 9)
+        )
+        _scripted_input(monkeypatch, ["", "n"])
+
+        code = run_corpus_record(Settings(), prompts_path=prompts_path, fixtures_dir=fixtures_dir)
+
+        assert code == 0
+        assert (fixtures_dir / "speech" / "001.wav").read_bytes() == b"pre-existing"
+        assert (fixtures_dir / "speech" / "002.wav").exists()
+        assert _load_manifest(fixtures_dir) is not None
+
+    def test_verify_prompt_integrity_directly_matching(self, tmp_path: Path) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA."])
+        fixtures_dir = tmp_path / "fixtures"
+        fixtures_dir.mkdir()
+        _verify_prompt_integrity(fixtures_dir, prompts_path, 1, force=False)  # writes baseline
+        _verify_prompt_integrity(fixtures_dir, prompts_path, 1, force=False)  # no change, no raise
+
+    def test_verify_prompt_integrity_directly_mismatched(self, tmp_path: Path) -> None:
+        prompts_path = _prompts_file(tmp_path, ["Hello EVA."])
+        fixtures_dir = tmp_path / "fixtures"
+        fixtures_dir.mkdir()
+        _verify_prompt_integrity(fixtures_dir, prompts_path, 1, force=False)
+        with pytest.raises(ConfigError):
+            _verify_prompt_integrity(fixtures_dir, prompts_path, 2, force=False)

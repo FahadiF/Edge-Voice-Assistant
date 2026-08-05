@@ -56,6 +56,7 @@ htmlcov/
 # -----------------------------
 /fixtures/speech/
 /fixtures/transcripts/
+/fixtures/.eva-corpus-manifest.json
 
 # -----------------------------
 # Private / internal notes
