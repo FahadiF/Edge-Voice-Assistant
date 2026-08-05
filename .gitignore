@@ -50,6 +50,14 @@ htmlcov/
 /conversations/
 
 # -----------------------------
+# Recorded fixture corpus (Batch 4 / 4B) — voice recordings need a
+# data-governance/consent sign-off before they can be committed at all;
+# `prompts.txt` (the script, not a recording) is fine to track.
+# -----------------------------
+/fixtures/speech/
+/fixtures/transcripts/
+
+# -----------------------------
 # Private / internal notes
 # -----------------------------
 .dev/

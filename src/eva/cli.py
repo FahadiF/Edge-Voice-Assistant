@@ -159,6 +159,23 @@ def _cmd_capture_test(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from eva.audio.corpus import run_corpus_record
+
+    paths = get_app_paths()
+    settings = load_settings(paths.settings_file)
+    if args.corpus_command == "record":
+        return run_corpus_record(
+            settings,
+            prompts_path=Path(args.prompts),
+            fixtures_dir=Path(args.fixtures_dir),
+            seconds=args.seconds,
+        )
+    return 2
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     """Start the assistant, guiding the user through setup if anything is missing."""
     from eva.conversation.personas import (
@@ -1191,6 +1208,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt", help="ASR initial_prompt (default: none, to isolate the audio path)"
     )
     p_probe.set_defaults(func=_cmd_capture_test)
+
+    p_corpus = sub.add_parser(
+        "corpus", help="Build the ASR fixture corpus (Batch 4B: recording tool only)"
+    )
+    corpus_sub = p_corpus.add_subparsers(dest="corpus_command", required=True)
+    p_corpus_record = corpus_sub.add_parser(
+        "record", help="Record one utterance per prompt, resuming where you left off"
+    )
+    p_corpus_record.add_argument(
+        "--prompts",
+        default="fixtures/prompts.txt",
+        help="Prompt script, one prompt per line (default: fixtures/prompts.txt)",
+    )
+    p_corpus_record.add_argument(
+        "--fixtures-dir",
+        default="fixtures",
+        help="Root of the speech/ and transcripts/ output (default: fixtures)",
+    )
+    p_corpus_record.add_argument(
+        "--seconds", type=float, default=10.0, help="Recording ceiling per prompt"
+    )
+    p_corpus.set_defaults(func=_cmd_corpus)
 
     p_desktop = sub.add_parser(
         "desktop", help="Open the native desktop window (same as the `eva-desktop` script)"

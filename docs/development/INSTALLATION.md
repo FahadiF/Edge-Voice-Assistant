@@ -245,6 +245,7 @@ eva desktop
 | `eva devices` | List audio devices | base |
 | `eva listen` | Live VAD/segmentation monitor | base + microphone |
 | `eva echo-test` | Measure echo cancellation | base + mic/speakers |
+| `eva corpus record` | Record the ASR fixture corpus, prompt by prompt (Batch 4B) | base + microphone |
 | `eva models list/download/remove` | Manage models | base |
 | `eva bench` | End-to-end pipeline benchmark (no mic); `--report` writes an aggregated JSON/Markdown/HTML report | full setup |
 | `eva run` | Interactive voice assistant (terminal) | full setup + mic/speakers |

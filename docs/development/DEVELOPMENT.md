@@ -257,6 +257,40 @@ A test asserts this; do not add a CDN stylesheet or chart library to them.
 
 ---
 
+## 7c. Recording the ASR fixture corpus (Batch 4B)
+
+`eva corpus record` is the recording tool for the fixture corpus Batch 4 (H8) deferred —
+it only builds the corpus; it does not measure WER, and the WER column in `eva bench`
+stays empty until someone actually records a corpus and signs off on the recording
+session's data governance.
+
+```bash
+eva corpus record --prompts fixtures/prompts.txt --fixtures-dir fixtures
+```
+
+Reads `fixtures/prompts.txt` (one prompt per line, blank lines ignored), and for each
+prompt: shows it, waits for Enter, records automatically, and stops the instant the
+`SpeechSegmenter` — the same one the live assistant uses — decides the utterance ended.
+Saves `fixtures/speech/NNN.wav` and `fixtures/transcripts/NNN.txt` (the prompt text,
+verbatim, UTF-8), then asks `[N] Next / [R] Re-record / [Q] Quit`.
+
+Interrupting or quitting is always safe: re-running the same command resumes at the
+first prompt still missing either half of its pair, and a file that predates the current
+run is never overwritten without an explicit `y` confirmation.
+
+**Recording, VAD, and WAV writing are not reimplemented for this tool** — it calls
+`eva.audio.capture_probe`'s private `_record`/`_write_wav` directly, the same helpers
+`eva capture-test` (§6) already uses and is tested against, so a corpus recording is
+byte-for-byte what the live assistant's front end would have captured for the same
+speech.
+
+`fixtures/speech/` and `fixtures/transcripts/` are gitignored: recorded voice data needs
+a data-governance/consent sign-off before it can be committed at all (see the Final
+Execution Roadmap's Batch 4 migration notes). `fixtures/prompts.txt` — the script, not a
+recording — is fine to track once written.
+
+---
+
 ## 8. Release process
 
 1. Quality gate green on Windows and Linux.
