@@ -206,14 +206,17 @@ Knowing these up front is more useful than discovering them:
 
 ## Roadmap
 
-Milestones M0–M6 are complete: full-duplex audio core, streaming pipeline, platform API,
-memory and personalization, web UI, and desktop shell. M7 (conversation experience) is in
-progress — M7.1 (speech-synchronized text display) is done; M7.2 (ASR accuracy
-investigation) is complete with implementation pending.
+Milestones M0–M5 are complete. M6 (desktop polish) is in progress: server supervision and
+the system tray are complete (M6.1–M6.2); the global hotkey, native first-run wizard,
+crash recovery/autostart, and Windows installer remain (M6.3–M6.6). M7 (conversation
+experience) is also in progress — M7.1 (speech-synchronized text display) is done; M7.2
+(ASR accuracy investigation) is complete with the model implementation pending.
 
-The LLM port is now transport-neutral (M7.4/ADR-029): local llama.cpp and a local
-OpenAI-compatible adapter (Ollama/LM Studio/vLLM) both implement the same port, with
-OS-keychain-backed secret references for any provider that needs an API key.
+The local provider abstraction (M7.4/ADR-029) and benchmark reporting groundwork (M8)
+have also landed in the unreleased development branch: local llama.cpp and a local
+OpenAI-compatible adapter (Ollama/LM Studio/vLLM) share the LLM port, with secret
+references for providers that need an API key. M7.3 architecture stabilization and the
+remaining M8 performance measurements and optimizations are still in progress.
 
 Planned next: ASR model upgrade → performance work (GPU speech synthesis, prompt-cache
 reuse) → an **optional, off-by-default** online mode with search, retrieval, and

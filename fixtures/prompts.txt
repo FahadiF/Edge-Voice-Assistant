@@ -1,0 +1,49 @@
+Hello EVA.
+Good morning.
+Good afternoon.
+Good evening.
+Goodbye.
+How are you today?
+What time is it?
+What day is today?
+Tell me a joke.
+Tell me something interesting.
+Who created you?
+What can you do?
+Open Settings.
+Close Settings.
+Increase the volume.
+Decrease the volume.
+Mute the audio.
+Unmute the audio.
+Stop speaking.
+Continue speaking.
+Repeat that.
+Thank you.
+You're welcome.
+How is the weather today?
+Read my notes.
+Create a reminder.
+Delete the reminder.
+Search my documents.
+Open my downloads folder.
+Open my documents folder.
+What's on my calendar today?
+Tell me today's date.
+How much memory are you using?
+What model are you running?
+Start listening.
+Stop listening.
+Cancel the request.
+Try again.
+Explain artificial intelligence.
+What is machine learning?
+How do airplanes fly?
+What is the capital of Finland?
+Where is Vaasa?
+Count from one to ten.
+The quick brown fox jumps over the lazy dog.
+She sells seashells by the seashore.
+Peter Piper picked a peck of pickled peppers.
+This is a speech recognition test.
+Thank you very much.
